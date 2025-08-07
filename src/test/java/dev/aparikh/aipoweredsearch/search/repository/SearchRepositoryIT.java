@@ -12,6 +12,7 @@ import org.springframework.context.annotation.Import;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -50,7 +51,7 @@ class SearchRepositoryIT extends SolrTestBase {
     
     @Test
     void shouldGetFields() {
-        List<String> fields = searchRepository.getFields(TEST_COLLECTION);
+        Set<String> fields = searchRepository.getActuallyUsedFields(TEST_COLLECTION);
         
         assertNotNull(fields);
         assertTrue(fields.contains("id"));

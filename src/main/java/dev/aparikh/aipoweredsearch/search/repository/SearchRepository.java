@@ -7,16 +7,23 @@ import org.apache.solr.client.solrj.SolrQuery;
 import org.apache.solr.client.solrj.request.schema.SchemaRequest;
 import org.apache.solr.client.solrj.response.QueryResponse;
 import org.apache.solr.client.solrj.response.schema.SchemaResponse;
+import org.apache.solr.common.SolrDocument;
 import org.apache.solr.common.SolrDocumentList;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Repository;
 
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
+
 
 @Repository
 public class SearchRepository {
 
+    Logger log = LoggerFactory.getLogger(SearchRepository.class);
     private final SolrClient solrClient;
 
     SearchRepository(SolrClient solrClient) {
@@ -65,13 +72,22 @@ public class SearchRepository {
         }
     }
 
-    public List<String> getFields(String collection) {
+    public Set<String> getActuallyUsedFields(String collection) {
+        Set<String> usedFields = new HashSet<>();
+
         try {
-            SchemaRequest.Fields request = new SchemaRequest.Fields();
-            SchemaResponse.FieldsResponse response = request.process(solrClient, collection);
-            return response.getFields().stream().map(f -> (String) f.get("name")).collect(Collectors.toList());
+            // Query sample of documents
+            SolrQuery query = new SolrQuery("*:*");
+            query.setRows(100);
+
+            QueryResponse response = solrClient.query(collection, query);
+
+            for (SolrDocument doc : response.getResults()) {
+                usedFields.addAll(doc.getFieldNames());
+            }
         } catch (Exception e) {
-            throw new RuntimeException(e);
+            log.error("Error analyzing fields", e);
         }
+        return usedFields;
     }
 }

@@ -25,6 +25,9 @@ dependencies {
     implementation("org.springframework.ai:spring-ai-starter-model-anthropic")
     implementation("org.apache.solr:solr-solrj:9.6.1")
     
+    // Swagger UI / OpenAPI documentation
+    implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:2.4.0")
+    
     // Apache HttpComponents dependencies for Solr
     implementation("org.apache.httpcomponents:httpclient:4.5.14")
     implementation("org.apache.httpcomponents:httpcore:4.4.16")

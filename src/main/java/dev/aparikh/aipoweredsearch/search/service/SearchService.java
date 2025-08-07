@@ -9,6 +9,7 @@ import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.Set;
 
 @Service
 public class SearchService {
@@ -22,7 +23,7 @@ public class SearchService {
     }
 
     public SearchResponse search(String collection, String freeTextQuery) {
-        List<String> fields = searchRepository.getFields(collection);
+        Set<String> fields = searchRepository.getActuallyUsedFields(collection);
 
         String systemMessage = """
                 You are a search expert. You are given a free text query and a list of fields from a Solr schema.

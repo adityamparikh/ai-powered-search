@@ -18,6 +18,7 @@ import org.springframework.ai.chat.prompt.Prompt;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -62,10 +63,10 @@ class SearchServiceTest {
         // Given
         String collection = "test-collection";
         String freeTextQuery = "find documents about spring boot";
-        List<String> fields = List.of("id", "name", "description");
+        Set<String> fields = Set.of("id", "name", "description");
         
         // Mock repository getFields
-        when(searchRepository.getFields(collection)).thenReturn(fields);
+        when(searchRepository.getActuallyUsedFields(collection)).thenReturn(fields);
         
         // Mock repository search
         SearchResponse expectedResponse = new SearchResponse(
