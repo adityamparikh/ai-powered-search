@@ -5,6 +5,8 @@ import dev.aparikh.aipoweredsearch.search.model.SearchRequest;
 import dev.aparikh.aipoweredsearch.search.model.SearchResponse;
 import dev.aparikh.aipoweredsearch.search.repository.SearchRepository;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
+import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.stereotype.Service;
 
@@ -16,9 +18,15 @@ public class SearchService {
     private final SearchRepository searchRepository;
     private final ChatClient chatClient;
 
-    public SearchService(SearchRepository searchRepository, ChatModel chatModel) {
+    public SearchService(SearchRepository searchRepository,
+                         ChatModel chatModel,
+                         ChatMemory chatMemory) {
         this.searchRepository = searchRepository;
-        this.chatClient = ChatClient.create(chatModel);
+        this.chatClient = ChatClient.builder(chatModel)
+                .defaultAdvisors(
+                        MessageChatMemoryAdvisor.builder(chatMemory).build() // chat-memory advisor
+                )
+                .build();
     }
 
     public SearchResponse search(String collection, String freeTextQuery) {
@@ -41,9 +49,12 @@ public class SearchService {
                 The available fields are: %s
                 """, freeTextQuery, fields);
 
+        String conversationId = "007";
+
         QueryGenerationResponse response = chatClient.prompt()
                 .system(systemMessage)
                 .user(userMessage)
+                .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, conversationId))
                 .call()
                 .entity(QueryGenerationResponse.class);
 

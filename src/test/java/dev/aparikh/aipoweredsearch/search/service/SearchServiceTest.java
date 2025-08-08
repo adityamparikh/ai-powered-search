@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
@@ -34,6 +35,8 @@ class SearchServiceTest {
 
     @Mock
     private ChatModel chatModel;
+    @Mock
+    private ChatMemory chatMemory;
 
     private SearchService searchService;
 
@@ -55,7 +58,7 @@ class SearchServiceTest {
         ChatResponse mockResponse = new ChatResponse(List.of(generation));
         when(chatModel.call(any(Prompt.class))).thenReturn(mockResponse);
         
-        searchService = new SearchService(searchRepository, chatModel);
+        searchService = new SearchService(searchRepository, chatModel, chatMemory);
     }
 
     @Test

@@ -1,11 +1,15 @@
 package dev.aparikh.aipoweredsearch.search;
 
 import dev.aparikh.aipoweredsearch.search.model.SearchResponse;
+import dev.aparikh.aipoweredsearch.search.service.SearchService;
 import org.apache.solr.client.solrj.SolrClient;
 import org.apache.solr.client.solrj.impl.HttpSolrClient;
 import org.apache.solr.common.SolrInputDocument;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
+import org.springframework.ai.chat.memory.ChatMemory;
+import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
@@ -59,15 +63,15 @@ class SearchIntegrationTest {
         
         @Bean
         @Primary 
-        public dev.aparikh.aipoweredsearch.search.service.SearchService searchService(
+        public SearchService searchService(
                 dev.aparikh.aipoweredsearch.search.repository.SearchRepository searchRepository) {
             
             // Mock ChatModel
-            org.springframework.ai.chat.model.ChatModel mockChatModel = 
-                org.mockito.Mockito.mock(org.springframework.ai.chat.model.ChatModel.class);
-            
+            ChatModel mockChatModel = Mockito.mock(ChatModel.class);
+            ChatMemory mockChatMemory = Mockito.mock(ChatMemory.class);
+
             // Create a simple SearchService that bypasses AI and returns predefined results
-            return new dev.aparikh.aipoweredsearch.search.service.SearchService(searchRepository, mockChatModel) {
+            return new SearchService(searchRepository, mockChatModel, mockChatMemory) {
                 @Override
                 public dev.aparikh.aipoweredsearch.search.model.SearchResponse search(String collection, String freeTextQuery) {
                     // Return a simple mock response without involving AI
