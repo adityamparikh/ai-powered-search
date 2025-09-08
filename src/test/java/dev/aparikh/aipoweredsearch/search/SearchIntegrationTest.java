@@ -1,5 +1,6 @@
 package dev.aparikh.aipoweredsearch.search;
 
+import dev.aparikh.aipoweredsearch.config.PostgresTestConfiguration;
 import dev.aparikh.aipoweredsearch.search.model.SearchResponse;
 import dev.aparikh.aipoweredsearch.search.service.SearchService;
 import org.apache.solr.client.solrj.SolrClient;
@@ -32,7 +33,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @Testcontainers
-@Import({SearchIntegrationTest.IntegrationTestConfiguration.class})
+@Import({PostgresTestConfiguration.class, SearchIntegrationTest.IntegrationTestConfiguration.class})
 class SearchIntegrationTest {
 
     @Container
@@ -64,14 +65,14 @@ class SearchIntegrationTest {
         @Bean
         @Primary 
         public SearchService searchService(
-                dev.aparikh.aipoweredsearch.search.repository.SearchRepository searchRepository) {
+                dev.aparikh.aipoweredsearch.search.repository.SearchRepository searchRepository,
+                ChatMemory chatMemory) {
             
             // Mock ChatModel
             ChatModel mockChatModel = Mockito.mock(ChatModel.class);
-            ChatMemory mockChatMemory = Mockito.mock(ChatMemory.class);
 
             // Create a simple SearchService that bypasses AI and returns predefined results
-            return new SearchService(searchRepository, mockChatModel, mockChatMemory) {
+            return new SearchService(searchRepository, mockChatModel, chatMemory) {
                 @Override
                 public dev.aparikh.aipoweredsearch.search.model.SearchResponse search(String collection, String freeTextQuery) {
                     // Return a simple mock response without involving AI

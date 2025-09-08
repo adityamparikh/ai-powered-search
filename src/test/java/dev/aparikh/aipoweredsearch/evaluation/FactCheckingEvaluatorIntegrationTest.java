@@ -1,5 +1,6 @@
 package dev.aparikh.aipoweredsearch.evaluation;
 
+import dev.aparikh.aipoweredsearch.config.PostgresTestConfiguration;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.evaluation.EvaluationRequest;
@@ -21,7 +22,7 @@ import static org.mockito.Mockito.when;
 
 @SpringBootTest
 @Testcontainers
-@Import(FactCheckingEvaluatorIntegrationTest.FactCheckingEvaluatorTestConfig.class)
+@Import({PostgresTestConfiguration.class, FactCheckingEvaluatorIntegrationTest.FactCheckingEvaluatorTestConfig.class})
 @ActiveProfiles("test")
 class FactCheckingEvaluatorIntegrationTest {
 

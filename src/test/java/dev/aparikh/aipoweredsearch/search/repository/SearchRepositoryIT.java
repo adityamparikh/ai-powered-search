@@ -1,6 +1,7 @@
 package dev.aparikh.aipoweredsearch.search.repository;
 
 import dev.aparikh.aipoweredsearch.TestcontainersConfiguration;
+import dev.aparikh.aipoweredsearch.config.PostgresTestConfiguration;
 import dev.aparikh.aipoweredsearch.search.SolrTestBase;
 import dev.aparikh.aipoweredsearch.search.model.SearchRequest;
 import dev.aparikh.aipoweredsearch.search.model.SearchResponse;
@@ -19,7 +20,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @SpringBootTest
-@Import(TestcontainersConfiguration.class)
+@Import({TestcontainersConfiguration.class, PostgresTestConfiguration.class})
 @org.testcontainers.junit.jupiter.Testcontainers
 class SearchRepositoryIT extends SolrTestBase {
     
