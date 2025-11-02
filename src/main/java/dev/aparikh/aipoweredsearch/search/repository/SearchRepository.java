@@ -1,15 +1,20 @@
 package dev.aparikh.aipoweredsearch.search.repository;
 
+import dev.aparikh.aipoweredsearch.search.model.FieldInfo;
 import dev.aparikh.aipoweredsearch.search.model.SearchRequest;
 import dev.aparikh.aipoweredsearch.search.model.SearchResponse;
 import org.apache.solr.client.solrj.SolrClient;
 import org.apache.solr.client.solrj.SolrQuery;
+import org.apache.solr.client.solrj.request.schema.SchemaRequest;
 import org.apache.solr.client.solrj.response.QueryResponse;
+import org.apache.solr.client.solrj.response.schema.SchemaResponse;
 import org.apache.solr.common.SolrDocument;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Repository;
 
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -90,5 +95,59 @@ public class SearchRepository {
             log.error("Error analyzing fields", e);
         }
         return usedFields;
+    }
+
+    /**
+     * Fetches field schema information from Solr including field types and attributes
+     */
+    public List<FieldInfo> getFieldsWithSchema(String collection) {
+        List<FieldInfo> fieldInfos = new ArrayList<>();
+
+        try {
+            // Get all fields from schema
+            SchemaRequest.Fields fieldsRequest = new SchemaRequest.Fields();
+            SchemaResponse.FieldsResponse fieldsResponse = fieldsRequest.process(solrClient, collection);
+            List<Map<String, Object>> fields = fieldsResponse.getFields();
+
+            // Get actually used fields from documents
+            Set<String> usedFields = getActuallyUsedFields(collection);
+
+            // Filter to only include fields that are actually used in documents
+            for (Map<String, Object> field : fields) {
+                String name = (String) field.get("name");
+
+                // Skip internal Solr fields
+                if (name.startsWith("_")) {
+                    continue;
+                }
+
+                // Only include fields that are actually used in documents
+                if (!usedFields.contains(name)) {
+                    continue;
+                }
+
+                String type = (String) field.get("type");
+                boolean multiValued = Boolean.TRUE.equals(field.get("multiValued"));
+                boolean stored = !Boolean.FALSE.equals(field.get("stored")); // default is true
+                boolean docValues = Boolean.TRUE.equals(field.get("docValues"));
+                boolean indexed = !Boolean.FALSE.equals(field.get("indexed")); // default is true
+
+                fieldInfos.add(new FieldInfo(name, type, multiValued, stored, docValues, indexed));
+            }
+
+            log.debug("Retrieved {} fields with schema information from collection {}", fieldInfos.size(), collection);
+
+        } catch (Exception e) {
+            log.error("Error fetching field schema from Solr", e);
+            // Fallback: return fields without type information
+            Set<String> usedFields = getActuallyUsedFields(collection);
+            for (String fieldName : usedFields) {
+                if (!fieldName.startsWith("_")) {
+                    fieldInfos.add(new FieldInfo(fieldName, "unknown", false, true, false, true));
+                }
+            }
+        }
+
+        return fieldInfos;
     }
 }
