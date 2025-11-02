@@ -1,6 +1,5 @@
 package dev.aparikh.aipoweredsearch.search.repository;
 
-import dev.aparikh.aipoweredsearch.TestcontainersConfiguration;
 import dev.aparikh.aipoweredsearch.config.PostgresTestConfiguration;
 import dev.aparikh.aipoweredsearch.search.SolrTestBase;
 import dev.aparikh.aipoweredsearch.search.model.SearchRequest;
@@ -11,7 +10,6 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 
 import java.util.Collections;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -20,7 +18,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @SpringBootTest
-@Import({TestcontainersConfiguration.class, PostgresTestConfiguration.class})
+@Import({PostgresTestConfiguration.class, dev.aparikh.aipoweredsearch.search.MockChatModelConfiguration.class})
 @org.testcontainers.junit.jupiter.Testcontainers
 class SearchRepositoryIT extends SolrTestBase {
     
@@ -42,10 +40,10 @@ class SearchRepositoryIT extends SolrTestBase {
         
         // Verify results
         assertNotNull(response);
-        assertNotNull(response.getDocuments());
-        assertEquals(3, response.getDocuments().size()); // We have 3 test documents
+        assertNotNull(response.documents());
+        assertEquals(3, response.documents().size()); // We have 3 test documents
         
-        Map<String, Object> document = response.getDocuments().get(0);
+        Map<String, Object> document = response.documents().getFirst();
         assertNotNull(document.get("id"));
         assertNotNull(document.get("name"));
     }

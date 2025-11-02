@@ -1,6 +1,7 @@
 package dev.aparikh.aipoweredsearch.search.repository;
 
 import dev.aparikh.aipoweredsearch.config.PostgresTestConfiguration;
+import dev.aparikh.aipoweredsearch.search.MockChatModelConfiguration;
 import dev.aparikh.aipoweredsearch.search.SolrTestBase;
 import dev.aparikh.aipoweredsearch.search.model.SearchRequest;
 import dev.aparikh.aipoweredsearch.search.model.SearchResponse;
@@ -8,6 +9,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.test.annotation.DirtiesContext;
+import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.util.Collections;
 import java.util.List;
@@ -18,7 +21,9 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @SpringBootTest
-@Import(PostgresTestConfiguration.class)
+@Testcontainers
+@DirtiesContext(classMode = DirtiesContext.ClassMode.BEFORE_CLASS)
+@Import({PostgresTestConfiguration.class, MockChatModelConfiguration.class})
 class SolrSearchIntegrationTest extends SolrTestBase {
 
     @Autowired
@@ -39,11 +44,11 @@ class SolrSearchIntegrationTest extends SolrTestBase {
         
         // Verify results
         assertNotNull(response);
-        assertNotNull(response.getDocuments());
-        assertEquals(3, response.getDocuments().size()); // We have 3 test documents
+        assertNotNull(response.documents());
+        assertEquals(3, response.documents().size()); // We have 3 test documents
         
         // Check that we have our test documents - name field comes as array from Solr
-        boolean foundSpringBootApp = response.getDocuments().stream()
+        boolean foundSpringBootApp = response.documents().stream()
             .anyMatch(doc -> {
                 Object nameField = doc.get("name");
                 if (nameField instanceof List) {
@@ -70,8 +75,8 @@ class SolrSearchIntegrationTest extends SolrTestBase {
         
         // Verify results - should find 2 documents (Spring Boot Application and Microservices Architecture)
         assertNotNull(response);
-        assertNotNull(response.getDocuments());
-        assertEquals(2, response.getDocuments().size());
+        assertNotNull(response.documents());
+        assertEquals(2, response.documents().size());
     }
     
     @Test

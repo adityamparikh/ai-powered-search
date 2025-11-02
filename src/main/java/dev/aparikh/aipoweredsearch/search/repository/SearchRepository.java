@@ -23,26 +23,26 @@ public class SearchRepository {
     Logger log = LoggerFactory.getLogger(SearchRepository.class);
     private final SolrClient solrClient;
 
-    SearchRepository(SolrClient solrClient) {
+    public SearchRepository(SolrClient solrClient) {
         this.solrClient = solrClient;
     }
 
     public SearchResponse search(String collection, SearchRequest searchRequest) {
-        SolrQuery query = new SolrQuery(searchRequest.getQuery());
+        SolrQuery query = new SolrQuery(searchRequest.query());
 
-        if (searchRequest.getFilterQueries() != null) {
-            searchRequest.getFilterQueries().forEach(query::addFilterQuery);
+        if (searchRequest.filterQueries() != null) {
+            searchRequest.filterQueries().forEach(query::addFilterQuery);
         }
 
         if (searchRequest.hasSort()) {
-            query.set("sort", searchRequest.getSort());
+            query.set("sort", searchRequest.sort());
         }
 
         if (searchRequest.hasFacets()) {
             query.setFacet(true);
-            searchRequest.getFacet().getFields().forEach(query::addFacetField);
-            if (searchRequest.getFacet().getQuery() != null) {
-                query.addFacetQuery(searchRequest.getFacet().getQuery());
+            searchRequest.facet().fields().forEach(query::addFacetField);
+            if (searchRequest.facet().query() != null) {
+                query.addFacetQuery(searchRequest.facet().query());
             }
         }
 
@@ -57,7 +57,7 @@ public class SearchRepository {
                                     f -> f.getName(),
                                     f -> f.getValues().stream()
                                             .map(c -> new SearchResponse.FacetCount(c.getName(), c.getCount()))
-                                            .collect(Collectors.toList()))) 
+                                            .toList()))
                     : Map.of();
                     
             return new SearchResponse(

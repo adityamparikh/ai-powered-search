@@ -1,6 +1,5 @@
 package dev.aparikh.aipoweredsearch.search.service;
 
-import dev.aparikh.aipoweredsearch.search.model.QueryGenerationResponse;
 import dev.aparikh.aipoweredsearch.search.model.SearchRequest;
 import dev.aparikh.aipoweredsearch.search.model.SearchResponse;
 import dev.aparikh.aipoweredsearch.search.repository.SearchRepository;
@@ -83,8 +82,8 @@ class SearchServiceTest {
         
         // Then
         assertNotNull(response);
-        assertEquals(1, response.getDocuments().size());
-        assertEquals("1", response.getDocuments().get(0).get("id"));
-        assertEquals("Test Document", response.getDocuments().get(0).get("name"));
+        assertEquals(1, response.documents().size());
+        assertEquals("1", response.documents().getFirst().get("id"));
+        assertEquals("Test Document", response.documents().getFirst().get("name"));
     }
 }

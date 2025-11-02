@@ -51,18 +51,20 @@ public class SearchService {
 
         String conversationId = "007";
 
-        QueryGenerationResponse response = chatClient.prompt()
+        QueryGenerationResponse queryGenerationResponse = chatClient.prompt()
                 .system(systemMessage)
                 .user(userMessage)
                 .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, conversationId))
                 .call()
                 .entity(QueryGenerationResponse.class);
 
+
+        assert queryGenerationResponse != null;
         SearchRequest searchRequest = new SearchRequest(
-                response.getQ(),
-                response.getFq(),
-                response.getSort(),
-                new SearchRequest.Facet(response.getFacetFields(), response.getFacetQuery())
+                queryGenerationResponse.q(),
+                queryGenerationResponse.fq(),
+                queryGenerationResponse.sort(),
+                new SearchRequest.Facet(queryGenerationResponse.facetFields(), queryGenerationResponse.facetQuery())
         );
 
         return searchRepository.search(collection, searchRequest);

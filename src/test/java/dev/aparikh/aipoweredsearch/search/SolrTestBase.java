@@ -1,9 +1,14 @@
 package dev.aparikh.aipoweredsearch.search;
 
 import org.apache.solr.client.solrj.SolrClient;
+import org.apache.solr.client.solrj.impl.HttpSolrClient;
 import org.apache.solr.common.SolrInputDocument;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
+import org.springframework.context.annotation.Primary;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.SolrContainer;
@@ -15,13 +20,13 @@ import org.testcontainers.utility.DockerImageName;
 public abstract class SolrTestBase {
 
     @Container
-    static final SolrContainer solrContainer = new SolrContainer(DockerImageName.parse("solr:9.6"))
+    protected static final SolrContainer solrContainer = new SolrContainer(DockerImageName.parse("solr:9.6"))
             .withEnv("SOLR_HEAP", "512m");
 
     @DynamicPropertySource
     static void solrProperties(DynamicPropertyRegistry registry) {
-        registry.add("spring.data.solr.host", 
-                () -> "http://" + solrContainer.getHost() + ":" + solrContainer.getSolrPort() + "/solr");
+        registry.add("solr.url",
+                () -> "http://" + solrContainer.getHost() + ":" + solrContainer.getSolrPort());
     }
 
     @Autowired
