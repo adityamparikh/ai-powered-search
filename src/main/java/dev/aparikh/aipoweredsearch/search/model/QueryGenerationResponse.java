@@ -8,6 +8,7 @@ public record QueryGenerationResponse(
         String q,
         List<String> fq,
         String sort,
+        String fl,
         @JsonProperty("facet.fields") List<String> facetFields,
         @JsonProperty("facet.query") String facetQuery
 ) {

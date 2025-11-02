@@ -38,6 +38,10 @@ public class SearchRepository {
             query.set("sort", searchRequest.sort());
         }
 
+        if (searchRequest.hasFieldList()) {
+            query.setFields(searchRequest.fieldList());
+        }
+
         if (searchRequest.hasFacets()) {
             query.setFacet(true);
             searchRequest.facet().fields().forEach(query::addFacetField);
@@ -61,7 +65,7 @@ public class SearchRepository {
                     : Map.of();
                     
             return new SearchResponse(
-                    response.getResults().stream().map(d -> (Map<String, Object>) d).collect(Collectors.toList()),
+                    response.getResults().stream().map(d -> (Map<String, Object>) d).toList(),
                     facetCountsMap
             );
         } catch (Exception e) {

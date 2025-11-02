@@ -14,7 +14,11 @@ import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.io.ClassPathResource;
+import org.springframework.core.io.Resource;
 
+import java.lang.reflect.Field;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -39,14 +43,18 @@ class SearchServiceTest {
 
     private SearchService searchService;
 
+    @Value("classpath:/prompts/system-message.st")
+    Resource systemResource;
+
     @BeforeEach
-    void setUp() {
+    void setUp() throws Exception {
         // Mock ChatModel to return JSON response
         String jsonResponse = """
                 {
                     "q": "*:*",
                     "fq": ["name:Spring"],
                     "sort": "id asc",
+                    "fl": "id,name,description",
                     "facet.fields": ["name"],
                     "facet.query": "description:boot"
                 }
@@ -56,8 +64,14 @@ class SearchServiceTest {
         Generation generation = new Generation(assistantMessage);
         ChatResponse mockResponse = new ChatResponse(List.of(generation));
         when(chatModel.call(any(Prompt.class))).thenReturn(mockResponse);
-        
-        searchService = new SearchService(searchRepository, chatModel, chatMemory);
+
+        searchService = new SearchService(systemResource, searchRepository, chatModel, chatMemory);
+
+        // Use reflection to set the systemResource field
+        Resource resource = new ClassPathResource("prompts/system-message.st");
+        Field resourceField = SearchService.class.getDeclaredField("systemResource");
+        resourceField.setAccessible(true);
+        resourceField.set(searchService, resource);
     }
 
     @Test
