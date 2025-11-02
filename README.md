@@ -96,9 +96,9 @@ Performs an AI-enhanced search on the specified Solr collection.
   "documents": [
     {
       "id": "1",
-      "name": "Spring Boot Application",
-      "description": "A sample Spring Boot application with Solr integration",
-      "category": "framework",
+      "name": ["Spring Boot Application"],
+      "description": ["A sample Spring Boot application with Solr integration"],
+      "category": ["framework"],
       "tags": ["java", "spring"]
     }
   ],
@@ -106,48 +106,6 @@ Performs an AI-enhanced search on the specified Solr collection.
     "category": [
       {
         "value": "framework",
-        "count": 5
-      }
-    ]
-  }
-}
-```
-
-## 🔍 Usage Examples
-
-### Example 1: Basic Search
-
-```bash
-curl "http://localhost:8080/api/v1/search/my-collection?query=find me documents about spring boot applications"
-```
-
-**Response:**
-```json
-{
-  "documents": [
-    {
-      "id": "1",
-      "name": "Spring Boot Application",
-      "description": "A comprehensive guide to building Spring Boot applications",
-      "category": "framework",
-      "tags": ["java", "spring", "microservices"]
-    },
-    {
-      "id": "2", 
-      "name": "Spring Boot Best Practices",
-      "description": "Best practices for developing Spring Boot applications",
-      "category": "documentation",
-      "tags": ["spring", "best-practices"]
-    }
-  ],
-  "facetCounts": {
-    "category": [
-      {
-        "value": "framework",
-        "count": 1
-      },
-      {
-        "value": "documentation", 
         "count": 1
       }
     ],
@@ -165,10 +123,19 @@ curl "http://localhost:8080/api/v1/search/my-collection?query=find me documents 
 }
 ```
 
-### Example 2: Specific Category Search
+## 🔍 Usage Examples
+
+The API accepts natural language queries and automatically generates appropriate Solr components including:
+- **Main Query (q)**: The core search terms
+- **Filter Queries (fq)**: Filters to narrow results  
+- **Facet Fields**: Fields to provide facet counts for
+- **Facet Queries**: Custom facet queries
+- **Sort**: Result ordering
+
+### Example 1: Basic Search
 
 ```bash
-curl "http://localhost:8080/api/v1/search/my-collection?query=show me all documentation related to microservices"
+curl "http://localhost:8080/api/v1/search/my-collection?query=find me documents about spring boot applications"
 ```
 
 **Response:**
@@ -176,11 +143,65 @@ curl "http://localhost:8080/api/v1/search/my-collection?query=show me all docume
 {
   "documents": [
     {
+      "id": "1",
+      "name": ["Spring Boot Application"],
+      "description": ["A sample Spring Boot application with Solr integration"],
+      "category": ["framework"],
+      "tags": ["java", "spring"]
+    },
+    {
       "id": "3",
-      "name": "Microservices Architecture Guide",
-      "description": "Complete guide to designing microservices architecture",
-      "category": "documentation",
-      "tags": ["microservices", "architecture", "design"]
+      "name": ["Microservices Architecture"],
+      "description": ["Building scalable microservices with Spring Boot"],
+      "category": ["architecture"],
+      "tags": ["microservices", "spring"]
+    }
+  ],
+  "facetCounts": {
+    "category": [
+      {
+        "value": "framework",
+        "count": 1
+      },
+      {
+        "value": "architecture",
+        "count": 1
+      }
+    ],
+    "tags": [
+      {
+        "value": "spring",
+        "count": 2
+      },
+      {
+        "value": "java",
+        "count": 1
+      },
+      {
+        "value": "microservices",
+        "count": 1
+      }
+    ]
+  }
+}
+```
+
+### Example 2: Specific Category Search
+
+```bash
+curl "http://localhost:8080/api/v1/search/my-collection?query=show me documentation about search engines"
+```
+
+**Response:**
+```json
+{
+  "documents": [
+    {
+      "id": "2",
+      "name": ["Apache Solr Guide"],
+      "description": ["Complete guide to Apache Solr search engine"],
+      "category": ["documentation"],
+      "tags": ["solr", "search"]
     }
   ],
   "facetCounts": {
@@ -189,18 +210,92 @@ curl "http://localhost:8080/api/v1/search/my-collection?query=show me all docume
         "value": "documentation",
         "count": 1
       }
+    ],
+    "tags": [
+      {
+        "value": "solr",
+        "count": 1
+      },
+      {
+        "value": "search",
+        "count": 1
+      }
     ]
   }
 }
 ```
 
-### Example 3: Using cURL with JSON Headers
+### Example 3: Faceted Search with Filtering
+
+Request facet counts and apply filters through natural language:
+
+```bash
+curl "http://localhost:8080/api/v1/search/my-collection?query=show me framework documents, group by category and tags, only include java-related items"
+```
+
+This generates a Solr query with:
+- **Filter Query**: `fq: ["tags:java"]`
+- **Facet Fields**: `facet.fields: ["category", "tags"]`
+
+**Response:**
+```json
+{
+  "documents": [
+    {
+      "id": "1",
+      "name": ["Spring Boot Application"],
+      "description": ["A sample Spring Boot application with Solr integration"],
+      "category": ["framework"],
+      "tags": ["java", "spring"]
+    }
+  ],
+  "facetCounts": {
+    "category": [
+      {
+        "value": "framework",
+        "count": 1
+      }
+    ],
+    "tags": [
+      {
+        "value": "java",
+        "count": 1
+      },
+      {
+        "value": "spring",
+        "count": 1
+      }
+    ]
+  }
+}
+```
+
+### Example 4: Search with Custom Sorting
+
+```bash
+curl "http://localhost:8080/api/v1/search/my-collection?query=find all documents about spring, sort by relevance score descending"
+```
+
+This generates: `sort: "score desc"`
+
+### Example 5: Complex Query with Multiple Filters
+
+```bash
+curl "http://localhost:8080/api/v1/search/my-collection?query=search for architecture documents that mention microservices, exclude framework category, show facets for tags"
+```
+
+This generates:
+- **Main Query**: `q: "description:*microservices* OR name:*microservices*"`
+- **Filter Queries**: `fq: ["category:architecture", "-category:framework"]`
+- **Facet Fields**: `facet.fields: ["tags"]`
+
+### Example 6: Using cURL with JSON Headers
 
 ```bash
 curl -X GET \
   -H "Accept: application/json" \
   -H "Content-Type: application/json" \
-  "http://localhost:8080/api/v1/search/products?query=find high-rated electronics under $500"
+  "http://localhost:8080/api/v1/search/my-collection?query=find documentation with search functionality, show category breakdown"
 ```
 
 ## 🧪 Testing
@@ -286,18 +381,62 @@ The application includes Spring Boot Actuator endpoints:
 5. **Response Assembly**: Results are formatted and returned with facet information
 6. **Memory Storage**: Conversation context is stored for future interactions
 
-### Sample AI Query Transformation
+## 🧠 Natural Language to Solr Mapping
 
+The AI understands various natural language patterns and converts them to appropriate Solr components:
+
+### Query Patterns
+
+| Natural Language | Generated Component | Example |
+|------------------|--------------------|---------| 
+| "find documents about X" | Main query (q) | `q: "name:*spring* OR description:*spring*"` |
+| "only include Y items" | Filter query (fq) | `fq: ["category:framework"]` |
+| "exclude Z category" | Negative filter | `fq: ["-category:documentation"]` |
+| "group by field" | Facet fields | `facet.fields: ["category", "tags"]` |
+| "sort by relevance/date" | Sort clause | `sort: "score desc"` |
+| "show breakdown of X" | Facet fields | `facet.fields: ["X"]` |
+
+### Sample AI Query Transformations
+
+#### Example 1: Basic Search
 **Input**: "find me documents about spring boot applications"
 
 **AI Generated Solr Query**:
 ```json
 {
   "q": "name:*spring* OR description:*spring* OR name:*boot* OR description:*boot*",
-  "fq": ["tags:spring", "category:framework OR category:documentation"],
+  "fq": ["tags:spring"],
   "sort": "score desc",
   "facet.fields": ["category", "tags"],
-  "facet.query": []
+  "facet.query": null
+}
+```
+
+#### Example 2: Filtered Faceted Search
+**Input**: "show me framework documents, group by category and tags, only include java-related items"
+
+**AI Generated Solr Query**:
+```json
+{
+  "q": "category:framework",
+  "fq": ["tags:java"],
+  "sort": "score desc", 
+  "facet.fields": ["category", "tags"],
+  "facet.query": null
+}
+```
+
+#### Example 3: Complex Multi-Filter Search
+**Input**: "search for architecture documents that mention microservices, exclude framework category, show facets for tags"
+
+**AI Generated Solr Query**:
+```json
+{
+  "q": "description:*microservices* OR name:*microservices*",
+  "fq": ["category:architecture", "-category:framework"],
+  "sort": "score desc",
+  "facet.fields": ["tags"],
+  "facet.query": null
 }
 ```
 

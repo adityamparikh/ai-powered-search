@@ -1,6 +1,6 @@
 plugins {
     java
-    id("org.springframework.boot") version "3.5.4"
+    id("org.springframework.boot") version "3.5.7"
     id("io.spring.dependency-management") version "1.1.7"
 }
 
@@ -9,7 +9,7 @@ version = "0.0.1-SNAPSHOT"
 
 java {
     toolchain {
-        languageVersion = JavaLanguageVersion.of(21)
+        languageVersion = JavaLanguageVersion.of(25)
     }
 }
 
@@ -17,7 +17,7 @@ repositories {
     mavenCentral()
 }
 
-extra["springAiVersion"] = "1.0.0"
+extra["springAiVersion"] = "1.0.3"
 
 dependencies {
     implementation("org.springframework.boot:spring-boot-starter-actuator")
@@ -25,19 +25,19 @@ dependencies {
     implementation("org.springframework.ai:spring-ai-starter-model-anthropic")
     implementation("org.springframework.ai:spring-ai-starter-model-chat-memory-repository-jdbc")
     implementation("org.postgresql:postgresql")
-    implementation("org.apache.solr:solr-solrj:9.6.1")
-    
+    implementation("org.apache.solr:solr-solrj:9.9.0")
+
     // Swagger UI / OpenAPI documentation
     implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:2.4.0")
-    
-    // Apache HttpComponents dependencies for Solr
-    implementation("org.apache.httpcomponents:httpclient:4.5.14")
-    implementation("org.apache.httpcomponents:httpcore:4.4.16")
-    implementation("org.apache.httpcomponents:httpmime:4.5.14")
-    
+
+    // Apache HttpComponents dependencies for HttpSolrClient
+    implementation("org.apache.httpcomponents:httpclient:4.5.13")
+    implementation("org.apache.httpcomponents:httpcore:4.4.9")
+    implementation("org.apache.httpcomponents:httpmime:4.5.13")
+
     // Additional Solr dependencies
     implementation("commons-io:commons-io:2.15.1")
-    implementation("org.apache.commons:commons-lang3:3.17.0")
+    implementation("org.apache.commons:commons-lang3:3.18.0")
     
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("org.springframework.boot:spring-boot-testcontainers")
