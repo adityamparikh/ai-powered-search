@@ -1,5 +1,6 @@
 package dev.aparikh.aipoweredsearch.search.service;
 
+import dev.aparikh.aipoweredsearch.search.model.FieldInfo;
 import dev.aparikh.aipoweredsearch.search.model.QueryGenerationResponse;
 import dev.aparikh.aipoweredsearch.search.model.SearchRequest;
 import dev.aparikh.aipoweredsearch.search.model.SearchResponse;
@@ -12,7 +13,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Service;
 
-import java.util.Set;
+import java.util.List;
+import java.util.stream.Collectors;
 
 @Service
 public class SearchService {
@@ -36,12 +38,17 @@ public class SearchService {
 
 
     public SearchResponse search(String collection, String freeTextQuery) {
-        Set<String> fields = searchRepository.getActuallyUsedFields(collection);
+        List<FieldInfo> fields = searchRepository.getFieldsWithSchema(collection);
+
+        // Format fields with type information for the AI
+        String fieldsInfo = fields.stream()
+                .map(FieldInfo::toSimpleString)
+                .collect(Collectors.joining(", "));
 
         String userMessage = String.format("""
                 The free text query is: %s
-                The available fields are: %s
-                """, freeTextQuery, fields);
+                The available fields with their types are: %s
+                """, freeTextQuery, fieldsInfo);
 
         String conversationId = "007";
 

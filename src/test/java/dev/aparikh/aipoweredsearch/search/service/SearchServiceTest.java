@@ -1,5 +1,6 @@
 package dev.aparikh.aipoweredsearch.search.service;
 
+import dev.aparikh.aipoweredsearch.search.model.FieldInfo;
 import dev.aparikh.aipoweredsearch.search.model.SearchRequest;
 import dev.aparikh.aipoweredsearch.search.model.SearchResponse;
 import dev.aparikh.aipoweredsearch.search.repository.SearchRepository;
@@ -22,7 +23,6 @@ import java.lang.reflect.Field;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -79,21 +79,25 @@ class SearchServiceTest {
         // Given
         String collection = "test-collection";
         String freeTextQuery = "find documents about spring boot";
-        Set<String> fields = Set.of("id", "name", "description");
-        
-        // Mock repository getFields
-        when(searchRepository.getActuallyUsedFields(collection)).thenReturn(fields);
-        
+        List<FieldInfo> fields = List.of(
+                new FieldInfo("id", "string", false, true, false, true),
+                new FieldInfo("name", "text_general", false, true, false, true),
+                new FieldInfo("description", "text_general", false, true, false, true)
+        );
+
+        // Mock repository getFieldsWithSchema
+        when(searchRepository.getFieldsWithSchema(collection)).thenReturn(fields);
+
         // Mock repository search
         SearchResponse expectedResponse = new SearchResponse(
                 Collections.singletonList(Map.of("id", "1", "name", "Test Document")),
                 Collections.emptyMap()
         );
         when(searchRepository.search(anyString(), any(SearchRequest.class))).thenReturn(expectedResponse);
-        
+
         // When
         SearchResponse response = searchService.search(collection, freeTextQuery);
-        
+
         // Then
         assertNotNull(response);
         assertEquals(1, response.documents().size());
