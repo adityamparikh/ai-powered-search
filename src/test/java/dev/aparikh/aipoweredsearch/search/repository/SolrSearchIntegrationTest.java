@@ -36,6 +36,7 @@ class SolrSearchIntegrationTest extends SolrTestBase {
                 "*:*",
                 Collections.emptyList(),
                 null,
+                null,
                 null
         );
         
@@ -66,6 +67,7 @@ class SolrSearchIntegrationTest extends SolrTestBase {
         SearchRequest searchRequest = new SearchRequest(
                 "*:*",
                 List.of("tags:*spring*"),  // Both documents have "spring" in tags
+                null,
                 null,
                 null
         );

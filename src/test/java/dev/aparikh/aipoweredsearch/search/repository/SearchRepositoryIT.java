@@ -32,6 +32,7 @@ class SearchRepositoryIT extends SolrTestBase {
                 "*:*",
                 Collections.emptyList(),
                 null,
+                null,
                 null
         );
         

@@ -8,6 +8,8 @@ import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.model.ChatModel;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Service;
 
 import java.util.Set;
@@ -15,12 +17,15 @@ import java.util.Set;
 @Service
 public class SearchService {
 
+    private final Resource systemResource;
     private final SearchRepository searchRepository;
     private final ChatClient chatClient;
 
-    public SearchService(SearchRepository searchRepository,
+    public SearchService(@Value("classpath:/prompts/system-message.st") Resource systemResource,
+                         SearchRepository searchRepository,
                          ChatModel chatModel,
                          ChatMemory chatMemory) {
+        this.systemResource = systemResource;
         this.searchRepository = searchRepository;
         this.chatClient = ChatClient.builder(chatModel)
                 .defaultAdvisors(
@@ -29,20 +34,9 @@ public class SearchService {
                 .build();
     }
 
+
     public SearchResponse search(String collection, String freeTextQuery) {
         Set<String> fields = searchRepository.getActuallyUsedFields(collection);
-
-        String systemMessage = """
-                You are a search expert. You are given a free text query and a list of fields from a Solr schema.
-                You need to convert the free text query into a structured search query.
-                
-                Respond with a JSON object with the following fields:
-                - q: The main query string. This should be a valid Solr query.
-                - fq: A list of filter queries. These should be valid Solr filter queries.
-                - sort: The sort clause. This should be a valid Solr sort clause.
-                - facet.fields: A list of fields to facet on.
-                - facet.query: A list of facet queries.
-                """;
 
         String userMessage = String.format("""
                 The free text query is: %s
@@ -52,7 +46,7 @@ public class SearchService {
         String conversationId = "007";
 
         QueryGenerationResponse queryGenerationResponse = chatClient.prompt()
-                .system(systemMessage)
+                .system(systemResource)
                 .user(userMessage)
                 .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, conversationId))
                 .call()
@@ -64,6 +58,7 @@ public class SearchService {
                 queryGenerationResponse.q(),
                 queryGenerationResponse.fq(),
                 queryGenerationResponse.sort(),
+                queryGenerationResponse.fl(),
                 new SearchRequest.Facet(queryGenerationResponse.facetFields(), queryGenerationResponse.facetQuery())
         );
 
