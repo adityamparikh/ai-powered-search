@@ -5,8 +5,11 @@ import dev.aparikh.aipoweredsearch.search.model.QueryGenerationResponse;
 import dev.aparikh.aipoweredsearch.search.model.SearchRequest;
 import dev.aparikh.aipoweredsearch.search.model.SearchResponse;
 import dev.aparikh.aipoweredsearch.search.repository.SearchRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
+import org.springframework.ai.chat.client.advisor.SimpleLoggerAdvisor;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.beans.factory.annotation.Value;
@@ -14,10 +17,11 @@ import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
-import java.util.stream.Collectors;
 
 @Service
 public class SearchService {
+
+    private final Logger log = LoggerFactory.getLogger(SearchService.class);
 
     private final Resource systemResource;
     private final SearchRepository searchRepository;
@@ -31,24 +35,22 @@ public class SearchService {
         this.searchRepository = searchRepository;
         this.chatClient = ChatClient.builder(chatModel)
                 .defaultAdvisors(
-                        MessageChatMemoryAdvisor.builder(chatMemory).build() // chat-memory advisor
+                        MessageChatMemoryAdvisor.builder(chatMemory).build(), // chat-memory advisor
+                        SimpleLoggerAdvisor.builder().build()
                 )
                 .build();
     }
 
 
     public SearchResponse search(String collection, String freeTextQuery) {
-        List<FieldInfo> fields = searchRepository.getFieldsWithSchema(collection);
+        log.debug("Searching for collection: {}, query: {}", collection, freeTextQuery);
 
-        // Format fields with type information for the AI
-        String fieldsInfo = fields.stream()
-                .map(FieldInfo::toSimpleString)
-                .collect(Collectors.joining(", "));
+        List<FieldInfo> fields = searchRepository.getFieldsWithSchema(collection);
 
         String userMessage = String.format("""
                 The free text query is: %s
                 The available fields with their types are: %s
-                """, freeTextQuery, fieldsInfo);
+                """, freeTextQuery, fields);
 
         String conversationId = "007";
 
@@ -61,6 +63,7 @@ public class SearchService {
 
 
         assert queryGenerationResponse != null;
+        log.debug("Query generation response: {}", queryGenerationResponse);
         SearchRequest searchRequest = new SearchRequest(
                 queryGenerationResponse.q(),
                 queryGenerationResponse.fq(),
@@ -68,7 +71,7 @@ public class SearchService {
                 queryGenerationResponse.fl(),
                 new SearchRequest.Facet(queryGenerationResponse.facetFields(), queryGenerationResponse.facetQuery())
         );
-
+        log.debug("Search request: {}", searchRequest);
         return searchRepository.search(collection, searchRequest);
     }
 }
