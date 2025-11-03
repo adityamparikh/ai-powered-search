@@ -58,6 +58,7 @@ class SearchIntegrationTest {
     static void configureSolrProperties(DynamicPropertyRegistry registry) {
         String solrUrl = "http://" + solrContainer.getHost() + ":" + solrContainer.getSolrPort();
         registry.add("solr.url", () -> solrUrl);
+        registry.add("spring.ai.openai.api-key", () -> "test-key");
     }
 
     private static final String COLLECTION = "test-collection";

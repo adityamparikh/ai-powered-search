@@ -17,15 +17,22 @@ repositories {
     mavenCentral()
 }
 
-extra["springAiVersion"] = "1.0.3"
+extra["springAiVersion"] = "1.1.0-M4"
 
 dependencies {
     implementation("org.springframework.boot:spring-boot-starter-actuator")
     implementation("org.springframework.boot:spring-boot-starter-web")
     implementation("org.springframework.ai:spring-ai-starter-model-anthropic")
+    implementation("org.springframework.ai:spring-ai-openai")
     implementation("org.springframework.ai:spring-ai-starter-model-chat-memory-repository-jdbc")
+    implementation("org.springframework.ai:spring-ai-vector-store")
     implementation("org.postgresql:postgresql")
-    implementation("org.apache.solr:solr-solrj:9.9.0")
+    implementation("org.apache.solr:solr-solrj:9.9.0") {
+        // Exclude Jetty HTTP/2 dependencies to avoid version conflicts
+        // We use HttpSolrClient (HTTP/1.1) instead of Http2SolrClient
+        exclude(group = "org.eclipse.jetty.http2", module = "http2-client")
+        exclude(group = "org.eclipse.jetty.http2", module = "http2-http-client-transport")
+    }
 
     // Swagger UI / OpenAPI documentation
     implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:2.4.0")
@@ -38,13 +45,15 @@ dependencies {
     // Additional Solr dependencies
     implementation("commons-io:commons-io:2.15.1")
     implementation("org.apache.commons:commons-lang3:3.18.0")
-    
+
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("org.springframework.boot:spring-boot-testcontainers")
     testImplementation("org.springframework.ai:spring-ai-spring-boot-testcontainers")
     testImplementation("org.testcontainers:junit-jupiter")
     testImplementation("org.testcontainers:solr")
     testImplementation("org.testcontainers:postgresql")
+    testImplementation("org.awaitility:awaitility:4.2.0")
+    testImplementation("io.micrometer:micrometer-observation-test")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 

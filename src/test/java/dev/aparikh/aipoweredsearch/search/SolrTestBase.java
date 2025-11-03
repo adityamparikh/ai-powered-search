@@ -27,6 +27,7 @@ public abstract class SolrTestBase {
     static void solrProperties(DynamicPropertyRegistry registry) {
         registry.add("solr.url",
                 () -> "http://" + solrContainer.getHost() + ":" + solrContainer.getSolrPort());
+        registry.add("spring.ai.openai.api-key", () -> "test-key");
     }
 
     @Autowired

@@ -1,20 +1,22 @@
 package dev.aparikh.aipoweredsearch.search.service;
 
 import dev.aparikh.aipoweredsearch.search.model.FieldInfo;
+import dev.aparikh.aipoweredsearch.search.model.QueryGenerationResponse;
 import dev.aparikh.aipoweredsearch.search.model.SearchRequest;
 import dev.aparikh.aipoweredsearch.search.model.SearchResponse;
 import dev.aparikh.aipoweredsearch.search.repository.SearchRepository;
+import org.apache.solr.client.solrj.SolrClient;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.ai.chat.memory.ChatMemory;
-import org.springframework.ai.chat.model.ChatModel;
+import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.core.io.Resource;
@@ -28,6 +30,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -37,45 +40,47 @@ class SearchServiceTest {
     private SearchRepository searchRepository;
 
     @Mock
-    private ChatModel chatModel;
+    private ChatClient chatClient;
+
     @Mock
-    private ChatMemory chatMemory;
+    private EmbeddingModel embeddingModel;
+
+    @Mock
+    private SolrClient solrClient;
 
     private SearchService searchService;
+
+    private ChatClient.CallResponseSpec callResponseSpec;
+    private ChatClient.ChatClientRequestSpec requestSpec;
 
     @Value("classpath:/prompts/system-message.st")
     Resource systemResource;
 
+    @Value("classpath:/prompts/semantic-search-system-message.st")
+    Resource semanticSystemResource;
+
     @BeforeEach
     void setUp() throws Exception {
-        // Mock ChatModel to return JSON response
-        String jsonResponse = """
-                {
-                    "q": "*:*",
-                    "fq": ["name:Spring"],
-                    "sort": "id asc",
-                    "fl": "id,name,description",
-                    "facet.fields": ["name"],
-                    "facet.query": "description:boot"
-                }
-                """;
+        // Mock ChatClient's fluent API
+        callResponseSpec = mock(ChatClient.CallResponseSpec.class);
+        requestSpec = mock(ChatClient.ChatClientRequestSpec.class);
 
-        AssistantMessage assistantMessage = new AssistantMessage(jsonResponse);
-        Generation generation = new Generation(assistantMessage);
-        ChatResponse mockResponse = new ChatResponse(List.of(generation));
-        when(chatModel.call(any(Prompt.class))).thenReturn(mockResponse);
+        when(chatClient.prompt()).thenReturn(requestSpec);
+        when(requestSpec.system(any(Resource.class))).thenReturn(requestSpec);
+        when(requestSpec.user(anyString())).thenReturn(requestSpec);
+        when(requestSpec.advisors(any(java.util.function.Consumer.class))).thenReturn(requestSpec);
+        when(requestSpec.call()).thenReturn(callResponseSpec);
 
-        searchService = new SearchService(systemResource, searchRepository, chatModel, chatMemory);
+        // Create resources
+        Resource systemRes = new ClassPathResource("prompts/system-message.st");
+        Resource semanticRes = new ClassPathResource("prompts/semantic-search-system-message.st");
 
-        // Use reflection to set the systemResource field
-        Resource resource = new ClassPathResource("prompts/system-message.st");
-        Field resourceField = SearchService.class.getDeclaredField("systemResource");
-        resourceField.setAccessible(true);
-        resourceField.set(searchService, resource);
+        searchService = new SearchService(systemRes, semanticRes, searchRepository,
+                chatClient, embeddingModel, solrClient);
     }
 
     @Test
-    void shouldSearchWithAiGeneratedQuery() {
+    void shouldSearchWithAiGeneratedQuery() throws Exception {
         // Given
         String collection = "test-collection";
         String freeTextQuery = "find documents about spring boot";
@@ -87,6 +92,17 @@ class SearchServiceTest {
 
         // Mock repository getFieldsWithSchema
         when(searchRepository.getFieldsWithSchema(collection)).thenReturn(fields);
+
+        // Mock QueryGenerationResponse from ChatClient
+        QueryGenerationResponse queryGenResponse = new QueryGenerationResponse(
+                "*:*",
+                List.of("name:Spring"),
+                "id asc",
+                "id,name,description",
+                List.of("name"),
+                "description:boot"
+        );
+        when(callResponseSpec.entity(QueryGenerationResponse.class)).thenReturn(queryGenResponse);
 
         // Mock repository search
         SearchResponse expectedResponse = new SearchResponse(

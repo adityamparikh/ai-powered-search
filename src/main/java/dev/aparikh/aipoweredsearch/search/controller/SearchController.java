@@ -28,11 +28,11 @@ class SearchController {
 
     @Operation(
         summary = "Search documents in a collection",
-        description = "Performs an AI-enhanced search on the specified collection using the provided query"
+        description = "Performs an AI-enhanced keyword search on the specified collection using the provided query"
     )
     @ApiResponses(value = {
         @ApiResponse(
-            responseCode = "200", 
+            responseCode = "200",
             description = "Search completed successfully",
             content = @Content(mediaType = "application/json", schema = @Schema(implementation = SearchResponse.class))
         ),
@@ -47,5 +47,32 @@ class SearchController {
             @Parameter(description = "Search query string", required = true)
             @RequestParam("query") String query) {
         return searchService.search(collection, query);
+    }
+
+    @Operation(
+        summary = "Semantic search using vector similarity",
+        description = "Performs semantic search on the specified collection using vector embeddings. " +
+                "The query is converted to a 1536-dimensional vector using OpenAI embeddings, " +
+                "and Solr's KNN (K-Nearest Neighbors) search finds semantically similar documents. " +
+                "Natural language filters are parsed by Claude AI and applied to refine results."
+    )
+    @ApiResponses(value = {
+        @ApiResponse(
+            responseCode = "200",
+            description = "Semantic search completed successfully",
+            content = @Content(mediaType = "application/json", schema = @Schema(implementation = SearchResponse.class))
+        ),
+        @ApiResponse(responseCode = "400", description = "Invalid collection or query parameters"),
+        @ApiResponse(responseCode = "404", description = "Collection not found"),
+        @ApiResponse(responseCode = "500", description = "Internal server error")
+    })
+    @GetMapping("/{collection}/semantic")
+    public SearchResponse semanticSearch(
+            @Parameter(description = "Collection name to search in", required = true, example = "products")
+            @PathVariable String collection,
+            @Parameter(description = "Natural language search query", required = true,
+                    example = "machine learning frameworks for Java")
+            @RequestParam("query") String query) {
+        return searchService.semanticSearch(collection, query);
     }
 }
