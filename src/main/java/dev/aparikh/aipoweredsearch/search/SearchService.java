@@ -1,11 +1,10 @@
-package dev.aparikh.aipoweredsearch.search.service;
+package dev.aparikh.aipoweredsearch.search;
 
 import dev.aparikh.aipoweredsearch.solr.vectorstore.SolrVectorStore;
 import dev.aparikh.aipoweredsearch.search.model.FieldInfo;
 import dev.aparikh.aipoweredsearch.search.model.QueryGenerationResponse;
 import dev.aparikh.aipoweredsearch.search.model.SearchRequest;
 import dev.aparikh.aipoweredsearch.search.model.SearchResponse;
-import dev.aparikh.aipoweredsearch.search.repository.SearchRepository;
 import org.apache.solr.client.solrj.SolrClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

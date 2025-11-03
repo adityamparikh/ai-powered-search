@@ -1,9 +1,8 @@
-package dev.aparikh.aipoweredsearch.indexing.controller;
+package dev.aparikh.aipoweredsearch.indexing;
 
 import dev.aparikh.aipoweredsearch.indexing.model.BatchIndexRequest;
 import dev.aparikh.aipoweredsearch.indexing.model.IndexRequest;
 import dev.aparikh.aipoweredsearch.indexing.model.IndexResponse;
-import dev.aparikh.aipoweredsearch.indexing.service.IndexService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;

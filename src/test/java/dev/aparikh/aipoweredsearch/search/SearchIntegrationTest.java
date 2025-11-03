@@ -2,7 +2,6 @@ package dev.aparikh.aipoweredsearch.search;
 
 import dev.aparikh.aipoweredsearch.config.PostgresTestConfiguration;
 import dev.aparikh.aipoweredsearch.search.model.SearchResponse;
-import dev.aparikh.aipoweredsearch.search.service.SearchService;
 import org.apache.solr.client.solrj.SolrClient;
 import org.apache.solr.common.SolrInputDocument;
 import org.junit.jupiter.api.BeforeEach;

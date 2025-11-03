@@ -1,4 +1,4 @@
-package dev.aparikh.aipoweredsearch.indexing.service;
+package dev.aparikh.aipoweredsearch.indexing;
 
 import dev.aparikh.aipoweredsearch.solr.vectorstore.SolrVectorStore;
 import dev.aparikh.aipoweredsearch.indexing.model.BatchIndexRequest;

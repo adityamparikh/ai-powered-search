@@ -1,7 +1,6 @@
-package dev.aparikh.aipoweredsearch.search.controller;
+package dev.aparikh.aipoweredsearch.search;
 
 import dev.aparikh.aipoweredsearch.search.model.SearchResponse;
-import dev.aparikh.aipoweredsearch.search.service.SearchService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
