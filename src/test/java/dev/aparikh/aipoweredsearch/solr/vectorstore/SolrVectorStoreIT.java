@@ -34,7 +34,7 @@ class SolrVectorStoreIT {
 
     @Container
     private static final SolrContainer solrContainer = new SolrContainer(
-            DockerImageName.parse("solr:9.7.0"));
+            DockerImageName.parse("solr:slim"));
 
     private static final String COLLECTION_NAME = "test_collection";
 
