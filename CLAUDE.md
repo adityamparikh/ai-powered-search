@@ -8,25 +8,39 @@ This is an AI-powered search application built with Spring Boot 3.5.7 and Java 2
 
 ### Core Architecture
 
-- **Spring Boot Application**: Main entry point at `dev.aparikh.aipoweredsearch.AiPoweredSearchApplication`
-- **Search Service**: `SearchService` provides both traditional and semantic search
+The application follows a **package-by-feature** structure organized around two main domains:
+
+- **Search Domain** (`dev.aparikh.aipoweredsearch.search`):
+  - `SearchController`: REST endpoints for search operations
+  - `SearchService`: Orchestrates traditional and semantic search with AI query generation
+  - `SearchRepository`: Low-level Solr query execution and field introspection
   - Traditional search: Converts free-text queries into structured Solr queries using Claude AI
   - Semantic search: Uses vector embeddings (OpenAI) for similarity-based retrieval
-- **Search Repository**: `SearchRepository` handles Solr interactions and query execution
-- **Index Service**: `IndexService` manages document indexing with automatic vector embedding generation
-- **Solr Vector Store**: `SolrVectorStore` implements Spring AI VectorStore interface for Solr 9.x+ dense vector support
-- **Chat Memory**: Uses PostgreSQL-backed chat memory for conversational context with conversation ID "007"
-- **Configuration**: Multi-LLM configuration in `SpringAiConfig` for Anthropic (chat) and OpenAI (embeddings)
+
+- **Indexing Domain** (`dev.aparikh.aipoweredsearch.indexing`):
+  - `IndexController`: REST endpoints for document indexing
+  - `IndexService`: Manages document indexing with automatic vector embedding generation
+  - Supports both single and batch document indexing
+
+- **Vector Store** (`dev.aparikh.aipoweredsearch.solr.vectorstore`):
+  - `SolrVectorStore`: Custom Spring AI VectorStore implementation for Solr 9.x+
+  - Implements dense vector support with HNSW (Hierarchical Navigable Small World) algorithm
+  - Handles automatic embedding generation and vector similarity search
+
+- **Configuration** (`dev.aparikh.aipoweredsearch.config`):
+  - `SpringAiConfig`: Multi-LLM configuration for Anthropic (chat) and OpenAI (embeddings)
+  - `SolrConfig`: Solr client configuration with HttpSolrClient
+  - Chat Memory: PostgreSQL-backed conversational context with conversation ID "007"
 
 ### Key Dependencies
 
-- Spring Boot 3.5.7 with Spring AI 1.1.0-M4
-- Anthropic Claude AI (claude-sonnet-4-5 model) for query generation
-- OpenAI (text-embedding-3-small) for vector embeddings (1536 dimensions)
-- Apache Solr 9.9.0 for search and vector storage
-- PostgreSQL for chat memory storage
-- Testcontainers for integration testing
-- SpringDoc OpenAPI for API documentation
+- **Spring Boot 3.5.7** with Spring AI 1.1.0-M4
+- **Anthropic Claude AI** (claude-sonnet-4-5) for query generation and chat
+- **OpenAI** (text-embedding-3-small) for vector embeddings (1536 dimensions)
+- **Apache Solr 9.9.0** for search and vector storage with dense vector support
+- **PostgreSQL** for chat memory persistence
+- **Testcontainers** for integration testing with Solr and PostgreSQL
+- **SpringDoc OpenAPI** for API documentation
 
 ## Development Commands
 
@@ -35,55 +49,92 @@ This is an AI-powered search application built with Spring Boot 3.5.7 and Java 2
 ./gradlew build                 # Build the project
 ./gradlew bootRun              # Run the application
 ./gradlew clean build          # Clean build
+./gradlew bootBuildImage       # Build Docker image
 ```
 
 ### Testing
 ```bash
-./gradlew test                 # Run all tests
-./gradlew check               # Run all checks including tests
+./gradlew test                                    # Run all tests
+./gradlew check                                  # Run all checks including tests
+./gradlew test --tests "ClassName"              # Run specific test class
+./gradlew test --tests "dev.aparikh.aipoweredsearch.search.*"  # Run all search tests
+./gradlew test --tests "dev.aparikh.aipoweredsearch.indexing.*" # Run all indexing tests
 ```
 
-### Single Test Execution
+### Test Execution Examples
 ```bash
-./gradlew test --tests "ClassName"
-./gradlew test --tests "dev.aparikh.aipoweredsearch.search.SearchIntegrationTest"
+# Integration tests (require containers)
+./gradlew test --tests "SearchIntegrationTest"
+./gradlew test --tests "IndexIntegrationTest"
+./gradlew test --tests "SolrVectorStoreIT"
+
+# Unit tests (fast, no containers)
+./gradlew test --tests "SearchServiceTest"
+./gradlew test --tests "IndexServiceTest"
+./gradlew test --tests "SearchControllerTest"
+./gradlew test --tests "IndexControllerTest"
+
+# Vector store tests (require OPENAI_API_KEY)
+./gradlew test --tests "SolrVectorStoreIT" --info
+./gradlew test --tests "SolrVectorStoreObservationIT" --info
 ```
+
+### Running Vector Store Tests
+Vector store integration tests require a valid OpenAI API key:
+```bash
+export OPENAI_API_KEY="your-actual-api-key"
+./gradlew test --tests "dev.aparikh.aipoweredsearch.config.SolrVectorStore*"
+```
+
+A helper script is provided: `./run-vector-tests.sh`
 
 ## Configuration Requirements
 
 ### Environment Variables
-- `ANTHROPIC_API_KEY`: Required for Claude AI integration (query generation)
-- `OPENAI_API_KEY`: Required for OpenAI embeddings (vector search)
+- `ANTHROPIC_API_KEY`: Required for Claude AI integration (query generation and chat)
+- `OPENAI_API_KEY`: Required for OpenAI embeddings (vector search and indexing)
 - `POSTGRES_USER`: PostgreSQL username (defaults to 'postgres')
 - `POSTGRES_PASSWORD`: PostgreSQL password (defaults to 'postgres')
 
 ### External Services
 - **Solr**: Expected at `http://localhost:8983/solr`
   - Must support dense vector fields (Solr 9.0+)
-  - Schema must include vector field with DenseVectorField type
+  - Collections must include vector field with DenseVectorField type
+  - See Solr Schema Requirements section below
 - **PostgreSQL**: Expected at `jdbc:postgresql://localhost:5432/chatmemory`
+  - Used for chat memory persistence
+- **Docker**: Required for running external services and Testcontainers tests
+
+### Running with Docker Compose
+```bash
+docker-compose up -d  # Start Solr and PostgreSQL
+docker-compose down   # Stop services
+```
 
 ### API Documentation
-- Swagger UI available at `/swagger-ui.html`
-- OpenAPI docs at `/api-docs`
+- **Swagger UI**: http://localhost:8080/swagger-ui.html
+- **OpenAPI Spec**: http://localhost:8080/api-docs
+- **Health Check**: http://localhost:8080/actuator/health
 
-## Semantic Search and Vector Indexing
+## Vector Search and Indexing
 
 ### Vector Store Implementation
 
-The application includes a custom `SolrVectorStore` implementation that:
+The `SolrVectorStore` is a custom implementation that:
 - Extends `AbstractObservationVectorStore` from Spring AI 1.1.0-M4
 - Implements the `VectorStore` interface for document storage and similarity search
-- Uses Solr's dense vector field type for KNN (K-Nearest Neighbors) search
+- Uses Solr's `DenseVectorField` type for KNN (K-Nearest Neighbors) search with HNSW algorithm
 - Supports cosine similarity metric for vector comparison
-- Automatically generates embeddings using OpenAI's text-embedding-3-small model
-- Includes observation/metrics support via Micrometer
+- Automatically generates embeddings using OpenAI's text-embedding-3-small model (1536 dimensions)
+- Includes observability support via Micrometer for tracking operations
+- Uses POST method for search queries to avoid URI length limitations
+- Handles Solr's multi-valued fields with proper type conversion
 
-**Location**: `src/main/java/dev/aparikh/aipoweredsearch/config/SolrVectorStore.java`
+**Location**: `src/main/java/dev/aparikh/aipoweredsearch/solr/vectorstore/SolrVectorStore.java`
 
 ### Solr Schema Requirements
 
-For vector search to work, Solr collections must have the following field configuration:
+For vector search to work, Solr collections must have the following configuration:
 
 ```xml
 <!-- Core fields -->
@@ -93,15 +144,19 @@ For vector search to work, Solr collections must have the following field config
 
 <!-- Vector field type definition -->
 <fieldType name="knn_vector_1536" class="solr.DenseVectorField"
-           vectorDimension="1536" similarityFunction="cosine"/>
+           vectorDimension="1536"
+           similarityFunction="cosine"
+           knnAlgorithm="hnsw"/>
 
-<!-- Dynamic metadata fields -->
+<!-- Dynamic metadata fields for document attributes -->
 <dynamicField name="metadata_*" type="text_general" indexed="true" stored="true"/>
 ```
 
+The vector field type must match the embedding dimension (1536 for text-embedding-3-small).
+
 ### Indexing API
 
-Documents can be indexed with automatic embedding generation:
+Documents can be indexed with automatic embedding generation via REST endpoints:
 
 **Single Document**: `POST /api/v1/index/{collection}`
 ```json
@@ -110,7 +165,8 @@ Documents can be indexed with automatic embedding generation:
   "content": "Your document text here",
   "metadata": {
     "author": "John Doe",
-    "date": "2025-01-01"
+    "category": "tech",
+    "tags": ["java", "spring", "ai"]
   }
 }
 ```
@@ -125,83 +181,107 @@ Documents can be indexed with automatic embedding generation:
       "metadata": {"category": "tech"}
     },
     {
-      "id": "doc2",
-      "content": "Second document",
+      "content": "Document without ID (auto-generated UUID)",
       "metadata": {"category": "science"}
     }
   ]
 }
 ```
 
-The `IndexService` automatically:
-1. Generates vector embeddings using OpenAI
-2. Stores documents with embeddings in Solr
-3. Handles batch operations efficiently
+**Features**:
+- Auto-generates UUIDs if document ID is not provided
+- Handles null or empty metadata gracefully
+- Supports complex metadata (nested objects, arrays, various types)
+- Processes Unicode and special characters correctly
+- Efficient batch processing for multiple documents
 
-**Location**: `src/main/java/dev/aparikh/aipoweredsearch/indexing/`
+**Implementation**: `IndexService` in `src/main/java/dev/aparikh/aipoweredsearch/indexing/`
 
-### Semantic Search API
+### Search APIs
 
-**Endpoint**: `GET /api/v1/search/{collection}/semantic?query={text}`
+**Traditional Search**: `GET /api/v1/search/{collection}?query={natural_language_query}`
+- Uses Claude AI to generate structured Solr queries (q, fq, sort, fl, facets)
+- Best for exact matches, filtering, faceting, and traditional search operations
+- Returns results based on keyword matching and Solr scoring
+- Example: "find spring boot documents from 2024, group by category"
 
-Semantic search performs the following steps:
-1. Uses Claude AI to parse natural language filters from the query
-2. Generates vector embedding for the query text using OpenAI
-3. Executes KNN similarity search in Solr (topK=10, cosine similarity)
-4. Returns semantically similar documents ranked by similarity score
+**Semantic Search**: `GET /api/v1/search/{collection}/semantic?query={text}`
+- Uses vector embeddings and cosine similarity for semantic matching
+- Best for finding conceptually similar documents
+- Returns results ranked by similarity score
+- Combines AI-powered filter parsing with vector similarity
+- Example: "comfortable running shoes under $100"
 
-**Example**:
-```
-GET /api/v1/search/products/semantic?query=comfortable running shoes under $100
-```
+**Search Flow**:
+1. Claude AI parses natural language filters and search intent
+2. For semantic search: generates query embedding using OpenAI
+3. Executes KNN similarity search in Solr (topK=10 by default)
+4. Returns documents with similarity scores in metadata
 
-Response includes documents with similarity scores in metadata.
-
-**Location**: `SearchService.semanticSearch()` in `src/main/java/dev/aparikh/aipoweredsearch/search/service/SearchService.java`
-
-### Traditional vs Semantic Search
-
-- **Traditional Search** (`GET /api/v1/search/{collection}?query={text}`):
-  - Uses Claude AI to generate structured Solr queries (q, fq, sort, fl, facets)
-  - Best for exact matches, filtering, faceting, and traditional search operations
-  - Returns results based on keyword matching and Solr scoring
-
-- **Semantic Search** (`GET /api/v1/search/{collection}/semantic?query={text}`):
-  - Uses vector embeddings and cosine similarity
-  - Best for finding conceptually similar documents
-  - Returns results based on semantic meaning, not just keywords
-  - Combines AI-powered filter parsing with vector similarity
+**Implementation**: `SearchService` in `src/main/java/dev/aparikh/aipoweredsearch/search/`
 
 ## Testing Architecture
 
-The project uses Testcontainers for integration testing with:
-- Solr containers for search testing
-- PostgreSQL containers for chat memory testing
-- Mock configurations for Claude AI in tests
-- Separate test configurations in `application-test.properties`
+The project has comprehensive test coverage across three levels:
 
-### Test Structure
-- `SearchIntegrationTest`: End-to-end search functionality
-- `SearchServiceTest`: Unit tests for search service
-- `SearchRepositoryIT`: Integration tests for Solr repository
-- `SolrTestBase`: Base class for Solr-related tests
+### Test Levels
 
-## Key Patterns
+1. **Unit Tests** (`@ExtendWith(MockitoExtension.class)` or `@WebMvcTest`)
+   - Service layer tests: `SearchServiceTest`, `IndexServiceTest`
+   - Controller layer tests: `SearchControllerTest`, `IndexControllerTest`
+   - Fast execution, no external dependencies
+   - Use mocked dependencies and static mocking for builders
 
-- **Multi-LLM Integration**: Uses multiple AI models (Anthropic Claude for chat, OpenAI for embeddings) with explicit bean configuration in `SpringAiConfig`
-- **AI-Powered Query Transformation**: Natural language to structured Solr queries using Claude AI
-- **Vector Search with Spring AI**: Custom `SolrVectorStore` implementing Spring AI's VectorStore interface
-- **Automatic Embedding Generation**: Documents are automatically vectorized during indexing using OpenAI
-- **Conversational Search**: Persistent chat memory with PostgreSQL for context-aware interactions
-- **Hybrid Search Capabilities**: Both traditional keyword search and semantic vector search
-- **Field Introspection**: Dynamic query building based on Solr schema
-- **Package by Feature**: Code organized by feature (indexing, search) rather than by layer
-- **Comprehensive Testing**: Integration tests with Testcontainers for Solr and PostgreSQL
+2. **Integration Tests** (`@SpringBootTest` with Testcontainers)
+   - Full application context tests: `SearchIntegrationTest`, `IndexIntegrationTest`
+   - Uses Testcontainers for Solr and PostgreSQL
+   - Tests complete request/response cycles
+   - Verifies actual database interactions
 
-## Important Implementation Notes
+3. **Vector Store Tests** (Requires OpenAI API key)
+   - `SolrVectorStoreIT`: Tests vector store operations
+   - `SolrVectorStoreObservationIT`: Tests observability features
+   - Uses real embeddings (not mocked) when `OPENAI_API_KEY` is set
+   - Tests skip gracefully if API key is not available
+
+### Test Configuration
+- Separate test configuration: `src/test/resources/application-test.properties`
+- PostgreSQL test config: `PostgresTestConfiguration.java`
+- Mock embeddings for integration tests (1536-dimensional float arrays)
+- Awaitility for async operation verification in Solr
+
+### Running Tests
+```bash
+# Run all tests
+./gradlew test
+
+# Run tests by package
+./gradlew test --tests "dev.aparikh.aipoweredsearch.search.*"
+./gradlew test --tests "dev.aparikh.aipoweredsearch.indexing.*"
+
+# Run specific test classes
+./gradlew test --tests "SearchIntegrationTest"
+./gradlew test --tests "IndexServiceTest"
+
+# Run with detailed output
+./gradlew test --tests "SolrVectorStoreIT" --info
+```
+
+## Key Implementation Patterns
 
 ### Multi-LLM Configuration
-When using both Anthropic and OpenAI dependencies, Spring AI cannot auto-configure `ChatClient`. Explicit configuration is required in `SpringAiConfig` with `@Qualifier` annotations to distinguish between models.
+When using both Anthropic and OpenAI, Spring AI cannot auto-configure `ChatClient`. Explicit configuration is required in `SpringAiConfig`:
+```java
+@Bean
+public ChatClient chatClient(
+    @Qualifier("anthropicChatModel") ChatModel chatModel,
+    ChatMemory chatMemory
+) {
+    return ChatClient.builder(chatModel)
+        .defaultAdvisors(new MessageChatMemoryAdvisor(chatMemory))
+        .build();
+}
+```
 
 ### Vector Store Builder Pattern
 `SolrVectorStore` uses the builder pattern extending `AbstractVectorStoreBuilder`:
@@ -211,15 +291,124 @@ SolrVectorStore vectorStore = SolrVectorStore.builder(solrClient, collection, em
     .build();
 ```
 
-### Embedding Storage
-Embeddings are stored in Document metadata with the key "embedding". The VectorStore automatically generates embeddings for documents that don't have them during the `add()` operation.
-
-### Search Request API
-Spring AI 1.1.0-M4 uses a builder pattern for SearchRequest:
+### Spring AI Filter Expression Syntax
+The vector store uses Spring AI's filter expression language:
 ```java
 SearchRequest request = SearchRequest.builder()
     .query("search text")
     .topK(10)
-    .filterExpression("field:value")
+    .similarityThreshold(0.7)
+    .filterExpression("category == 'AI'")  // Not Solr syntax
     .build();
 ```
+
+The filter expression is converted to Solr query format internally.
+
+### Embedding Storage
+Embeddings are stored in Document metadata with key "embedding". The VectorStore automatically generates embeddings for documents without them during `add()` operations.
+
+### Metadata Handling
+Solr returns multi-valued fields as lists. The vector store extracts first values and converts types:
+```java
+// Handles: {"category": ["AI"]} -> {"category": "AI"}
+// Handles: {"year": [2024L]} -> {"year": 2024}
+```
+
+### Package Structure
+Code is organized by **feature** (not layer):
+```
+dev.aparikh.aipoweredsearch/
+├── search/              # Search domain
+│   ├── SearchController
+│   ├── SearchService
+│   ├── SearchRepository
+│   └── model/          # Search-specific models
+├── indexing/           # Indexing domain
+│   ├── IndexController
+│   ├── IndexService
+│   └── model/         # Indexing-specific models
+├── solr/vectorstore/  # Vector store implementation
+│   ├── SolrVectorStore
+│   └── SolrVectorStoreOptions
+└── config/            # Cross-cutting configuration
+```
+
+## Important Implementation Details
+
+### Solr Client Configuration
+The project uses `HttpSolrClient` (HTTP/1.1) instead of `Http2SolrClient` to avoid Jetty 12.x dependency conflicts. Jetty HTTP/2 modules are explicitly excluded in `build.gradle.kts`.
+
+### Vector Search POST Method
+Vector searches use POST method to avoid "URI too long" errors when sending large embedding arrays (1536 dimensions).
+
+### Observation and Metrics
+The `SolrVectorStore` extends `AbstractObservationVectorStore` for integration with Micrometer:
+- Tracks add/delete operations
+- Monitors similarity search performance
+- Provides metrics for observability platforms
+
+### Chat Memory
+- Conversation ID is hardcoded as "007" in the application
+- PostgreSQL-backed for persistence across restarts
+- Schema auto-initialization enabled via `spring.ai.chat.memory.repository.jdbc.initialize-schema=always`
+
+### Virtual Threads
+The application uses Java virtual threads (`spring.threads.virtual.enabled=true`) for improved concurrency handling.
+
+## Common Issues and Solutions
+
+### "Only DenseVectorField is compatible with Vector Query Parsers"
+If you see this error: `Error from server at http://localhost:8983/solr: only DenseVectorField is compatible with Vector Query Parsers`
+
+**Cause**: The Solr collection doesn't have the proper vector field configuration.
+
+**Solution**:
+1. Restart Docker containers to run the initialization script:
+   ```bash
+   docker-compose down
+   docker-compose up -d
+   ```
+
+2. The `init-solr.sh` script will automatically create collections with proper vector field configuration:
+   - Field type: `knn_vector_1536` (1536 dimensions)
+   - Field name: `vector`
+   - Similarity function: cosine
+   - Algorithm: HNSW
+
+3. Verify the field configuration:
+   ```bash
+   curl "http://localhost:8983/solr/books/schema/fields/vector"
+   ```
+
+4. If using a custom collection name, ensure it's created with the vector field or modify `init-solr.sh` to add your collection name.
+
+### Vector Store Tests Require API Key
+If vector store tests fail with "Cannot invoke EmbeddingResponse.getResults() because embeddingResponse is null":
+- Set valid `OPENAI_API_KEY` environment variable
+- Tests use real embeddings, not mocks
+- Use `./run-vector-tests.sh` helper script
+
+### Jetty HTTP Protocol Violations
+If you see "HTTP protocol violation: Authentication challenge without WWW-Authenticate header":
+- This is a known Jetty 12.x issue with invalid API keys
+- Verify your OpenAI API key is valid
+- The error occurs when Jetty's HTTP/2 client encounters invalid auth
+
+### Filter Expression Syntax
+When creating vector store searches:
+- Use Spring AI filter syntax: `category == 'AI'`
+- NOT Solr syntax: `category:AI`
+- The VectorStore converts expressions internally
+
+### Test Container Port Conflicts
+If Testcontainers fail to start:
+- Ensure Docker Desktop is running
+- Check for port conflicts with existing Solr/PostgreSQL instances
+- Testcontainers uses random ports to avoid conflicts
+
+## Related Documentation
+
+- Spring AI Documentation: https://docs.spring.io/spring-ai/reference/
+- Apache Solr Documentation: https://solr.apache.org/guide/
+- Testcontainers Documentation: https://www.testcontainers.org/
+- OpenAPI/Swagger UI: Available at `/swagger-ui.html` when application is running

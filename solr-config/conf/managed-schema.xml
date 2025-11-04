@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+ Licensed to the Apache Software Foundation (ASF) under one or more
+ contributor license agreements.  See the NOTICE file distributed with
+ this work for additional information regarding copyright ownership.
+ The ASF licenses this file to You under the Apache License, Version 2.0
+ (the "License"); you may not use this file except in compliance with
+ the License.  You may obtain a copy of the License at
+
+     http://www.apache.org/licenses/LICENSE-2.0
+
+ Unless required by applicable law or agreed to in writing, software
+ distributed under the License is distributed on an "AS IS" BASIS,
+ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ See the License for the specific language governing permissions and
+ limitations under the License.
+-->
+
+<schema name="ai-powered-search" version="1.0">
+
+  <!-- FIELD TYPES -->
+
+  <!-- Basic Types -->
+  <fieldType name="string" class="solr.StrField" sortMissingLast="true" docValues="true"/>
+  <fieldType name="strings" class="solr.StrField" sortMissingLast="true" multiValued="true" docValues="true"/>
+  <fieldType name="boolean" class="solr.BoolField" sortMissingLast="true"/>
+  <fieldType name="booleans" class="solr.BoolField" sortMissingLast="true" multiValued="true"/>
+  <fieldType name="pint" class="solr.IntPointField" docValues="true"/>
+  <fieldType name="pints" class="solr.IntPointField" docValues="true" multiValued="true"/>
+  <fieldType name="plong" class="solr.LongPointField" docValues="true"/>
+  <fieldType name="plongs" class="solr.LongPointField" docValues="true" multiValued="true"/>
+  <fieldType name="pfloat" class="solr.FloatPointField" docValues="true"/>
+  <fieldType name="pfloats" class="solr.FloatPointField" docValues="true" multiValued="true"/>
+  <fieldType name="pdouble" class="solr.DoublePointField" docValues="true"/>
+  <fieldType name="pdoubles" class="solr.DoublePointField" docValues="true" multiValued="true"/>
+  <fieldType name="pdate" class="solr.DatePointField" docValues="true"/>
+  <fieldType name="pdates" class="solr.DatePointField" docValues="true" multiValued="true"/>
+
+  <!-- Text Type -->
+  <fieldType name="text_general" class="solr.TextField" positionIncrementGap="100" multiValued="true">
+    <analyzer type="index">
+      <tokenizer class="solr.StandardTokenizerFactory"/>
+      <filter class="solr.StopFilterFactory" ignoreCase="true" words="stopwords.txt"/>
+      <filter class="solr.LowerCaseFilterFactory"/>
+    </analyzer>
+    <analyzer type="query">
+      <tokenizer class="solr.StandardTokenizerFactory"/>
+      <filter class="solr.StopFilterFactory" ignoreCase="true" words="stopwords.txt"/>
+      <filter class="solr.SynonymGraphFilterFactory" synonyms="synonyms.txt" ignoreCase="true" expand="true"/>
+      <filter class="solr.LowerCaseFilterFactory"/>
+    </analyzer>
+  </fieldType>
+
+  <!-- Vector Field Type for KNN search -->
+  <fieldType name="knn_vector_1536" class="solr.DenseVectorField" vectorDimension="1536" similarityFunction="cosine" knnAlgorithm="hnsw"/>
+
+  <!-- Special Types -->
+  <fieldType name="_nest_path_" class="solr.NestPathField"/>
+
+  <!-- CORE FIELDS -->
+
+  <!-- Required Fields -->
+  <field name="id" type="string" indexed="true" stored="true" required="true" multiValued="false"/>
+  <field name="_version_" type="plong" indexed="false" stored="false" docValues="true" multiValued="false"/>
+  <field name="_root_" type="string" indexed="true" stored="false" docValues="false"/>
+  <field name="_nest_path_" type="_nest_path_" indexed="true" stored="false"/>
+
+  <!-- Content Fields -->
+  <field name="content" type="text_general" indexed="true" stored="true"/>
+  <field name="vector" type="knn_vector_1536" indexed="true" stored="true"/>
+
+  <!-- METADATA FIELDS (based on IndexRequest.java) -->
+
+  <!-- String Fields -->
+  <field name="author" type="string" indexed="true" stored="true"/>
+  <field name="category" type="string" indexed="true" stored="true"/>
+  <field name="type" type="string" indexed="true" stored="true"/>
+  <field name="language" type="string" indexed="true" stored="true"/>
+  <field name="size" type="string" indexed="true" stored="true"/>
+  <field name="test" type="string" indexed="true" stored="true"/>
+
+  <!-- Numeric Fields -->
+  <field name="priority" type="pint" indexed="true" stored="true"/>
+  <field name="order" type="pint" indexed="true" stored="true"/>
+  <field name="rating" type="pdouble" indexed="true" stored="true"/>
+
+  <!-- Boolean Field -->
+  <field name="published" type="boolean" indexed="true" stored="true"/>
+
+  <!-- Multi-valued Field -->
+  <field name="tags" type="strings" indexed="true" stored="true" multiValued="true"/>
+
+  <!-- DYNAMIC FIELDS (Fallback for additional metadata) -->
+
+  <dynamicField name="metadata_*" type="text_general" indexed="true" stored="true" multiValued="true"/>
+  <dynamicField name="*_i" type="pint" indexed="true" stored="true"/>
+  <dynamicField name="*_s" type="string" indexed="true" stored="true"/>
+  <dynamicField name="*_l" type="plong" indexed="true" stored="true"/>
+  <dynamicField name="*_txt" type="text_general" indexed="true" stored="true"/>
+  <dynamicField name="*_b" type="boolean" indexed="true" stored="true"/>
+  <dynamicField name="*_d" type="pdouble" indexed="true" stored="true"/>
+
+  <!-- Copy Fields -->
+  <copyField source="content" dest="_text_"/>
+
+  <!-- Default Search Field -->
+  <field name="_text_" type="text_general" indexed="true" stored="false" multiValued="true"/>
+
+  <!-- Unique Key -->
+  <uniqueKey>id</uniqueKey>
+
+</schema>
