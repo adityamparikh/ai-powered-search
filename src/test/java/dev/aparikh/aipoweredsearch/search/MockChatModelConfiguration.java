@@ -12,13 +12,11 @@ import static org.mockito.Mockito.mock;
 public class MockChatModelConfiguration {
 
     @Bean
-    @Primary
     public ChatModel chatModel() {
         return mock(ChatModel.class);
     }
     
     @Bean
-    @Primary
     public ChatClient chatClient() {
         return mock(ChatClient.class);
     }

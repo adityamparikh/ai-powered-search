@@ -1,5 +1,7 @@
 package dev.aparikh.aipoweredsearch.search;
 
+import dev.aparikh.aipoweredsearch.search.model.AskRequest;
+import dev.aparikh.aipoweredsearch.search.model.AskResponse;
 import dev.aparikh.aipoweredsearch.search.model.SearchResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -8,8 +10,11 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import org.springframework.web.bind.annotation.*;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -73,5 +78,28 @@ class SearchController {
                     example = "machine learning frameworks for Java")
             @RequestParam("query") String query) {
         return searchService.semanticSearch(collection, query);
+    }
+
+    @Operation(
+        summary = "Ask a question with RAG (Retrieval-Augmented Generation)",
+        description = "Performs conversational question-answering using RAG. " +
+                "The QuestionAnswerAdvisor automatically retrieves relevant documents from the VectorStore, " +
+                "and Claude AI generates a natural language answer based on the retrieved context. " +
+                "Maintains conversation history for follow-up questions using the conversationId."
+    )
+    @ApiResponses(value = {
+        @ApiResponse(
+            responseCode = "200",
+            description = "Answer generated successfully",
+            content = @Content(mediaType = "application/json", schema = @Schema(implementation = AskResponse.class))
+        ),
+        @ApiResponse(responseCode = "400", description = "Invalid request"),
+        @ApiResponse(responseCode = "500", description = "Internal server error")
+    })
+    @PostMapping("/ask")
+    public AskResponse ask(
+            @Parameter(description = "Question request with optional conversation ID", required = true)
+            @RequestBody AskRequest askRequest) {
+        return searchService.ask(askRequest);
     }
 }

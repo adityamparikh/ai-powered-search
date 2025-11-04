@@ -36,6 +36,9 @@ class SearchServiceTest {
     private ChatClient chatClient;
 
     @Mock
+    private ChatClient ragChatClient;
+
+    @Mock
     private VectorStore vectorStore;
 
     private SearchService searchService;
@@ -65,7 +68,7 @@ class SearchServiceTest {
         Resource systemRes = new ClassPathResource("prompts/system-message.st");
         Resource semanticRes = new ClassPathResource("prompts/semantic-search-system-message.st");
 
-        searchService = new SearchService(systemRes, semanticRes, searchRepository, chatClient, vectorStore);
+        searchService = new SearchService(systemRes, semanticRes, searchRepository, chatClient, ragChatClient, vectorStore);
     }
 
     @Test

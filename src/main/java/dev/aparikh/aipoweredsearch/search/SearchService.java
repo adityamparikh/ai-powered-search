@@ -1,15 +1,13 @@
 package dev.aparikh.aipoweredsearch.search;
 
-import dev.aparikh.aipoweredsearch.search.model.FieldInfo;
-import dev.aparikh.aipoweredsearch.search.model.QueryGenerationResponse;
-import dev.aparikh.aipoweredsearch.search.model.SearchRequest;
-import dev.aparikh.aipoweredsearch.search.model.SearchResponse;
+import dev.aparikh.aipoweredsearch.search.model.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.vectorstore.VectorStore;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Service;
@@ -30,17 +28,20 @@ public class SearchService {
     private final Resource semanticSystemResource;
     private final SearchRepository searchRepository;
     private final ChatClient chatClient;
+    private final ChatClient ragChatClient;
     private final VectorStore vectorStore;
 
     public SearchService(@Value("classpath:/prompts/system-message.st") Resource systemResource,
                          @Value("classpath:/prompts/semantic-search-system-message.st") Resource semanticSystemResource,
                          SearchRepository searchRepository,
-                         ChatClient chatClient,
+                         @Qualifier("searchChatClient") ChatClient chatClient,
+                         @Qualifier("ragChatClient") ChatClient ragChatClient,
                          VectorStore vectorStore) {
         this.systemResource = systemResource;
         this.semanticSystemResource = semanticSystemResource;
         this.searchRepository = searchRepository;
         this.chatClient = chatClient;
+        this.ragChatClient = ragChatClient;
         this.vectorStore = vectorStore;
     }
 
@@ -153,5 +154,50 @@ public class SearchService {
         // Note: Faceting not currently supported in VectorStore similaritySearch
         // Could be enhanced by making a parallel Solr query for facets if needed
         return new SearchResponse(documents, Map.of());
+    }
+
+    /**
+     * Performs conversational question-answering with RAG (Retrieval-Augmented Generation).
+     *
+     * <p>This method:
+     * <ol>
+     *   <li>Uses QuestionAnswerAdvisor to automatically retrieve relevant context from VectorStore</li>
+     *   <li>Passes the question and retrieved context to Claude AI</li>
+     *   <li>Returns a natural language answer based on the indexed documents</li>
+     *   <li>Maintains conversation history for follow-up questions</li>
+     * </ol>
+     * </p>
+     *
+     * <p>Unlike semantic search which returns document matches, this method returns
+     * a conversational answer synthesized from the retrieved documents.</p>
+     *
+     * @param askRequest the question and conversation context
+     * @return conversational answer with source document IDs
+     */
+    public AskResponse ask(AskRequest askRequest) {
+        log.debug("RAG question answering for: {}", askRequest.question());
+
+        String conversationId = askRequest.conversationId() != null ?
+                askRequest.conversationId() : "default";
+
+        // The QuestionAnswerAdvisor automatically:
+        // 1. Searches the VectorStore for relevant documents
+        // 2. Adds them as context to the prompt
+        // 3. Claude generates an answer based on that context
+        String answer = ragChatClient.prompt()
+                .user(askRequest.question())
+                .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, conversationId))
+                .call()
+                .content();
+
+        log.debug("RAG answer generated: {}", answer);
+
+        // Note: We don't have direct access to which documents were retrieved by QuestionAnswerAdvisor
+        // In a production system, you might want to:
+        // 1. Manually retrieve documents first
+        // 2. Pass them to Claude
+        // 3. Return the document IDs as sources
+        // For now, we return an empty sources list
+        return new AskResponse(answer, conversationId, List.of());
     }
 }

@@ -26,6 +26,7 @@ dependencies {
     implementation("org.springframework.ai:spring-ai-openai")
     implementation("org.springframework.ai:spring-ai-starter-model-chat-memory-repository-jdbc")
     implementation("org.springframework.ai:spring-ai-vector-store")
+    implementation("org.springframework.ai:spring-ai-advisors-vector-store")
     implementation("org.postgresql:postgresql")
     implementation("org.apache.solr:solr-solrj:9.9.0") {
         // Exclude Jetty HTTP/2 dependencies to avoid version conflicts

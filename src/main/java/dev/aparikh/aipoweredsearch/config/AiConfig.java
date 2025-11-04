@@ -3,11 +3,14 @@ package dev.aparikh.aipoweredsearch.config;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
 import org.springframework.ai.chat.client.advisor.SimpleLoggerAdvisor;
+import org.springframework.ai.chat.client.advisor.vectorstore.QuestionAnswerAdvisor;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.openai.OpenAiEmbeddingModel;
 import org.springframework.ai.openai.api.OpenAiApi;
+import org.springframework.ai.vectorstore.VectorStore;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.context.annotation.Bean;
@@ -31,7 +34,7 @@ import org.springframework.context.annotation.Configuration;
  * </ul>
  */
 @Configuration
-public class SpringAiConfig {
+public class AiConfig {
 
     /**
      * Creates an OpenAI EmbeddingModel bean.
@@ -68,7 +71,7 @@ public class SpringAiConfig {
     }
 
     /**
-     * Creates a ChatClient bean using the ChatModel.
+     * Creates a ChatClient bean for query generation (without RAG).
      *
      * <p>This bean is used by the SearchService for query generation and conversational search.
      * It must be explicitly defined because Spring AI cannot auto-configure when multiple
@@ -86,9 +89,47 @@ public class SpringAiConfig {
      * @return configured ChatClient instance
      */
     @Bean
+    @Qualifier("searchChatClient")
     public ChatClient chatClient(ChatModel chatModel, ChatMemory chatMemory) {
         return ChatClient.builder(chatModel)
                 .defaultAdvisors(
+                        MessageChatMemoryAdvisor.builder(chatMemory).build(),
+                        SimpleLoggerAdvisor.builder().build()
+                )
+                .build();
+    }
+
+    /**
+     * Creates a RAG-enabled ChatClient bean with QuestionAnswerAdvisor.
+     *
+     * <p>This bean is used for conversational question-answering with retrieval-augmented
+     * generation (RAG). It automatically retrieves relevant context from the VectorStore
+     * and includes it in the conversation.</p>
+     *
+     * <p>The ChatClient is configured with advisors:
+     * <ul>
+     *   <li>QuestionAnswerAdvisor - Retrieves context from VectorStore for RAG</li>
+     *   <li>MessageChatMemoryAdvisor - Maintains conversational context across requests</li>
+     *   <li>SimpleLoggerAdvisor - Logs chat interactions for debugging</li>
+     * </ul>
+     * </p>
+     *
+     * @param chatModel the ChatModel (Anthropic) auto-configured by Spring AI
+     * @param chatMemory the ChatMemory for maintaining conversation history
+     * @param vectorStore the VectorStore for retrieving relevant context
+     * @return configured ChatClient instance with RAG capabilities
+     */
+    @Bean
+    @Qualifier("ragChatClient")
+    public ChatClient ragChatClient(ChatModel chatModel, ChatMemory chatMemory, VectorStore vectorStore) {
+        return ChatClient.builder(chatModel)
+                .defaultAdvisors(
+                        QuestionAnswerAdvisor.builder(vectorStore)
+                                .searchRequest(org.springframework.ai.vectorstore.SearchRequest.builder()
+                                        .topK(5)
+                                        .similarityThreshold(0.7)
+                                        .build())
+                                .build(),
                         MessageChatMemoryAdvisor.builder(chatMemory).build(),
                         SimpleLoggerAdvisor.builder().build()
                 )

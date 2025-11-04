@@ -13,7 +13,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
 @Testcontainers
-@Import({PostgresTestConfiguration.class, MockChatModelConfiguration.class})
+@Import({PostgresTestConfiguration.class})
 @SpringBootTest
 class AiPoweredSearchApplicationTests {
 
