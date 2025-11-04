@@ -1,23 +1,25 @@
 package dev.aparikh.aipoweredsearch.search;
 
-import dev.aparikh.aipoweredsearch.solr.vectorstore.SolrVectorStore;
 import dev.aparikh.aipoweredsearch.search.model.FieldInfo;
 import dev.aparikh.aipoweredsearch.search.model.QueryGenerationResponse;
 import dev.aparikh.aipoweredsearch.search.model.SearchRequest;
 import dev.aparikh.aipoweredsearch.search.model.SearchResponse;
-import org.apache.solr.client.solrj.SolrClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.document.Document;
-import org.springframework.ai.embedding.EmbeddingModel;
+import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Service;
 
-import java.util.*;
-import java.util.stream.Collectors;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+import static org.springframework.ai.vectorstore.SearchRequest.Builder;
+import static org.springframework.ai.vectorstore.SearchRequest.builder;
 
 @Service
 public class SearchService {
@@ -28,21 +30,18 @@ public class SearchService {
     private final Resource semanticSystemResource;
     private final SearchRepository searchRepository;
     private final ChatClient chatClient;
-    private final EmbeddingModel embeddingModel;
-    private final SolrClient solrClient;
+    private final VectorStore vectorStore;
 
     public SearchService(@Value("classpath:/prompts/system-message.st") Resource systemResource,
                          @Value("classpath:/prompts/semantic-search-system-message.st") Resource semanticSystemResource,
                          SearchRepository searchRepository,
                          ChatClient chatClient,
-                         EmbeddingModel embeddingModel,
-                         SolrClient solrClient) {
+                         VectorStore vectorStore) {
         this.systemResource = systemResource;
         this.semanticSystemResource = semanticSystemResource;
         this.searchRepository = searchRepository;
         this.chatClient = chatClient;
-        this.embeddingModel = embeddingModel;
-        this.solrClient = solrClient;
+        this.vectorStore = vectorStore;
     }
 
 
@@ -127,10 +126,7 @@ public class SearchService {
 
         // Step 4: Execute semantic search using VectorStore
         // VectorStore will automatically generate embeddings from the query text
-        SolrVectorStore vectorStore = SolrVectorStore.builder(solrClient, collection, embeddingModel).build();
-
-        org.springframework.ai.vectorstore.SearchRequest.Builder searchRequestBuilder =
-                org.springframework.ai.vectorstore.SearchRequest.builder()
+        Builder searchRequestBuilder = builder()
                         .query(freeTextQuery)
                         .topK(10);
 
@@ -152,7 +148,7 @@ public class SearchService {
                     docMap.putAll(doc.getMetadata());
                     return docMap;
                 })
-                .collect(Collectors.toList());
+                .toList();
 
         // Note: Faceting not currently supported in VectorStore similaritySearch
         // Could be enhanced by making a parallel Solr query for facets if needed

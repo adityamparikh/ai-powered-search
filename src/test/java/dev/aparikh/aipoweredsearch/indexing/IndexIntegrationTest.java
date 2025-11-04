@@ -73,6 +73,7 @@ class IndexIntegrationTest {
         String solrUrl = "http://" + solrContainer.getHost() + ":" + solrContainer.getSolrPort();
         registry.add("solr.url", () -> solrUrl);
         registry.add("spring.ai.openai.api-key", () -> "test-key");
+        registry.add("solr.default.collection", () -> COLLECTION);
     }
 
     private static final String COLLECTION = "test-collection";

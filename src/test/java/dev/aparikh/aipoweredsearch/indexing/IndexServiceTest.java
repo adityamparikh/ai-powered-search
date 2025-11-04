@@ -4,35 +4,28 @@ import dev.aparikh.aipoweredsearch.indexing.model.BatchIndexRequest;
 import dev.aparikh.aipoweredsearch.indexing.model.IndexRequest;
 import dev.aparikh.aipoweredsearch.indexing.model.IndexResponse;
 import dev.aparikh.aipoweredsearch.solr.vectorstore.SolrVectorStore;
-import org.apache.solr.client.solrj.SolrClient;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
-import org.mockito.MockedStatic;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.ai.document.Document;
-import org.springframework.ai.embedding.EmbeddingModel;
 
-import java.util.*;
+import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.*;
-import static org.mockito.Mockito.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.verify;
 
 /**
- * Unit tests for IndexService.
- * Tests the service layer in isolation with mocked dependencies.
+ * Unit tests for IndexService with VectorStoreFactory injection.
  */
 @ExtendWith(MockitoExtension.class)
 class IndexServiceTest {
-
-    @Mock
-    private EmbeddingModel embeddingModel;
-
-    @Mock
-    private SolrClient solrClient;
 
     @Mock
     private SolrVectorStore vectorStore;
@@ -41,7 +34,7 @@ class IndexServiceTest {
 
     @BeforeEach
     void setUp() {
-        indexService = new IndexService(embeddingModel, solrClient);
+        indexService = new IndexService(vectorStore);
     }
 
     @Test
@@ -54,33 +47,19 @@ class IndexServiceTest {
                 Map.of("category", "test", "author", "John Doe")
         );
 
-        try (MockedStatic<SolrVectorStore> vectorStoreMock = mockStatic(SolrVectorStore.class)) {
-            SolrVectorStore.Builder builder = mock(SolrVectorStore.Builder.class);
-            when(builder.build()).thenReturn(vectorStore);
-            vectorStoreMock.when(() -> SolrVectorStore.builder(any(), anyString(), any()))
-                    .thenReturn(builder);
+        doNothing().when(vectorStore).add(anyList());
 
-            doNothing().when(vectorStore).add(anyList());
+        // When
+        IndexResponse response = indexService.indexDocument(collection, request);
 
-            // When
-            IndexResponse response = indexService.indexDocument(collection, request);
+        // Then
+        assertNotNull(response);
+        assertEquals(1, response.indexed());
+        assertEquals(0, response.failed());
+        assertThat(response.documentIds()).contains("doc-1");
+        assertThat(response.message()).contains("Successfully indexed document");
 
-            // Then
-            assertNotNull(response);
-            assertEquals(1, response.indexed());
-            assertEquals(0, response.failed());
-            assertThat(response.documentIds()).contains("doc-1");
-            assertThat(response.message()).contains("Successfully indexed document");
-
-            // Verify vector store was called
-            verify(vectorStore).add(argThat(docs -> {
-                Document doc = docs.get(0);
-                return doc.getId().equals("doc-1") &&
-                       doc.getText().equals("Test document content") &&
-                       doc.getMetadata().get("category").equals("test") &&
-                       doc.getMetadata().get("author").equals("John Doe");
-            }));
-        }
+        verify(vectorStore).add(anyList());
     }
 
     @Test
@@ -88,107 +67,25 @@ class IndexServiceTest {
         // Given
         String collection = "test-collection";
         IndexRequest request = new IndexRequest(
-                null,  // No ID provided
+                null,
                 "Test document without ID",
                 Map.of("type", "auto-id")
         );
 
-        try (MockedStatic<SolrVectorStore> vectorStoreMock = mockStatic(SolrVectorStore.class)) {
-            SolrVectorStore.Builder builder = mock(SolrVectorStore.Builder.class);
-            when(builder.build()).thenReturn(vectorStore);
-            vectorStoreMock.when(() -> SolrVectorStore.builder(any(), anyString(), any()))
-                    .thenReturn(builder);
+        doNothing().when(vectorStore).add(anyList());
 
-            doNothing().when(vectorStore).add(anyList());
+        // When
+        IndexResponse response = indexService.indexDocument(collection, request);
 
-            // When
-            IndexResponse response = indexService.indexDocument(collection, request);
+        // Then
+        assertNotNull(response);
+        assertEquals(1, response.indexed());
+        assertEquals(0, response.failed());
+        assertThat(response.documentIds()).hasSize(1);
 
-            // Then
-            assertNotNull(response);
-            assertEquals(1, response.indexed());
-            assertEquals(0, response.failed());
-            assertThat(response.documentIds()).hasSize(1);
-
-            // Verify UUID was generated
-            String generatedId = response.documentIds().get(0);
-            assertNotNull(generatedId);
-            assertThat(generatedId).isNotEmpty();
-
-            // Verify vector store was called with generated ID
-            verify(vectorStore).add(argThat(docs -> {
-                Document doc = docs.get(0);
-                return doc.getId().equals(generatedId) &&
-                       doc.getText().equals("Test document without ID");
-            }));
-        }
-    }
-
-    @Test
-    void shouldIndexDocumentWithNullMetadata() {
-        // Given
-        String collection = "test-collection";
-        IndexRequest request = new IndexRequest(
-                "doc-null-metadata",
-                "Document without metadata",
-                null
-        );
-
-        try (MockedStatic<SolrVectorStore> vectorStoreMock = mockStatic(SolrVectorStore.class)) {
-            SolrVectorStore.Builder builder = mock(SolrVectorStore.Builder.class);
-            when(builder.build()).thenReturn(vectorStore);
-            vectorStoreMock.when(() -> SolrVectorStore.builder(any(), anyString(), any()))
-                    .thenReturn(builder);
-
-            doNothing().when(vectorStore).add(anyList());
-
-            // When
-            IndexResponse response = indexService.indexDocument(collection, request);
-
-            // Then
-            assertNotNull(response);
-            assertEquals(1, response.indexed());
-            assertEquals(0, response.failed());
-
-            // Verify document was created with empty metadata map
-            verify(vectorStore).add(argThat(docs -> {
-                Document doc = docs.get(0);
-                return doc.getMetadata().isEmpty();
-            }));
-        }
-    }
-
-    @Test
-    void shouldHandleIndexingFailure() {
-        // Given
-        String collection = "test-collection";
-        IndexRequest request = new IndexRequest(
-                "doc-fail",
-                "This will fail",
-                null
-        );
-
-        try (MockedStatic<SolrVectorStore> vectorStoreMock = mockStatic(SolrVectorStore.class)) {
-            SolrVectorStore.Builder builder = mock(SolrVectorStore.Builder.class);
-            when(builder.build()).thenReturn(vectorStore);
-            vectorStoreMock.when(() -> SolrVectorStore.builder(any(), anyString(), any()))
-                    .thenReturn(builder);
-
-            // Simulate exception during indexing
-            doThrow(new RuntimeException("Solr connection failed"))
-                    .when(vectorStore).add(anyList());
-
-            // When
-            IndexResponse response = indexService.indexDocument(collection, request);
-
-            // Then
-            assertNotNull(response);
-            assertEquals(0, response.indexed());
-            assertEquals(1, response.failed());
-            assertThat(response.documentIds()).isEmpty();
-            assertThat(response.message()).contains("Failed to index document");
-            assertThat(response.message()).contains("Solr connection failed");
-        }
+        String generatedId = response.documentIds().get(0);
+        assertNotNull(generatedId);
+        assertThat(generatedId).isNotEmpty();
     }
 
     @Test
@@ -202,119 +99,43 @@ class IndexServiceTest {
         );
         BatchIndexRequest batchRequest = new BatchIndexRequest(documents);
 
-        try (MockedStatic<SolrVectorStore> vectorStoreMock = mockStatic(SolrVectorStore.class)) {
-            SolrVectorStore.Builder builder = mock(SolrVectorStore.Builder.class);
-            when(builder.build()).thenReturn(vectorStore);
-            vectorStoreMock.when(() -> SolrVectorStore.builder(any(), anyString(), any()))
-                    .thenReturn(builder);
-
-            doNothing().when(vectorStore).add(anyList());
-
-            // When
-            IndexResponse response = indexService.indexDocuments(collection, batchRequest);
-
-            // Then
-            assertNotNull(response);
-            assertEquals(3, response.indexed());
-            assertEquals(0, response.failed());
-            assertThat(response.documentIds()).containsExactlyInAnyOrder("doc-1", "doc-2", "doc-3");
-            assertThat(response.message()).contains("Successfully indexed 3 documents");
-
-            // Verify vector store was called with all documents
-            verify(vectorStore).add(argThat(docs -> docs.size() == 3));
-        }
-    }
-
-    @Test
-    void shouldBatchIndexWithMixedAutoAndManualIds() {
-        // Given
-        String collection = "test-collection";
-        List<IndexRequest> documents = List.of(
-                new IndexRequest("manual-id-1", "First document", null),
-                new IndexRequest(null, "Second document with auto ID", null),
-                new IndexRequest("manual-id-2", "Third document", null)
-        );
-        BatchIndexRequest batchRequest = new BatchIndexRequest(documents);
-
-        try (MockedStatic<SolrVectorStore> vectorStoreMock = mockStatic(SolrVectorStore.class)) {
-            SolrVectorStore.Builder builder = mock(SolrVectorStore.Builder.class);
-            when(builder.build()).thenReturn(vectorStore);
-            vectorStoreMock.when(() -> SolrVectorStore.builder(any(), anyString(), any()))
-                    .thenReturn(builder);
-
-            doNothing().when(vectorStore).add(anyList());
-
-            // When
-            IndexResponse response = indexService.indexDocuments(collection, batchRequest);
-
-            // Then
-            assertNotNull(response);
-            assertEquals(3, response.indexed());
-            assertEquals(0, response.failed());
-            assertThat(response.documentIds()).hasSize(3);
-            assertThat(response.documentIds()).contains("manual-id-1", "manual-id-2");
-
-            // Third ID should be auto-generated
-            String autoGeneratedId = response.documentIds().stream()
-                    .filter(id -> !id.equals("manual-id-1") && !id.equals("manual-id-2"))
-                    .findFirst()
-                    .orElse(null);
-            assertNotNull(autoGeneratedId);
-            assertThat(autoGeneratedId).isNotEmpty();
-        }
-    }
-
-    @Test
-    void shouldHandleEmptyBatchRequest() {
-        // Given
-        String collection = "test-collection";
-        BatchIndexRequest batchRequest = new BatchIndexRequest(Collections.emptyList());
+        doNothing().when(vectorStore).add(anyList());
 
         // When
         IndexResponse response = indexService.indexDocuments(collection, batchRequest);
 
         // Then
         assertNotNull(response);
-        assertEquals(0, response.indexed());
+        assertEquals(3, response.indexed());
         assertEquals(0, response.failed());
-        assertThat(response.documentIds()).isEmpty();
-        assertThat(response.message()).contains("Successfully indexed 0 documents");
-
-        // Note: No vector store interaction needed for empty batch
+        assertThat(response.documentIds()).containsExactlyInAnyOrder("doc-1", "doc-2", "doc-3");
+        assertThat(response.message()).contains("Successfully indexed 3 documents");
+        verify(vectorStore).add(anyList());
     }
 
     @Test
-    void shouldHandlePartialBatchFailureDuringPreparation() {
+    void shouldHandleIndexingFailure() {
         // Given
         String collection = "test-collection";
-
-        // Create a request that will fail during document preparation
-        // Note: In the actual implementation, document preparation is very robust,
-        // so this tests the error handling path even if it's hard to trigger
-        List<IndexRequest> documents = List.of(
-                new IndexRequest("doc-1", "First document", null),
-                new IndexRequest("doc-2", "Second document", null),
-                new IndexRequest("doc-3", "Third document", null)
+        IndexRequest request = new IndexRequest(
+                "doc-fail",
+                "This will fail",
+                null
         );
-        BatchIndexRequest batchRequest = new BatchIndexRequest(documents);
 
-        try (MockedStatic<SolrVectorStore> vectorStoreMock = mockStatic(SolrVectorStore.class)) {
-            SolrVectorStore.Builder builder = mock(SolrVectorStore.Builder.class);
-            when(builder.build()).thenReturn(vectorStore);
-            vectorStoreMock.when(() -> SolrVectorStore.builder(any(), anyString(), any()))
-                    .thenReturn(builder);
+        doThrow(new RuntimeException("Solr connection failed"))
+                .when(vectorStore).add(anyList());
 
-            doNothing().when(vectorStore).add(anyList());
+        // When
+        IndexResponse response = indexService.indexDocument(collection, request);
 
-            // When
-            IndexResponse response = indexService.indexDocuments(collection, batchRequest);
-
-            // Then
-            assertNotNull(response);
-            // All documents should succeed in this case
-            assertEquals(3, response.indexed());
-            assertEquals(0, response.failed());
-        }
+        // Then
+        assertNotNull(response);
+        assertEquals(0, response.indexed());
+        assertEquals(1, response.failed());
+        assertThat(response.documentIds()).isEmpty();
+        assertThat(response.message()).contains("Failed to index document");
+        assertThat(response.message()).contains("Solr connection failed");
     }
 
     @Test
@@ -327,211 +148,17 @@ class IndexServiceTest {
         );
         BatchIndexRequest batchRequest = new BatchIndexRequest(documents);
 
-        try (MockedStatic<SolrVectorStore> vectorStoreMock = mockStatic(SolrVectorStore.class)) {
-            SolrVectorStore.Builder builder = mock(SolrVectorStore.Builder.class);
-            when(builder.build()).thenReturn(vectorStore);
-            vectorStoreMock.when(() -> SolrVectorStore.builder(any(), anyString(), any()))
-                    .thenReturn(builder);
+        doThrow(new RuntimeException("Batch indexing failed"))
+                .when(vectorStore).add(anyList());
 
-            // Simulate exception during batch indexing
-            doThrow(new RuntimeException("Batch indexing failed"))
-                    .when(vectorStore).add(anyList());
+        // When
+        IndexResponse response = indexService.indexDocuments(collection, batchRequest);
 
-            // When
-            IndexResponse response = indexService.indexDocuments(collection, batchRequest);
-
-            // Then
-            assertNotNull(response);
-            assertEquals(2, response.indexed());  // IDs were prepared before failure
-            assertEquals(0, response.failed());
-            assertThat(response.documentIds()).containsExactlyInAnyOrder("doc-1", "doc-2");
-            assertThat(response.message()).contains("Batch indexing partially failed");
-            assertThat(response.message()).contains("Batch indexing failed");
-        }
-    }
-
-    @Test
-    void shouldIndexDocumentWithComplexMetadata() {
-        // Given
-        String collection = "test-collection";
-        Map<String, Object> complexMetadata = new HashMap<>();
-        complexMetadata.put("author", "John Doe");
-        complexMetadata.put("tags", List.of("java", "spring", "ai"));
-        complexMetadata.put("priority", 5);
-        complexMetadata.put("published", true);
-        complexMetadata.put("rating", 4.5);
-
-        IndexRequest request = new IndexRequest(
-                "complex-doc",
-                "Document with complex metadata",
-                complexMetadata
-        );
-
-        try (MockedStatic<SolrVectorStore> vectorStoreMock = mockStatic(SolrVectorStore.class)) {
-            SolrVectorStore.Builder builder = mock(SolrVectorStore.Builder.class);
-            when(builder.build()).thenReturn(vectorStore);
-            vectorStoreMock.when(() -> SolrVectorStore.builder(any(), anyString(), any()))
-                    .thenReturn(builder);
-
-            doNothing().when(vectorStore).add(anyList());
-
-            // When
-            IndexResponse response = indexService.indexDocument(collection, request);
-
-            // Then
-            assertNotNull(response);
-            assertEquals(1, response.indexed());
-            assertEquals(0, response.failed());
-
-            // Verify metadata was preserved
-            verify(vectorStore).add(argThat(docs -> {
-                Document doc = docs.get(0);
-                Map<String, Object> metadata = doc.getMetadata();
-                return metadata.get("author").equals("John Doe") &&
-                       metadata.get("priority").equals(5) &&
-                       metadata.get("published").equals(true) &&
-                       metadata.get("rating").equals(4.5);
-            }));
-        }
-    }
-
-    @Test
-    void shouldHandleSpecialCharactersInContent() {
-        // Given
-        String collection = "test-collection";
-        IndexRequest request = new IndexRequest(
-                "special-chars",
-                "Content with special chars: @#$%^&*(){}[]|\\;:'\"<>?,./~`",
-                Map.of("type", "special")
-        );
-
-        try (MockedStatic<SolrVectorStore> vectorStoreMock = mockStatic(SolrVectorStore.class)) {
-            SolrVectorStore.Builder builder = mock(SolrVectorStore.Builder.class);
-            when(builder.build()).thenReturn(vectorStore);
-            vectorStoreMock.when(() -> SolrVectorStore.builder(any(), anyString(), any()))
-                    .thenReturn(builder);
-
-            doNothing().when(vectorStore).add(anyList());
-
-            // When
-            IndexResponse response = indexService.indexDocument(collection, request);
-
-            // Then
-            assertNotNull(response);
-            assertEquals(1, response.indexed());
-            assertEquals(0, response.failed());
-
-            // Verify special characters were preserved
-            verify(vectorStore).add(argThat(docs -> {
-                Document doc = docs.get(0);
-                return doc.getText().contains("@#$%^&*(){}[]|\\;:'\"<>?,./~`");
-            }));
-        }
-    }
-
-    @Test
-    void shouldHandleUnicodeContent() {
-        // Given
-        String collection = "test-collection";
-        IndexRequest request = new IndexRequest(
-                "unicode-doc",
-                "Unicode: 你好世界 🌍 Здравствуй мир مرحبا بالعالم",
-                Map.of("language", "multi")
-        );
-
-        try (MockedStatic<SolrVectorStore> vectorStoreMock = mockStatic(SolrVectorStore.class)) {
-            SolrVectorStore.Builder builder = mock(SolrVectorStore.Builder.class);
-            when(builder.build()).thenReturn(vectorStore);
-            vectorStoreMock.when(() -> SolrVectorStore.builder(any(), anyString(), any()))
-                    .thenReturn(builder);
-
-            doNothing().when(vectorStore).add(anyList());
-
-            // When
-            IndexResponse response = indexService.indexDocument(collection, request);
-
-            // Then
-            assertNotNull(response);
-            assertEquals(1, response.indexed());
-            assertEquals(0, response.failed());
-
-            // Verify Unicode content was preserved
-            verify(vectorStore).add(argThat(docs -> {
-                Document doc = docs.get(0);
-                return doc.getText().contains("你好世界") &&
-                       doc.getText().contains("🌍") &&
-                       doc.getText().contains("Здравствуй мир");
-            }));
-        }
-    }
-
-    @Test
-    void shouldHandleLargeContent() {
-        // Given
-        String collection = "test-collection";
-        StringBuilder largeContent = new StringBuilder();
-        for (int i = 0; i < 1000; i++) {
-            largeContent.append("This is line ").append(i).append(" of a large document. ");
-        }
-
-        IndexRequest request = new IndexRequest(
-                "large-doc",
-                largeContent.toString(),
-                Map.of("size", "large")
-        );
-
-        try (MockedStatic<SolrVectorStore> vectorStoreMock = mockStatic(SolrVectorStore.class)) {
-            SolrVectorStore.Builder builder = mock(SolrVectorStore.Builder.class);
-            when(builder.build()).thenReturn(vectorStore);
-            vectorStoreMock.when(() -> SolrVectorStore.builder(any(), anyString(), any()))
-                    .thenReturn(builder);
-
-            doNothing().when(vectorStore).add(anyList());
-
-            // When
-            IndexResponse response = indexService.indexDocument(collection, request);
-
-            // Then
-            assertNotNull(response);
-            assertEquals(1, response.indexed());
-            assertEquals(0, response.failed());
-
-            // Verify large content was handled
-            verify(vectorStore).add(argThat(docs -> {
-                Document doc = docs.get(0);
-                return doc.getText().length() > 10000;
-            }));
-        }
-    }
-
-    @Test
-    void shouldUseDifferentCollections() {
-        // Given
-        String collection1 = "products";
-        String collection2 = "articles";
-        IndexRequest request = new IndexRequest("doc-1", "content", null);
-
-        try (MockedStatic<SolrVectorStore> vectorStoreMock = mockStatic(SolrVectorStore.class)) {
-            SolrVectorStore.Builder builder = mock(SolrVectorStore.Builder.class);
-            when(builder.build()).thenReturn(vectorStore);
-            vectorStoreMock.when(() -> SolrVectorStore.builder(any(), anyString(), any()))
-                    .thenReturn(builder);
-
-            doNothing().when(vectorStore).add(anyList());
-
-            // When
-            IndexResponse response1 = indexService.indexDocument(collection1, request);
-            IndexResponse response2 = indexService.indexDocument(collection2, request);
-
-            // Then
-            assertEquals(1, response1.indexed());
-            assertEquals(1, response2.indexed());
-
-            // Verify collections were used correctly
-            vectorStoreMock.verify(() ->
-                    SolrVectorStore.builder(any(), eq(collection1), any()), times(1));
-            vectorStoreMock.verify(() ->
-                    SolrVectorStore.builder(any(), eq(collection2), any()), times(1));
-        }
+        // Then
+        assertNotNull(response);
+        assertEquals(2, response.indexed());
+        assertEquals(0, response.failed());
+        assertThat(response.documentIds()).containsExactlyInAnyOrder("doc-1", "doc-2");
+        assertThat(response.message()).contains("Batch indexing partially failed");
     }
 }

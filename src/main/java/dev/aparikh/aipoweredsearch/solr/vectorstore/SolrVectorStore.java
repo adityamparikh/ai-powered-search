@@ -15,14 +15,22 @@ import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.embedding.EmbeddingResponse;
 import org.springframework.ai.vectorstore.AbstractVectorStoreBuilder;
 import org.springframework.ai.vectorstore.SearchRequest;
+import org.springframework.ai.vectorstore.filter.Filter;
 import org.springframework.ai.vectorstore.observation.AbstractObservationVectorStore;
 import org.springframework.ai.vectorstore.observation.VectorStoreObservationContext;
-import org.springframework.ai.vectorstore.filter.Filter;
 import org.springframework.util.Assert;
 
 import java.io.IOException;
-import java.util.*;
-import java.util.stream.Collectors;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.UUID;
+
+import static java.util.stream.Collectors.toList;
 
 /**
  * Apache Solr vector store for Spring AI Document storage and retrieval.
@@ -104,13 +112,13 @@ public class SolrVectorStore extends AbstractObservationVectorStore {
                         Object embedding = doc.getMetadata().get("embedding");
                         return embedding == null || !(embedding instanceof float[]) || ((float[]) embedding).length == 0;
                     })
-                    .collect(Collectors.toList());
+                    .collect(toList());
 
             // Generate embeddings in batch for efficiency
             if (!documentsWithoutEmbeddings.isEmpty()) {
                 List<String> texts = documentsWithoutEmbeddings.stream()
                         .map(Document::getText)
-                        .collect(Collectors.toList());
+                        .collect(toList());
 
                 EmbeddingResponse embeddingResponse = this.embeddingModel.embedForResponse(texts);
 
@@ -130,7 +138,7 @@ public class SolrVectorStore extends AbstractObservationVectorStore {
             // Convert to Solr documents
             List<SolrInputDocument> solrDocs = documents.stream()
                     .map(this::toSolrDocument)
-                    .collect(Collectors.toList());
+                    .collect(toList());
 
             // Add to Solr
             UpdateResponse response = solrClient.add(collection, solrDocs);
@@ -183,7 +191,7 @@ public class SolrVectorStore extends AbstractObservationVectorStore {
                 throw new RuntimeException("Failed to generate embedding for query");
             }
 
-            float[] queryEmbedding = embeddingResponse.getResults().get(0).getOutput();
+            float[] queryEmbedding = embeddingResponse.getResults().getFirst().getOutput();
 
             // Build KNN query
             String vectorString = floatArrayToString(queryEmbedding);
@@ -232,7 +240,7 @@ public class SolrVectorStore extends AbstractObservationVectorStore {
                         }
                         return true;
                     })
-                    .collect(Collectors.toList());
+                    .toList();
         } catch (SolrServerException | IOException e) {
             throw new RuntimeException("Failed to perform similarity search in Solr", e);
         }

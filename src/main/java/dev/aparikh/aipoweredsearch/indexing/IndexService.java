@@ -1,17 +1,20 @@
 package dev.aparikh.aipoweredsearch.indexing;
 
-import dev.aparikh.aipoweredsearch.solr.vectorstore.SolrVectorStore;
 import dev.aparikh.aipoweredsearch.indexing.model.BatchIndexRequest;
 import dev.aparikh.aipoweredsearch.indexing.model.IndexRequest;
 import dev.aparikh.aipoweredsearch.indexing.model.IndexResponse;
-import org.apache.solr.client.solrj.SolrClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.document.Document;
-import org.springframework.ai.embedding.EmbeddingModel;
+import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.stereotype.Service;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 
 /**
  * Service for indexing documents with vector embeddings.
@@ -29,12 +32,10 @@ public class IndexService {
 
     private static final Logger log = LoggerFactory.getLogger(IndexService.class);
 
-    private final EmbeddingModel embeddingModel;
-    private final SolrClient solrClient;
+    private final VectorStore vectorStore;
 
-    public IndexService(EmbeddingModel embeddingModel, SolrClient solrClient) {
-        this.embeddingModel = embeddingModel;
-        this.solrClient = solrClient;
+    public IndexService(VectorStore vectorStore) {
+        this.vectorStore = vectorStore;
     }
 
     /**
@@ -64,7 +65,6 @@ public class IndexService {
                     .build();
 
             // Store in Solr using VectorStore - embeddings generated automatically
-            SolrVectorStore vectorStore = SolrVectorStore.builder(solrClient, collection, embeddingModel).build();
             vectorStore.add(Collections.singletonList(document));
 
             log.info("Successfully indexed document '{}' in collection '{}'", docId, collection);
@@ -129,7 +129,6 @@ public class IndexService {
 
             // Batch store in Solr using VectorStore - embeddings generated automatically
             if (!documents.isEmpty()) {
-                SolrVectorStore vectorStore = SolrVectorStore.builder(solrClient, collection, embeddingModel).build();
                 vectorStore.add(documents);
                 log.info("Successfully indexed {} documents in collection '{}'", documents.size(), collection);
             }
