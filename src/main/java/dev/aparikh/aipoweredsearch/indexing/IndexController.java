@@ -11,11 +11,29 @@ import org.springframework.web.bind.annotation.*;
 /**
  * REST controller for document indexing with vector embeddings.
  *
- * <p>Provides endpoints to:</p>
+ * <p>This controller manages document ingestion into the search system, providing
+ * endpoints for both single and batch document indexing. Each indexed document
+ * is automatically enhanced with vector embeddings for semantic search capabilities.
+ *
+ * <p>Key features:
  * <ul>
- *   <li>Index single documents with automatic embedding generation</li>
- *   <li>Batch index multiple documents for improved performance</li>
+ *   <li>Automatic UUID generation for documents without IDs</li>
+ *   <li>Vector embedding generation using OpenAI's text-embedding-3-small model</li>
+ *   <li>Support for rich metadata including nested objects and arrays</li>
+ *   <li>Efficient batch processing for bulk document ingestion</li>
  * </ul>
+ *
+ * <p>The indexing process:
+ * <ol>
+ *   <li>Document content is validated and normalized</li>
+ *   <li>OpenAI generates a 1536-dimensional embedding vector</li>
+ *   <li>Document and vector are stored in Solr</li>
+ *   <li>Document becomes searchable via both keyword and semantic search</li>
+ * </ol>
+ *
+ * @author Aditya Parikh
+ * @since 1.0.0
+ * @see IndexService
  */
 @RestController
 @RequestMapping("/api/v1/index")
@@ -24,16 +42,39 @@ class IndexController {
 
     private final IndexService indexService;
 
+    /**
+     * Constructs a new IndexController with the specified IndexService.
+     *
+     * @param indexService the service responsible for document indexing operations
+     */
     IndexController(IndexService indexService) {
         this.indexService = indexService;
     }
 
     /**
-     * Indexes a single document with vector embeddings.
+     * Indexes a single document with automatic vector embedding generation.
      *
-     * @param collection   the Solr collection to index into
-     * @param indexRequest the document to index
-     * @return indexing result with document ID
+     * <p>This endpoint accepts a document with content and optional metadata,
+     * generates vector embeddings using OpenAI, and stores both the document
+     * and its vector representation in Solr for hybrid search capabilities.
+     *
+     * <p>Example request body:
+     * <pre>{@code
+     * {
+     *   "id": "doc123",
+     *   "content": "Spring Boot is a framework for building Java applications",
+     *   "metadata": {
+     *     "author": "John Doe",
+     *     "category": "technology",
+     *     "tags": ["java", "spring", "programming"]
+     *   }
+     * }
+     * }</pre>
+     *
+     * @param collection the name of the Solr collection to index into
+     * @param indexRequest the document containing content and optional metadata
+     * @return an {@link IndexResponse} with the document ID and indexing status
+     * @throws IllegalArgumentException if collection or content is null or empty
      */
     @PostMapping("/{collection}")
     @Operation(
@@ -50,11 +91,41 @@ class IndexController {
     }
 
     /**
-     * Indexes multiple documents in batch with vector embeddings.
+     * Indexes multiple documents in batch with automatic vector embedding generation.
      *
-     * @param collection   the Solr collection to index into
-     * @param batchRequest batch of documents to index
-     * @return indexing results with document IDs and status
+     * <p>This endpoint provides efficient bulk indexing by processing multiple
+     * documents in a single request. Each document receives its own embedding
+     * vector, and the entire batch is committed to Solr atomically.
+     *
+     * <p>Benefits over single document indexing:
+     * <ul>
+     *   <li>Reduced network overhead</li>
+     *   <li>Batch embedding generation</li>
+     *   <li>Single Solr commit for all documents</li>
+     *   <li>Better throughput for large datasets</li>
+     * </ul>
+     *
+     * <p>Example request body:
+     * <pre>{@code
+     * {
+     *   "documents": [
+     *     {
+     *       "id": "doc1",
+     *       "content": "First document content",
+     *       "metadata": {"category": "tech"}
+     *     },
+     *     {
+     *       "content": "Second document without ID (auto-generated)",
+     *       "metadata": {"category": "science"}
+     *     }
+     *   ]
+     * }
+     * }</pre>
+     *
+     * @param collection the name of the Solr collection to index into
+     * @param batchRequest the batch containing multiple documents to index
+     * @return an {@link IndexResponse} with document IDs and overall status
+     * @throws IllegalArgumentException if collection is null or batch is empty
      */
     @PostMapping("/{collection}/batch")
     @Operation(

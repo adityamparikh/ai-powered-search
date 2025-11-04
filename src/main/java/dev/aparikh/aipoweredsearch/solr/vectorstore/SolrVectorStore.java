@@ -33,29 +33,64 @@ import java.util.UUID;
 import static java.util.stream.Collectors.toList;
 
 /**
- * Apache Solr vector store for Spring AI Document storage and retrieval.
+ * Apache Solr vector store implementation for Spring AI document storage and retrieval.
  *
- * <p>This class provides vector store functionality using Apache Solr's dense vector search
- * capabilities (Solr 9.0+). It supports:</p>
+ * <p>This class provides a full-featured vector store using Apache Solr's dense vector search
+ * capabilities (Solr 9.0+). It enables semantic search by storing document embeddings
+ * and performing similarity-based retrieval using KNN (K-Nearest Neighbors) algorithms.
+ *
+ * <p>Key features:
  * <ul>
- *   <li>Storing documents with vector embeddings</li>
- *   <li>KNN (K-Nearest Neighbors) similarity search</li>
- *   <li>Metadata filtering with Solr filter queries</li>
- *   <li>Cosine similarity metric</li>
+ *   <li>Automatic embedding generation using OpenAI's text-embedding-3-small model</li>
+ *   <li>HNSW (Hierarchical Navigable Small World) algorithm for efficient similarity search</li>
+ *   <li>Cosine similarity metric for semantic matching</li>
+ *   <li>Metadata filtering with Spring AI filter expressions</li>
+ *   <li>Observability support via Micrometer metrics</li>
+ *   <li>Batch document processing for improved performance</li>
  * </ul>
  *
  * <h3>Solr Schema Requirements:</h3>
  * <p>The Solr collection must have the following fields defined:</p>
- * <pre>
- * &lt;field name="id" type="string" indexed="true" stored="true" required="true"/&gt;
- * &lt;field name="content" type="text_general" indexed="true" stored="true"/&gt;
- * &lt;field name="vector" type="knn_vector_1536" indexed="true" stored="true"/&gt;
+ * <pre>{@code
+ * <field name="id" type="string" indexed="true" stored="true" required="true"/>
+ * <field name="content" type="text_general" indexed="true" stored="true"/>
+ * <field name="vector" type="knn_vector_1536" indexed="true" stored="true"/>
  *
- * &lt;fieldType name="knn_vector_1536" class="solr.DenseVectorField"
- *            vectorDimension="1536" similarityFunction="cosine"/&gt;
- * </pre>
+ * <fieldType name="knn_vector_1536" class="solr.DenseVectorField"
+ *            vectorDimension="1536"
+ *            similarityFunction="cosine"
+ *            knnAlgorithm="hnsw"/>
+ * }</pre>
  *
- * <p>Metadata fields are stored with the prefix "metadata_".</p>
+ * <p>Metadata fields are stored with the prefix "metadata_" and support dynamic field types.
+ *
+ * <h3>Usage Example:</h3>
+ * <pre>{@code
+ * SolrVectorStore vectorStore = SolrVectorStore.builder(solrClient, "products", embeddingModel)
+ *     .options(SolrVectorStoreOptions.defaults())
+ *     .build();
+ *
+ * // Add documents
+ * Document doc = Document.builder()
+ *     .id("prod-123")
+ *     .text("High-performance running shoes with cushioned sole")
+ *     .metadata(Map.of("category", "footwear", "price", 99.99))
+ *     .build();
+ * vectorStore.add(List.of(doc));
+ *
+ * // Semantic search
+ * SearchRequest request = SearchRequest.builder()
+ *     .query("comfortable athletic shoes")
+ *     .topK(10)
+ *     .filterExpression("price < 150")
+ *     .build();
+ * List<Document> results = vectorStore.similaritySearch(request);
+ * }</pre>
+ *
+ * @author Aditya Parikh
+ * @since 1.0.0
+ * @see AbstractObservationVectorStore
+ * @see SolrVectorStoreOptions
  */
 public class SolrVectorStore extends AbstractObservationVectorStore {
 

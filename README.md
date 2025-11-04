@@ -413,6 +413,65 @@ The project has comprehensive test coverage across three levels:
 - Embedding generation and storage
 - Similarity search validation
 
+## 📊 Code Quality & Automation
+
+### SonarQube Integration
+
+The project includes SonarQube integration for continuous code quality monitoring:
+
+```bash
+# Run SonarQube analysis
+./gradlew sonarqube \
+  -Dsonar.host.url=http://localhost:9000 \
+  -Dsonar.token=your-token
+```
+
+**Quality Metrics Tracked:**
+- Code coverage (via JaCoCo)
+- Code smells and technical debt
+- Security vulnerabilities
+- Maintainability rating
+- Reliability rating
+
+### JaCoCo Code Coverage
+
+Code coverage reports are automatically generated:
+
+```bash
+# Run tests with coverage
+./gradlew test jacocoTestReport
+
+# View coverage report
+open build/reports/jacoco/test/html/index.html
+```
+
+### Claude AI PR Reviews
+
+Pull requests are automatically reviewed by Claude AI for:
+
+- **Code Quality**: Clean code principles, SOLID compliance, design patterns
+- **Security**: OWASP Top 10, injection vulnerabilities, authentication issues
+- **Performance**: Algorithm efficiency, query optimization, resource management
+- **Spring Boot**: Best practices, RESTful design, configuration patterns
+- **AI/ML**: Prompt engineering, vector store efficiency, RAG implementation
+
+See [Claude PR Review Documentation](docs/CLAUDE_PR_REVIEW.md) for setup and configuration.
+
+### Comprehensive Javadocs
+
+All public classes and methods include detailed Javadocs with:
+- Purpose and functionality description
+- Parameter documentation
+- Return value documentation
+- Usage examples
+- Cross-references to related classes
+
+Generate Javadoc HTML:
+```bash
+./gradlew javadoc
+open build/docs/javadoc/index.html
+```
+
 ## 🔧 Configuration
 
 ### Application Properties

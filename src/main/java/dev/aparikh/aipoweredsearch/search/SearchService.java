@@ -19,6 +19,29 @@ import java.util.Map;
 import static org.springframework.ai.vectorstore.SearchRequest.Builder;
 import static org.springframework.ai.vectorstore.SearchRequest.builder;
 
+/**
+ * Service layer for AI-enhanced search operations.
+ *
+ * <p>This service orchestrates various search strategies including:
+ * <ul>
+ *   <li>Traditional keyword search with AI-powered query generation</li>
+ *   <li>Semantic vector search using embeddings and similarity matching</li>
+ *   <li>RAG-based conversational question answering</li>
+ * </ul>
+ *
+ * <p>The service integrates multiple AI models and search backends:
+ * <ul>
+ *   <li>Claude AI (Anthropic) for natural language understanding and response generation</li>
+ *   <li>OpenAI embeddings for vector similarity search</li>
+ *   <li>Apache Solr for both traditional and vector-based search</li>
+ *   <li>PostgreSQL for conversation history persistence</li>
+ * </ul>
+ *
+ * @author Aditya Parikh
+ * @since 1.0.0
+ * @see SearchRepository
+ * @see SearchController
+ */
 @Service
 public class SearchService {
 
@@ -31,6 +54,16 @@ public class SearchService {
     private final ChatClient ragChatClient;
     private final VectorStore vectorStore;
 
+    /**
+     * Constructs a new SearchService with required dependencies.
+     *
+     * @param systemResource the system prompt template for traditional search query generation
+     * @param semanticSystemResource the system prompt template for semantic search filter parsing
+     * @param searchRepository the repository for low-level Solr operations
+     * @param chatClient the ChatClient configured for search query generation
+     * @param ragChatClient the ChatClient configured with QuestionAnswerAdvisor for RAG
+     * @param vectorStore the VectorStore implementation (SolrVectorStore) for semantic search
+     */
     public SearchService(@Value("classpath:/prompts/system-message.st") Resource systemResource,
                          @Value("classpath:/prompts/semantic-search-system-message.st") Resource semanticSystemResource,
                          SearchRepository searchRepository,
@@ -46,6 +79,31 @@ public class SearchService {
     }
 
 
+    /**
+     * Performs AI-enhanced traditional search on a Solr collection.
+     *
+     * <p>This method uses Claude AI to intelligently parse natural language queries
+     * and generate optimized Solr search parameters including:
+     * <ul>
+     *   <li>Query terms (q parameter)</li>
+     *   <li>Filter queries (fq parameter) for refinement</li>
+     *   <li>Sorting criteria</li>
+     *   <li>Field list for response</li>
+     *   <li>Faceting parameters for aggregation</li>
+     * </ul>
+     *
+     * <p>Example queries that Claude can understand:
+     * <ul>
+     *   <li>"find all Java books published after 2020, sorted by date"</li>
+     *   <li>"search for spring framework tutorials with code examples"</li>
+     *   <li>"show me electronics under $500, group by brand"</li>
+     * </ul>
+     *
+     * @param collection the name of the Solr collection to search
+     * @param freeTextQuery the natural language search query
+     * @return a {@link SearchResponse} containing matched documents and facets
+     * @throws IllegalArgumentException if collection or query is null or empty
+     */
     public SearchResponse search(String collection, String freeTextQuery) {
         log.debug("Searching for collection: {}, query: {}", collection, freeTextQuery);
 

@@ -2,6 +2,8 @@ plugins {
     java
     id("org.springframework.boot") version "3.5.7"
     id("io.spring.dependency-management") version "1.1.7"
+    id("org.sonarqube") version "5.1.0.4882"
+    jacoco
 }
 
 group = "dev.aparikh"
@@ -66,4 +68,37 @@ dependencyManagement {
 
 tasks.withType<Test> {
     useJUnitPlatform()
+    finalizedBy(tasks.jacocoTestReport)
+}
+
+// JaCoCo configuration for code coverage
+jacoco {
+    toolVersion = "0.8.12"
+}
+
+tasks.jacocoTestReport {
+    dependsOn(tasks.test)
+    reports {
+        xml.required.set(true)
+        html.required.set(true)
+        csv.required.set(false)
+    }
+}
+
+// SonarQube configuration
+sonar {
+    properties {
+        property("sonar.projectKey", "ai-powered-search")
+        property("sonar.projectName", "AI Powered Search")
+        property("sonar.host.url", System.getenv("SONAR_HOST_URL") ?: "http://localhost:9000")
+        property("sonar.token", System.getenv("SONAR_TOKEN") ?: "")
+        property("sonar.java.source", "25")
+        property("sonar.java.target", "25")
+        property("sonar.sources", "src/main/java")
+        property("sonar.tests", "src/test/java")
+        property("sonar.java.binaries", "build/classes/java/main")
+        property("sonar.java.test.binaries", "build/classes/java/test")
+        property("sonar.coverage.jacoco.xmlReportPaths", "build/reports/jacoco/test/jacocoTestReport.xml")
+        property("sonar.exclusions", "**/*Application.java,**/*Config.java,**/model/**,**/dto/**")
+    }
 }
