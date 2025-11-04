@@ -20,7 +20,7 @@ import org.testcontainers.utility.DockerImageName;
 public abstract class SolrTestBase {
 
     @Container
-    protected static final SolrContainer solrContainer = new SolrContainer(DockerImageName.parse("solr:9.6"))
+    protected static final SolrContainer solrContainer = new SolrContainer(DockerImageName.parse("solr:slim"))
             .withEnv("SOLR_HEAP", "512m");
 
     @DynamicPropertySource

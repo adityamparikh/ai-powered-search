@@ -1,6 +1,7 @@
 package dev.aparikh.aipoweredsearch;
 
 import dev.aparikh.aipoweredsearch.config.PostgresTestConfiguration;
+import dev.aparikh.aipoweredsearch.config.SolrTestConfiguration;
 import dev.aparikh.aipoweredsearch.search.MockChatModelConfiguration;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -13,18 +14,13 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
 @Testcontainers
-@Import({PostgresTestConfiguration.class})
+@Import({PostgresTestConfiguration.class, SolrTestConfiguration.class})
 @SpringBootTest
 class AiPoweredSearchApplicationTests {
 
-    @Container
-    static final SolrContainer solrContainer = new SolrContainer(DockerImageName.parse("solr:9.6"))
-            .withEnv("SOLR_HEAP", "512m");
 
     @DynamicPropertySource
     static void configureSolrProperties(DynamicPropertyRegistry registry) {
-        String solrUrl = "http://" + solrContainer.getHost() + ":" + solrContainer.getSolrPort();
-        registry.add("solr.url", () -> solrUrl);
         registry.add("spring.ai.openai.api-key", () -> "test-key");
     }
 

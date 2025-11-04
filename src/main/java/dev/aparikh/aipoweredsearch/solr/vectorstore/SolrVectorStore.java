@@ -294,10 +294,14 @@ public class SolrVectorStore extends AbstractObservationVectorStore {
 
     /**
      * Returns the native Solr client.
+     *
+     * @param <T> the type of the native client
+     * @return an Optional containing the SolrClient instance
      */
     @Override
-    public Optional<Object> getNativeClient() {
-        return Optional.of(this.solrClient);
+    @SuppressWarnings("unchecked")
+    public <T> Optional<T> getNativeClient() {
+        return (Optional<T>) Optional.of(this.solrClient);
     }
 
     private void initializeSchema() {

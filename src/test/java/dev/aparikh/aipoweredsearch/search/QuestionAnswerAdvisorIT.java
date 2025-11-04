@@ -2,6 +2,7 @@ package dev.aparikh.aipoweredsearch.search;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import dev.aparikh.aipoweredsearch.config.PostgresTestConfiguration;
+import dev.aparikh.aipoweredsearch.config.SolrTestConfiguration;
 import org.apache.solr.client.solrj.SolrClient;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
@@ -55,12 +56,15 @@ import static org.assertj.core.api.Assertions.assertThat;
         }
 )
 @Testcontainers
-@Import({PostgresTestConfiguration.class})
+@Import({PostgresTestConfiguration.class, SolrTestConfiguration.class})
 @EnabledIfEnvironmentVariables({
         @EnabledIfEnvironmentVariable(named = "ANTHROPIC_API_KEY", matches = ".*"),
         @EnabledIfEnvironmentVariable(named = "OPENAI_API_KEY", matches = ".*")
 })
 class QuestionAnswerAdvisorIT {
+
+    @Autowired
+    SolrContainer solrContainer;
 
     @Autowired
     @Qualifier("ragChatClient")
@@ -72,14 +76,8 @@ class QuestionAnswerAdvisorIT {
     @Autowired
     private SolrClient solrClient;
 
-    @Container
-    static final SolrContainer solrContainer = new SolrContainer(DockerImageName.parse("solr:9.6"))
-            .withEnv("SOLR_HEAP", "512m");
-
     @DynamicPropertySource
     static void configureSolrProperties(DynamicPropertyRegistry registry) {
-        String solrUrl = "http://" + solrContainer.getHost() + ":" + solrContainer.getSolrPort();
-        registry.add("solr.url", () -> solrUrl);
         registry.add("solr.default.collection", () -> COLLECTION);
     }
 

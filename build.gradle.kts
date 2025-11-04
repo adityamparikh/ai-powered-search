@@ -11,7 +11,7 @@ version = "0.0.1-SNAPSHOT"
 
 java {
     toolchain {
-        languageVersion = JavaLanguageVersion.of(25)
+        languageVersion = JavaLanguageVersion.of(21)
     }
 }
 
@@ -30,20 +30,12 @@ dependencies {
     implementation("org.springframework.ai:spring-ai-vector-store")
     implementation("org.springframework.ai:spring-ai-advisors-vector-store")
     implementation("org.postgresql:postgresql")
-    implementation("org.apache.solr:solr-solrj:9.9.0") {
-        // Exclude Jetty HTTP/2 dependencies to avoid version conflicts
-        // We use HttpSolrClient (HTTP/1.1) instead of Http2SolrClient
-        exclude(group = "org.eclipse.jetty.http2", module = "http2-client")
-        exclude(group = "org.eclipse.jetty.http2", module = "http2-http-client-transport")
-    }
+    // Apache Solr client with HTTP/2 support
+    // Let Solr bring in its own Jetty HTTP/2 dependencies transitively
+    implementation("org.apache.solr:solr-solrj:9.9.0")
 
     // Swagger UI / OpenAPI documentation
     implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:2.4.0")
-
-    // Apache HttpComponents dependencies for HttpSolrClient
-    implementation("org.apache.httpcomponents:httpclient:4.5.13")
-    implementation("org.apache.httpcomponents:httpcore:4.4.9")
-    implementation("org.apache.httpcomponents:httpmime:4.5.13")
 
     // Additional Solr dependencies
     implementation("commons-io:commons-io:2.15.1")
@@ -71,6 +63,10 @@ tasks.withType<Test> {
     finalizedBy(tasks.jacocoTestReport)
 }
 
+tasks.withType<JavaCompile> {
+    options.compilerArgs.addAll(listOf("-Xlint:all", "-Xlint:-processing"))
+}
+
 // JaCoCo configuration for code coverage
 jacoco {
     toolVersion = "0.8.12"
@@ -92,8 +88,8 @@ sonar {
         property("sonar.projectName", "AI Powered Search")
         property("sonar.host.url", System.getenv("SONAR_HOST_URL") ?: "http://localhost:9000")
         property("sonar.token", System.getenv("SONAR_TOKEN") ?: "")
-        property("sonar.java.source", "25")
-        property("sonar.java.target", "25")
+        property("sonar.java.source", "21")
+        property("sonar.java.target", "21")
         property("sonar.sources", "src/main/java")
         property("sonar.tests", "src/test/java")
         property("sonar.java.binaries", "build/classes/java/main")

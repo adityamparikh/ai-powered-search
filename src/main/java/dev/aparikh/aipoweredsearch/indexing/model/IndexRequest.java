@@ -16,7 +16,7 @@ public record IndexRequest(
         @Schema(description = "Unique document identifier (auto-generated if not provided)", example = "doc-001")
         String id,
 
-        @Schema(description = "Text content to be embedded and indexed", example = "Spring Boot is a powerful framework for building Java applications", required = true)
+        @Schema(description = "Text content to be embedded and indexed", example = "Spring Boot is a powerful framework for building Java applications", requiredMode = Schema.RequiredMode.REQUIRED)
         String content,
 
         @Schema(description = "Additional metadata fields", example = "{\"category\": \"framework\", \"tags\": [\"java\", \"spring\"]}")

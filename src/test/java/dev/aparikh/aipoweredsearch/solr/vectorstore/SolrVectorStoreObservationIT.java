@@ -39,7 +39,7 @@ class SolrVectorStoreObservationIT {
 
     @Container
     private static final SolrContainer solrContainer = new SolrContainer(
-            DockerImageName.parse("solr:9.7.0"));
+            DockerImageName.parse("solr:slim"));
 
     private static final String COLLECTION_NAME = "test_collection";
 
@@ -314,13 +314,6 @@ class SolrVectorStoreObservationIT {
         @Bean
         public TestObservationRegistry observationRegistry() {
             return TestObservationRegistry.create();
-        }
-
-        @Bean
-        public SolrClient solrClient() {
-            // Base Solr URL without collection - collection is specified separately in VectorStore.builder()
-            String solrUrl = "http://" + solrContainer.getHost() + ":" + solrContainer.getSolrPort() + "/solr";
-            return new org.apache.solr.client.solrj.impl.HttpSolrClient.Builder(solrUrl).build();
         }
 
         @Bean

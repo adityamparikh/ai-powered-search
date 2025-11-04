@@ -171,7 +171,7 @@ rate_limit:
 custom_prompts:
   # Additional context about the project
   project_context: |
-    This is an AI-powered search application using Spring Boot 3.5.7 and Java 25.
+    This is an AI-powered search application using Spring Boot 3.5.7 and Java 21 LTS.
     It integrates Apache Solr for search, Anthropic Claude for AI, and OpenAI for embeddings.
     The application follows package-by-feature architecture and uses Spring AI for LLM integration.
 

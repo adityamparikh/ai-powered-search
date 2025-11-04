@@ -56,6 +56,18 @@ class SearchController {
         this.searchService = searchService;
     }
 
+    /**
+     * Performs an AI-enhanced keyword search on the specified Solr collection.
+     *
+     * <p>This method uses Claude AI to transform the natural language query into
+     * an optimized Solr query with appropriate filters, facets, and sorting parameters.
+     * The AI understands search intent and generates structured queries accordingly.
+     *
+     * @param collection the name of the Solr collection to search
+     * @param query the natural language search query (e.g., "find Java books published after 2020")
+     * @return a {@link SearchResponse} containing matched documents and metadata
+     * @throws IllegalArgumentException if collection or query is null or empty
+     */
     @Operation(
         summary = "Search documents in a collection",
         description = "Performs an AI-enhanced keyword search on the specified collection using the provided query"
@@ -70,18 +82,6 @@ class SearchController {
         @ApiResponse(responseCode = "404", description = "Collection not found"),
         @ApiResponse(responseCode = "500", description = "Internal server error")
     })
-    /**
-     * Performs an AI-enhanced keyword search on the specified Solr collection.
-     *
-     * <p>This method uses Claude AI to transform the natural language query into
-     * an optimized Solr query with appropriate filters, facets, and sorting parameters.
-     * The AI understands search intent and generates structured queries accordingly.
-     *
-     * @param collection the name of the Solr collection to search
-     * @param query the natural language search query (e.g., "find Java books published after 2020")
-     * @return a {@link SearchResponse} containing matched documents and metadata
-     * @throws IllegalArgumentException if collection or query is null or empty
-     */
     @GetMapping("/{collection}")
     public SearchResponse search(
             @Parameter(description = "Collection name to search in", required = true)
@@ -91,23 +91,6 @@ class SearchController {
         return searchService.search(collection, query);
     }
 
-    @Operation(
-        summary = "Semantic search using vector similarity",
-        description = "Performs semantic search on the specified collection using vector embeddings. " +
-                "The query is converted to a 1536-dimensional vector using OpenAI embeddings, " +
-                "and Solr's KNN (K-Nearest Neighbors) search finds semantically similar documents. " +
-                "Natural language filters are parsed by Claude AI and applied to refine results."
-    )
-    @ApiResponses(value = {
-        @ApiResponse(
-            responseCode = "200",
-            description = "Semantic search completed successfully",
-            content = @Content(mediaType = "application/json", schema = @Schema(implementation = SearchResponse.class))
-        ),
-        @ApiResponse(responseCode = "400", description = "Invalid collection or query parameters"),
-        @ApiResponse(responseCode = "404", description = "Collection not found"),
-        @ApiResponse(responseCode = "500", description = "Internal server error")
-    })
     /**
      * Performs semantic search using vector embeddings for similarity matching.
      *
@@ -126,6 +109,23 @@ class SearchController {
      * @return a {@link SearchResponse} containing semantically similar documents with similarity scores
      * @throws IllegalArgumentException if collection or query is null or empty
      */
+    @Operation(
+        summary = "Semantic search using vector similarity",
+        description = "Performs semantic search on the specified collection using vector embeddings. " +
+                "The query is converted to a 1536-dimensional vector using OpenAI embeddings, " +
+                "and Solr's KNN (K-Nearest Neighbors) search finds semantically similar documents. " +
+                "Natural language filters are parsed by Claude AI and applied to refine results."
+    )
+    @ApiResponses(value = {
+        @ApiResponse(
+            responseCode = "200",
+            description = "Semantic search completed successfully",
+            content = @Content(mediaType = "application/json", schema = @Schema(implementation = SearchResponse.class))
+        ),
+        @ApiResponse(responseCode = "400", description = "Invalid collection or query parameters"),
+        @ApiResponse(responseCode = "404", description = "Collection not found"),
+        @ApiResponse(responseCode = "500", description = "Internal server error")
+    })
     @GetMapping("/{collection}/semantic")
     public SearchResponse semanticSearch(
             @Parameter(description = "Collection name to search in", required = true, example = "products")
@@ -136,22 +136,6 @@ class SearchController {
         return searchService.semanticSearch(collection, query);
     }
 
-    @Operation(
-        summary = "Ask a question with RAG (Retrieval-Augmented Generation)",
-        description = "Performs conversational question-answering using RAG. " +
-                "The QuestionAnswerAdvisor automatically retrieves relevant documents from the VectorStore, " +
-                "and Claude AI generates a natural language answer based on the retrieved context. " +
-                "Maintains conversation history for follow-up questions using the conversationId."
-    )
-    @ApiResponses(value = {
-        @ApiResponse(
-            responseCode = "200",
-            description = "Answer generated successfully",
-            content = @Content(mediaType = "application/json", schema = @Schema(implementation = AskResponse.class))
-        ),
-        @ApiResponse(responseCode = "400", description = "Invalid request"),
-        @ApiResponse(responseCode = "500", description = "Internal server error")
-    })
     /**
      * Performs conversational question-answering using RAG (Retrieval-Augmented Generation).
      *
@@ -172,7 +156,23 @@ class SearchController {
      * @return an {@link AskResponse} with the generated answer and conversation metadata
      * @throws IllegalArgumentException if the question is null or empty
      */
-    @PostMapping("/{collection}/ask")
+    @Operation(
+        summary = "Ask a question with RAG (Retrieval-Augmented Generation)",
+        description = "Performs conversational question-answering using RAG. " +
+                "The QuestionAnswerAdvisor automatically retrieves relevant documents from the VectorStore, " +
+                "and Claude AI generates a natural language answer based on the retrieved context. " +
+                "Maintains conversation history for follow-up questions using the conversationId."
+    )
+    @ApiResponses(value = {
+        @ApiResponse(
+            responseCode = "200",
+            description = "Answer generated successfully",
+            content = @Content(mediaType = "application/json", schema = @Schema(implementation = AskResponse.class))
+        ),
+        @ApiResponse(responseCode = "400", description = "Invalid request"),
+        @ApiResponse(responseCode = "500", description = "Internal server error")
+    })
+    @PostMapping("/ask")
     public AskResponse ask(
             @Parameter(description = "Question request with optional conversation ID", required = true)
             @RequestBody AskRequest askRequest) {

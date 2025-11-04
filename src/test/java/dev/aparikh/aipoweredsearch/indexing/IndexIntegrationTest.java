@@ -1,6 +1,7 @@
 package dev.aparikh.aipoweredsearch.indexing;
 
 import dev.aparikh.aipoweredsearch.config.PostgresTestConfiguration;
+import dev.aparikh.aipoweredsearch.config.SolrTestConfiguration;
 import dev.aparikh.aipoweredsearch.indexing.model.BatchIndexRequest;
 import dev.aparikh.aipoweredsearch.indexing.model.IndexRequest;
 import dev.aparikh.aipoweredsearch.indexing.model.IndexResponse;
@@ -46,8 +47,11 @@ import static org.mockito.Mockito.when;
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @Testcontainers
-@Import(PostgresTestConfiguration.class)
+@Import({PostgresTestConfiguration.class, SolrTestConfiguration.class})
 class IndexIntegrationTest {
+
+    @Autowired
+    SolrContainer solrContainer;
 
     @MockitoBean
     private ChatModel chatModel;
@@ -64,14 +68,8 @@ class IndexIntegrationTest {
     @Autowired
     private SolrClient solrClient;
 
-    @Container
-    static final SolrContainer solrContainer = new SolrContainer(DockerImageName.parse("solr:9.6"))
-            .withEnv("SOLR_HEAP", "512m");
-
     @DynamicPropertySource
     static void configureSolrProperties(DynamicPropertyRegistry registry) {
-        String solrUrl = "http://" + solrContainer.getHost() + ":" + solrContainer.getSolrPort();
-        registry.add("solr.url", () -> solrUrl);
         registry.add("spring.ai.openai.api-key", () -> "test-key");
         registry.add("solr.default.collection", () -> COLLECTION);
     }
@@ -80,9 +78,6 @@ class IndexIntegrationTest {
 
     @BeforeEach
     void setUp() throws Exception {
-        System.out.println("Solr Container Host: " + solrContainer.getHost());
-        System.out.println("Solr Container Port: " + solrContainer.getSolrPort());
-        System.out.println("Solr Container Running: " + solrContainer.isRunning());
 
         // Create collection if it doesn't exist
         try {

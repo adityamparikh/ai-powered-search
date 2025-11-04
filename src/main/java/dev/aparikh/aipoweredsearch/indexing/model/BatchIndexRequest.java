@@ -11,7 +11,7 @@ import java.util.List;
  */
 @Schema(description = "Request to index multiple documents in batch with vector embeddings")
 public record BatchIndexRequest(
-        @Schema(description = "List of documents to index", required = true)
+        @Schema(description = "List of documents to index", requiredMode = Schema.RequiredMode.REQUIRED)
         List<IndexRequest> documents
 ) {
 }
