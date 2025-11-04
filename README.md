@@ -1,29 +1,94 @@
 # AI-Powered Search
 
-An intelligent search application that combines Apache Solr's powerful search capabilities with Anthropic Claude AI to transform natural language queries into structured search requests. Built with Spring Boot 3.5.4 and Java 21.
+An intelligent search application that combines Apache Solr's powerful search capabilities with AI-driven semantic search and intelligent query generation. Built with Spring Boot 3.5.7, Spring AI, and Java 21.
 
 ## 🚀 Features
 
-- **AI-Enhanced Query Processing**: Converts free-text queries into structured Solr queries using Anthropic Claude
-- **Conversational Search**: Maintains chat memory for context-aware search interactions
-- **Apache Solr Integration**: Leverages Solr's advanced search and faceting capabilities
+### Core Capabilities
+
+- **Semantic Vector Search**: Find documents by meaning using OpenAI embeddings (text-embedding-3-small)
+- **Keyword Search**: Traditional full-text search with AI-enhanced query generation
+- **Hybrid Search**: Combine semantic similarity with keyword filters for precise results
+- **AI-Enhanced Queries**: Anthropic Claude (claude-sonnet-4-5) transforms natural language into structured Solr queries
+- **Conversational Context**: Maintains chat memory for context-aware search interactions
+- **Auto-Indexing**: Automatic embedding generation during document indexing
+- **Batch Operations**: Efficient batch indexing with optimized embedding generation
+
+### Technical Features
+
+- **Production-Ready**: Comprehensive test coverage with unit, integration, and vector store tests
+- **Type-Safe Schema**: Explicitly typed metadata fields (strings, integers, doubles, booleans, arrays)
+- **SolrCloud**: Distributed Solr with ZooKeeper coordination
+- **Vector Similarity**: HNSW algorithm with cosine similarity for fast approximate KNN search
 - **RESTful API**: Clean REST endpoints with OpenAPI documentation
-- **Production Ready**: Comprehensive test coverage with integration tests using Testcontainers
+- **Virtual Threads**: Leverages Java 21 virtual threads for improved concurrency
 
 ## 🏗️ Architecture
 
-- **Search Service**: Converts natural language queries into structured Solr queries using Claude AI
-- **Search Repository**: Handles Solr interactions and query execution
-- **Chat Memory**: PostgreSQL-backed conversational context with conversation ID "007"
-- **API Layer**: RESTful endpoints with comprehensive OpenAPI documentation
+### System Overview
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        Client Application                        │
+└───────────────┬─────────────────────────┬──────────────────────┘
+                │                         │
+        Indexing API              Search API
+                │                         │
+    ┌───────────▼──────────┐   ┌─────────▼────────────┐
+    │  IndexController     │   │  SearchController    │
+    │  - Single document   │   │  - Semantic search   │
+    │  - Batch indexing    │   │  - Keyword search    │
+    └───────────┬──────────┘   └─────────┬────────────┘
+                │                        │
+    ┌───────────▼──────────┐   ┌─────────▼────────────┐
+    │   IndexService       │   │   SearchService      │
+    │  - Auto embeddings   │   │  - Query generation  │
+    └───────────┬──────────┘   └─────────┬────────────┘
+                │                        │
+                │              ┌─────────▼────────────┐
+                │              │  SearchRepository    │
+                │              │  - Schema retrieval  │
+                │              └─────────┬────────────┘
+                │                        │
+    ┌───────────▼────────────────────────▼────────────┐
+    │           SolrVectorStore (Spring AI)           │
+    │  - Embedding integration                        │
+    │  - Vector similarity search                     │
+    │  - Document persistence                         │
+    └───────────┬─────────────────────────────────────┘
+                │
+    ┌───────────▼──────────┐   ┌──────────────────────┐
+    │  OpenAI Embeddings   │   │  Anthropic Claude    │
+    │  text-embedding-3-   │   │  claude-sonnet-4-5   │
+    │  small (1536-dim)    │   │  Query generation    │
+    └──────────────────────┘   └──────────────────────┘
+                │
+    ┌───────────▼──────────────────────────────────────┐
+    │         Apache Solr 9.9.0 + ZooKeeper            │
+    │  - DenseVectorField (HNSW, cosine)              │
+    │  - KNN search                                    │
+    │  - Typed schema fields                           │
+    │  - PostgreSQL (chat memory)                      │
+    └──────────────────────────────────────────────────┘
+```
+
+### Key Components
+
+- **SolrVectorStore**: Custom Spring AI vector store implementation for Solr
+- **IndexService**: Handles document indexing with automatic embedding generation
+- **SearchService**: Orchestrates both semantic and keyword search
+- **SearchRepository**: Solr query execution and schema introspection
+- **Chat Memory**: PostgreSQL-backed conversation history (conversation ID: "007")
 
 ## 📋 Prerequisites
 
 - **Java 21** or higher
-- **Docker** and **Docker Desktop** (for Solr and PostgreSQL)
-- **Apache Solr 9.6.1** (can be run via Docker)
-- **PostgreSQL** (for chat memory storage)
-- **Anthropic API Key** (for Claude AI integration)
+- **Docker** and **Docker Desktop** (for Solr, ZooKeeper, and PostgreSQL)
+- **Apache Solr 9.9.0** (provided via Docker)
+- **ZooKeeper 3.9** (provided via Docker)
+- **PostgreSQL 16** (provided via Docker)
+- **Anthropic API Key** (for Claude AI)
+- **OpenAI API Key** (for embeddings)
 
 ## 🛠️ Setup & Installation
 
@@ -39,9 +104,13 @@ cd ai-powered-search
 Set the required environment variables:
 
 ```bash
-export ANTHROPIC_API_KEY=your_anthropic_api_key_here
-export POSTGRES_USER=postgres
-export POSTGRES_PASSWORD=postgres
+# Required
+export ANTHROPIC_API_KEY="sk-ant-your-key-here"
+export OPENAI_API_KEY="sk-your-key-here"
+
+# Optional (defaults provided)
+export POSTGRES_USER="postgres"
+export POSTGRES_PASSWORD="postgres"
 ```
 
 ### 3. Start External Services
@@ -53,8 +122,14 @@ docker-compose up -d
 ```
 
 This will start:
-- **Solr** at `http://localhost:8983`
+- **Solr** at `http://localhost:8983` (with ZooKeeper coordination)
+- **ZooKeeper** at `localhost:2181` (internal)
 - **PostgreSQL** at `localhost:5432`
+
+The init script automatically:
+- Uploads the custom schema to ZooKeeper
+- Creates the "books" collection with vector support
+- Configures all field types and metadata fields
 
 ### 4. Build the Application
 
@@ -78,225 +153,222 @@ Once the application is running, access the interactive API documentation at:
 - **Swagger UI**: http://localhost:8080/swagger-ui.html
 - **OpenAPI Spec**: http://localhost:8080/api-docs
 
-### Search Endpoint
+### Indexing Endpoints
 
-**GET** `/api/v1/search/{collection}?query={query}`
+#### Index Single Document
 
-Performs an AI-enhanced search on the specified Solr collection.
+**POST** `/api/v1/index/{collection}`
 
-#### Parameters
+```bash
+curl -X POST "http://localhost:8080/api/v1/index/books" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id": "doc-123",
+    "content": "Spring Boot simplifies Java application development",
+    "metadata": {
+      "category": "technology",
+      "author": "John Doe",
+      "tags": ["java", "spring", "framework"],
+      "priority": 5,
+      "published": true,
+      "rating": 4.5
+    }
+  }'
+```
 
-- `collection` (path): The name of the Solr collection to search
-- `query` (query): Natural language search query
-
-#### Response
-
+**Response:**
 ```json
 {
-  "documents": [
-    {
-      "id": "1",
-      "name": ["Spring Boot Application"],
-      "description": ["A sample Spring Boot application with Solr integration"],
-      "category": ["framework"],
-      "tags": ["java", "spring"]
-    }
-  ],
-  "facetCounts": {
-    "category": [
+  "indexed": 1,
+  "failed": 0,
+  "documentIds": ["doc-123"],
+  "message": "Successfully indexed 1 document(s)"
+}
+```
+
+#### Batch Index Documents
+
+**POST** `/api/v1/index/{collection}/batch`
+
+```bash
+curl -X POST "http://localhost:8080/api/v1/index/books/batch" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "documents": [
       {
-        "value": "framework",
-        "count": 1
-      }
-    ],
-    "tags": [
-      {
-        "value": "spring",
-        "count": 2
+        "content": "TensorFlow is a machine learning framework",
+        "metadata": {"category": "ml", "language": "python"}
       },
       {
-        "value": "java",
-        "count": 1
+        "content": "PyTorch provides dynamic computational graphs",
+        "metadata": {"category": "ml", "language": "python"}
       }
     ]
-  }
+  }'
+```
+
+### Search Endpoints
+
+#### Semantic Search
+
+**GET** `/api/v1/search/{collection}/semantic`
+
+Performs vector similarity search using OpenAI embeddings.
+
+```bash
+curl "http://localhost:8080/api/v1/search/books/semantic?query=frameworks%20for%20building%20web%20applications&topK=10&minScore=0.7"
+```
+
+**Parameters:**
+- `query`: Natural language search query (required)
+- `topK`: Number of results to return (default: 10)
+- `minScore`: Minimum similarity score 0-1 (default: 0.7)
+
+**Response:**
+```json
+{
+  "query": "frameworks for building web applications",
+  "results": [
+    {
+      "id": "doc-123",
+      "content": "Spring Boot simplifies Java application development",
+      "metadata": {
+        "category": "technology",
+        "author": "John Doe",
+        "tags": ["java", "spring", "framework"]
+      },
+      "score": 0.89
+    }
+  ],
+  "totalResults": 5
+}
+```
+
+#### Keyword Search (AI-Enhanced)
+
+**POST** `/api/v1/search`
+
+Performs keyword search with AI-generated Solr queries.
+
+```bash
+curl -X POST "http://localhost:8080/api/v1/search" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "find java books with ratings above 4 published recently",
+    "collection": "books",
+    "searchType": "KEYWORD"
+  }'
+```
+
+**Request Body:**
+```json
+{
+  "query": "Natural language query",
+  "collection": "books",
+  "searchType": "SEMANTIC" | "KEYWORD"
 }
 ```
 
 ## 🔍 Usage Examples
 
-The API accepts natural language queries and automatically generates appropriate Solr components including:
-- **Main Query (q)**: The core search terms
-- **Filter Queries (fq)**: Filters to narrow results  
-- **Facet Fields**: Fields to provide facet counts for
-- **Facet Queries**: Custom facet queries
-- **Sort**: Result ordering
+### Semantic Search Examples
 
-### Example 1: Basic Search
+Semantic search finds documents by meaning, not just keywords.
+
+#### Example 1: Conceptual Search
 
 ```bash
-curl "http://localhost:8080/api/v1/search/my-collection?query=find me documents about spring boot applications"
+# Find documents about machine learning frameworks
+curl "http://localhost:8080/api/v1/search/books/semantic?query=deep%20learning%20libraries&topK=5"
 ```
 
-**Response:**
-```json
-{
-  "documents": [
-    {
-      "id": "1",
-      "name": ["Spring Boot Application"],
-      "description": ["A sample Spring Boot application with Solr integration"],
-      "category": ["framework"],
-      "tags": ["java", "spring"]
-    },
-    {
-      "id": "3",
-      "name": ["Microservices Architecture"],
-      "description": ["Building scalable microservices with Spring Boot"],
-      "category": ["architecture"],
-      "tags": ["microservices", "spring"]
-    }
-  ],
-  "facetCounts": {
-    "category": [
-      {
-        "value": "framework",
-        "count": 1
-      },
-      {
-        "value": "architecture",
-        "count": 1
-      }
-    ],
-    "tags": [
-      {
-        "value": "spring",
-        "count": 2
-      },
-      {
-        "value": "java",
-        "count": 1
-      },
-      {
-        "value": "microservices",
-        "count": 1
-      }
-    ]
-  }
-}
-```
+**Matches:**
+- "TensorFlow is a machine learning framework" (score: 0.87)
+- "PyTorch provides dynamic computational graphs" (score: 0.85)
+- "Keras simplifies neural network building" (score: 0.82)
 
-### Example 2: Specific Category Search
+#### Example 2: Cross-Language Conceptual Match
 
 ```bash
-curl "http://localhost:8080/api/v1/search/my-collection?query=show me documentation about search engines"
+# Search in English, find conceptually similar content
+curl "http://localhost:8080/api/v1/search/books/semantic?query=optimizing%20neural%20networks"
 ```
 
-**Response:**
-```json
-{
-  "documents": [
-    {
-      "id": "2",
-      "name": ["Apache Solr Guide"],
-      "description": ["Complete guide to Apache Solr search engine"],
-      "category": ["documentation"],
-      "tags": ["solr", "search"]
-    }
-  ],
-  "facetCounts": {
-    "category": [
-      {
-        "value": "documentation",
-        "count": 1
-      }
-    ],
-    "tags": [
-      {
-        "value": "solr",
-        "count": 1
-      },
-      {
-        "value": "search",
-        "count": 1
-      }
-    ]
-  }
-}
-```
+**Matches documents about:**
+- Training techniques
+- Hyperparameter tuning
+- Model optimization
+- Performance improvements
 
-### Example 3: Faceted Search with Filtering
+### Keyword Search Examples
 
-Request facet counts and apply filters through natural language:
+Keyword search uses Claude AI to generate precise Solr queries.
+
+#### Example 1: Filtered Search
 
 ```bash
-curl "http://localhost:8080/api/v1/search/my-collection?query=show me framework documents, group by category and tags, only include java-related items"
-```
-
-This generates a Solr query with:
-- **Filter Query**: `fq: ["tags:java"]`
-- **Facet Fields**: `facet.fields: ["category", "tags"]`
-
-**Response:**
-```json
-{
-  "documents": [
-    {
-      "id": "1",
-      "name": ["Spring Boot Application"],
-      "description": ["A sample Spring Boot application with Solr integration"],
-      "category": ["framework"],
-      "tags": ["java", "spring"]
-    }
-  ],
-  "facetCounts": {
-    "category": [
-      {
-        "value": "framework",
-        "count": 1
-      }
-    ],
-    "tags": [
-      {
-        "value": "java",
-        "count": 1
-      },
-      {
-        "value": "spring",
-        "count": 1
-      }
-    ]
-  }
-}
-```
-
-### Example 4: Search with Custom Sorting
-
-```bash
-curl "http://localhost:8080/api/v1/search/my-collection?query=find all documents about spring, sort by relevance score descending"
-```
-
-This generates: `sort: "score desc"`
-
-### Example 5: Complex Query with Multiple Filters
-
-```bash
-curl "http://localhost:8080/api/v1/search/my-collection?query=search for architecture documents that mention microservices, exclude framework category, show facets for tags"
-```
-
-This generates:
-- **Main Query**: `q: "description:*microservices* OR name:*microservices*"`
-- **Filter Queries**: `fq: ["category:architecture", "-category:framework"]`
-- **Facet Fields**: `facet.fields: ["tags"]`
-
-### Example 6: Using cURL with JSON Headers
-
-```bash
-curl -X GET \
-  -H "Accept: application/json" \
+curl -X POST "http://localhost:8080/api/v1/search" \
   -H "Content-Type: application/json" \
-  "http://localhost:8080/api/v1/search/my-collection?query=find documentation with search functionality, show category breakdown"
+  -d '{
+    "query": "find programming books about java with high ratings",
+    "collection": "books",
+    "searchType": "KEYWORD"
+  }'
 ```
+
+**Claude generates:**
+```json
+{
+  "queryString": "content:(programming AND java)",
+  "filterQueries": ["category:technology", "rating:[4.0 TO *]"],
+  "sort": "rating desc"
+}
+```
+
+#### Example 2: Faceted Search
+
+```bash
+curl -X POST "http://localhost:8080/api/v1/search" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "show me framework documents, group by category and language",
+    "collection": "books",
+    "searchType": "KEYWORD"
+  }'
+```
+
+**Claude generates:**
+```json
+{
+  "queryString": "category:framework",
+  "facetFields": ["category", "language"]
+}
+```
+
+### Hybrid Search Example
+
+Combine semantic similarity with keyword filters:
+
+```bash
+# Step 1: Semantic search with Claude-enhanced filters
+curl -X POST "http://localhost:8080/api/v1/search" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "recent papers about neural networks published in 2024",
+    "collection": "books",
+    "searchType": "SEMANTIC"
+  }'
+```
+
+**Claude generates filters:**
+```json
+{
+  "filterQueries": ["published:true", "year:2024"],
+  "fieldList": ["id", "title", "content", "author"]
+}
+```
+
+**Then KNN search with filters applied**
 
 ## 🧪 Testing
 
@@ -309,15 +381,37 @@ curl -X GET \
 ### Run Specific Test Classes
 
 ```bash
+# Integration tests
 ./gradlew test --tests "SearchIntegrationTest"
-./gradlew test --tests "SolrSearchIntegrationTest" 
+./gradlew test --tests "IndexIntegrationTest"
+
+# Service tests
+./gradlew test --tests "SearchServiceTest"
+./gradlew test --tests "IndexServiceTest"
+
+# Controller tests
+./gradlew test --tests "SearchControllerTest"
+./gradlew test --tests "IndexControllerTest"
 ```
 
 ### Test Structure
 
-- **Integration Tests**: Full application context tests using Testcontainers
-- **Unit Tests**: Isolated component testing
-- **Repository Tests**: Solr integration testing with test containers
+The project has comprehensive test coverage across three levels:
+
+**1. Unit Tests** (@ExtendWith(MockitoExtension.class)):
+- Service layer tests with mocked dependencies
+- Controller tests with @WebMvcTest
+- Test embedding generation, query processing, error handling
+
+**2. Integration Tests** (@SpringBootTest with Testcontainers):
+- Full application context tests
+- Real Solr and PostgreSQL containers
+- End-to-end indexing and search flows
+
+**3. Vector Store Tests**:
+- SolrVectorStore implementation tests
+- Embedding generation and storage
+- Similarity search validation
 
 ## 🔧 Configuration
 
@@ -327,29 +421,116 @@ Key configuration options in `src/main/resources/application.properties`:
 
 ```properties
 # Solr Configuration
-spring.data.solr.host=http://localhost:8983/solr
+spring.ai.vectorstore.solr.host=http://localhost:8983/solr
 
-# Anthropic AI Configuration  
+# Anthropic Claude Configuration
 spring.ai.anthropic.api-key=${ANTHROPIC_API_KEY}
-spring.ai.anthropic.chat.model=claude-sonnet-4-0
+spring.ai.anthropic.chat.options.model=claude-sonnet-4-5
+
+# OpenAI Embeddings Configuration
+spring.ai.openai.api-key=${OPENAI_API_KEY}
+spring.ai.openai.embedding.options.model=text-embedding-3-small
 
 # PostgreSQL Chat Memory
 spring.datasource.url=jdbc:postgresql://localhost:5432/chatmemory
 spring.datasource.username=${POSTGRES_USER:postgres}
 spring.datasource.password=${POSTGRES_PASSWORD:postgres}
 
-# Chat Memory Configuration
-spring.ai.chat.memory.repository.jdbc.initialize-schema=always
-spring.ai.chat.memory.repository.type=jdbc
+# Virtual Threads (Java 21)
+spring.threads.virtual.enabled=true
 ```
 
-### Environment Variables
+### Metadata Field Types
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `ANTHROPIC_API_KEY` | Your Anthropic API key (required) | - |
-| `POSTGRES_USER` | PostgreSQL username | `postgres` |
-| `POSTGRES_PASSWORD` | PostgreSQL password | `postgres` |
+The schema supports typed metadata fields matching `IndexRequest.java`:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `author` | string | Document author |
+| `category` | string | Document category |
+| `type` | string | Document type |
+| `language` | string | Programming language |
+| `priority` | pint | Integer priority |
+| `order` | pint | Sequence number |
+| `rating` | pdouble | Decimal rating |
+| `published` | boolean | Publication status |
+| `tags` | strings | Array of tags |
+| `metadata_*` | text_general | Dynamic fields (fallback) |
+
+### Vector Configuration
+
+- **Embedding Model**: OpenAI text-embedding-3-small
+- **Dimensions**: 1536
+- **Similarity**: Cosine (0-1 scale)
+- **Algorithm**: HNSW (Hierarchical Navigable Small World)
+- **Field**: vector (type: knn_vector_1536)
+
+## 📚 Documentation
+
+Comprehensive documentation is available:
+
+- **[VECTOR_SEARCH_GUIDE.md](VECTOR_SEARCH_GUIDE.md)**: Complete guide to vector search, indexing, and semantic search
+- **[QUICK_REFERENCE.md](QUICK_REFERENCE.md)**: Quick lookup guide for developers
+- **[SOLR-SETUP.md](SOLR-SETUP.md)**: Solr schema configuration and setup
+- **[CLAUDE.md](CLAUDE.md)**: Instructions for AI assistants working with this codebase
+
+## 🔍 How It Works
+
+### Indexing Flow
+
+1. **Document Reception**: Client sends document(s) via REST API
+2. **Preparation**: IndexService converts requests to Document objects
+3. **Embedding Generation**: SolrVectorStore generates 1536-dim embeddings via OpenAI
+4. **Storage**: Documents + embeddings stored in Solr with typed metadata
+5. **Response**: Returns indexed count and document IDs
+
+### Semantic Search Flow
+
+1. **Query Reception**: Client sends natural language query
+2. **Query Embedding**: OpenAI generates vector for query text
+3. **Filter Generation** (optional): Claude AI generates filter queries
+4. **KNN Search**: Solr executes vector similarity search with HNSW
+5. **Ranking**: Results ranked by cosine similarity (0-1)
+6. **Response**: Returns documents with similarity scores
+
+### Keyword Search Flow
+
+1. **Query Reception**: Client sends natural language query
+2. **Schema Retrieval**: System gets field types from Solr
+3. **Query Generation**: Claude AI generates structured Solr query
+4. **Execution**: Solr executes keyword search with filters/facets
+5. **Response**: Returns matched documents with metadata
+
+## 🧠 AI Integration
+
+### Claude AI (Query Generation)
+
+**Model**: claude-sonnet-4-5
+
+**Capabilities:**
+- Converts natural language to Solr query syntax
+- Understands field types (text, string, numeric, boolean, date)
+- Generates filter queries, facets, sorting
+- Maintains conversation context for refinement
+
+**System Prompts:**
+- `prompts/system-message.st`: Keyword search guidance (122 lines)
+- `prompts/semantic-search-system-message.st`: Semantic search guidance (150 lines)
+
+### OpenAI Embeddings
+
+**Model**: text-embedding-3-small
+
+**Specifications:**
+- **Dimensions**: 1536
+- **Context**: 8,191 tokens
+- **Cost**: ~$0.02 per 1M tokens
+- **Performance**: Fast, suitable for real-time search
+
+**Usage:**
+- Automatic embedding during indexing
+- Query embedding for semantic search
+- Batch processing for efficiency
 
 ## 🏭 Production Deployment
 
@@ -363,8 +544,20 @@ spring.ai.chat.memory.repository.type=jdbc
 
 Create environment-specific property files:
 - `application-dev.properties`
-- `application-staging.properties` 
+- `application-staging.properties`
 - `application-prod.properties`
+
+### Production Checklist
+
+- [ ] Increase Solr heap size (default: 1GB)
+- [ ] Configure Solr replication factor
+- [ ] Set up production PostgreSQL
+- [ ] Enable SSL for external connections
+- [ ] Implement authentication/authorization
+- [ ] Configure rate limiting
+- [ ] Set up monitoring (Prometheus/Grafana)
+- [ ] Configure log aggregation
+- [ ] Set up backup strategy
 
 ### Health Checks
 
@@ -372,73 +565,27 @@ The application includes Spring Boot Actuator endpoints:
 - **Health**: `/actuator/health`
 - **Info**: `/actuator/info`
 
-## 🔍 How It Works
+## 🚀 Performance Optimization
 
-1. **Query Reception**: REST endpoint receives natural language query
-2. **Schema Inspection**: System retrieves available fields from target Solr collection
-3. **AI Processing**: Claude AI converts the natural language query into structured Solr query syntax
-4. **Search Execution**: Generated query is executed against Solr
-5. **Response Assembly**: Results are formatted and returned with facet information
-6. **Memory Storage**: Conversation context is stored for future interactions
+### Indexing
 
-## 🧠 Natural Language to Solr Mapping
+- Use batch indexing for multiple documents
+- Embeddings generated in single API call
+- Single Solr commit per batch
 
-The AI understands various natural language patterns and converts them to appropriate Solr components:
+### Searching
 
-### Query Patterns
+- Set appropriate `topK` (default: 10)
+- Use similarity threshold to filter results (default: 0.7)
+- Request only needed fields with `fl` parameter
+- Leverage Solr's query cache
 
-| Natural Language | Generated Component | Example |
-|------------------|--------------------|---------| 
-| "find documents about X" | Main query (q) | `q: "name:*spring* OR description:*spring*"` |
-| "only include Y items" | Filter query (fq) | `fq: ["category:framework"]` |
-| "exclude Z category" | Negative filter | `fq: ["-category:documentation"]` |
-| "group by field" | Facet fields | `facet.fields: ["category", "tags"]` |
-| "sort by relevance/date" | Sort clause | `sort: "score desc"` |
-| "show breakdown of X" | Facet fields | `facet.fields: ["X"]` |
+### Monitoring
 
-### Sample AI Query Transformations
-
-#### Example 1: Basic Search
-**Input**: "find me documents about spring boot applications"
-
-**AI Generated Solr Query**:
-```json
-{
-  "q": "name:*spring* OR description:*spring* OR name:*boot* OR description:*boot*",
-  "fq": ["tags:spring"],
-  "sort": "score desc",
-  "facet.fields": ["category", "tags"],
-  "facet.query": null
-}
-```
-
-#### Example 2: Filtered Faceted Search
-**Input**: "show me framework documents, group by category and tags, only include java-related items"
-
-**AI Generated Solr Query**:
-```json
-{
-  "q": "category:framework",
-  "fq": ["tags:java"],
-  "sort": "score desc", 
-  "facet.fields": ["category", "tags"],
-  "facet.query": null
-}
-```
-
-#### Example 3: Complex Multi-Filter Search
-**Input**: "search for architecture documents that mention microservices, exclude framework category, show facets for tags"
-
-**AI Generated Solr Query**:
-```json
-{
-  "q": "description:*microservices* OR name:*microservices*",
-  "fq": ["category:architecture", "-category:framework"],
-  "sort": "score desc",
-  "facet.fields": ["tags"],
-  "facet.query": null
-}
-```
+- Track embedding API costs (OpenAI dashboard)
+- Monitor Solr query performance
+- Use Spring AI observation framework
+- Log slow queries for optimization
 
 ## 🤝 Contributing
 
@@ -449,8 +596,24 @@ The AI understands various natural language patterns and converts them to approp
 5. Ensure all tests pass
 6. Submit a pull request
 
+## 📄 License
+
+[Add your license information here]
+
 ## 🆘 Support
 
 - **Issues**: [GitHub Issues](https://github.com/adityamparikh/ai-powered-search/issues)
-- **Documentation**: Check the `/docs` endpoint when running
+- **Documentation**: See `/docs` directory
 - **API Reference**: Swagger UI at `/swagger-ui.html`
+- **Guides**: Check VECTOR_SEARCH_GUIDE.md for comprehensive documentation
+
+## 🙏 Acknowledgments
+
+Built with:
+- [Spring Boot](https://spring.io/projects/spring-boot) - Application framework
+- [Spring AI](https://docs.spring.io/spring-ai/reference/) - AI integration
+- [Apache Solr](https://solr.apache.org/) - Search platform
+- [Anthropic Claude](https://www.anthropic.com/) - Query generation AI
+- [OpenAI](https://openai.com/) - Embedding generation
+- [ZooKeeper](https://zookeeper.apache.org/) - Distributed coordination
+- [PostgreSQL](https://www.postgresql.org/) - Chat memory storage
