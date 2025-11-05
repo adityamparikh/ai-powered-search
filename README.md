@@ -1,27 +1,16 @@
 # AI-Powered Search
 
-An intelligent search application that combines Apache Solr's powerful search capabilities with AI-driven semantic search and intelligent query generation. Built with Spring Boot 3.5.7, Spring AI, and Java 21.
+Apache Solr search with AI-driven query generation and semantic vector search. Built with Spring Boot 3.5.7, Spring AI, and Java 21.
 
 ## 🚀 Features
 
-### Core Capabilities
-
-- **Semantic Vector Search**: Find documents by meaning using OpenAI embeddings (text-embedding-3-small)
-- **Keyword Search**: Traditional full-text search with AI-enhanced query generation
-- **Hybrid Search**: Combine semantic similarity with keyword filters for precise results
-- **AI-Enhanced Queries**: Anthropic Claude (claude-sonnet-4-5) transforms natural language into structured Solr queries
-- **Conversational Context**: Maintains chat memory for context-aware search interactions
-- **Auto-Indexing**: Automatic embedding generation during document indexing
-- **Batch Operations**: Efficient batch indexing with optimized embedding generation
-
-### Technical Features
-
-- **Production-Ready**: Comprehensive test coverage with unit, integration, and vector store tests
-- **Type-Safe Schema**: Explicitly typed metadata fields (strings, integers, doubles, booleans, arrays)
-- **SolrCloud**: Distributed Solr with ZooKeeper coordination
-- **Vector Similarity**: HNSW algorithm with cosine similarity for fast approximate KNN search
-- **RESTful API**: Clean REST endpoints with OpenAPI documentation
-- **Virtual Threads**: Leverages Java 21 virtual threads for improved concurrency
+- **Keyword Search**: Claude AI converts natural language to Solr queries
+- **Semantic Search**: OpenAI embeddings (1536-dim) for vector similarity
+- **RAG Q&A**: Retrieval-augmented generation for conversational answers
+- **Hybrid Search**: Combine vector similarity with Solr filters
+- **Auto-Indexing**: Automatic embedding generation during document storage
+- **Type-Safe Schema**: Typed metadata fields in Solr
+- **SolrCloud**: Distributed search with ZooKeeper
 
 ## 🏗️ Architecture
 
@@ -246,26 +235,62 @@ curl "http://localhost:8080/api/v1/search/books/semantic?query=frameworks%20for%
 
 #### Keyword Search (AI-Enhanced)
 
-**POST** `/api/v1/search`
+**GET** `/api/v1/search/{collection}`
 
 Performs keyword search with AI-generated Solr queries.
 
 ```bash
-curl -X POST "http://localhost:8080/api/v1/search" \
+curl "http://localhost:8080/api/v1/search/books?query=find%20java%20books%20with%20high%20ratings"
+```
+
+**Parameters:**
+- `query`: Natural language search query (required)
+
+**Response:**
+```json
+{
+  "documents": [
+    {
+      "id": "doc-456",
+      "content": "Java programming guide",
+      "metadata": {"category": "technology", "rating": 4.8}
+    }
+  ],
+  "facets": {
+    "category": {"technology": 15, "programming": 10}
+  }
+}
+```
+
+#### RAG Question Answering
+
+**POST** `/api/v1/search/ask`
+
+Performs conversational question-answering using RAG (Retrieval-Augmented Generation).
+
+```bash
+curl -X POST "http://localhost:8080/api/v1/search/ask" \
   -H "Content-Type: application/json" \
   -d '{
-    "query": "find java books with ratings above 4 published recently",
-    "collection": "books",
-    "searchType": "KEYWORD"
+    "question": "What are the benefits of using Spring Boot for microservices?",
+    "conversationId": "user-123"
   }'
 ```
 
 **Request Body:**
 ```json
 {
-  "query": "Natural language query",
-  "collection": "books",
-  "searchType": "SEMANTIC" | "KEYWORD"
+  "question": "Your question here",
+  "conversationId": "optional-conversation-id"
+}
+```
+
+**Response:**
+```json
+{
+  "answer": "Spring Boot offers several benefits for microservices development...",
+  "conversationId": "user-123",
+  "sources": []
 }
 ```
 
@@ -528,123 +553,39 @@ The schema supports typed metadata fields matching `IndexRequest.java`:
 
 Comprehensive documentation is available:
 
+- **[TECHNICAL_DETAILS.md](TECHNICAL_DETAILS.md)**: In-depth technical implementation details
 - **[VECTOR_SEARCH_GUIDE.md](VECTOR_SEARCH_GUIDE.md)**: Complete guide to vector search, indexing, and semantic search
 - **[QUICK_REFERENCE.md](QUICK_REFERENCE.md)**: Quick lookup guide for developers
 - **[SOLR-SETUP.md](SOLR-SETUP.md)**: Solr schema configuration and setup
 - **[CLAUDE.md](CLAUDE.md)**: Instructions for AI assistants working with this codebase
 
-## 🔍 How It Works
+## 🔍 Search Approaches
 
-### Indexing Flow
+| Feature | Traditional Keyword | Semantic Vector | RAG Q&A |
+|---------|-------------------|-----------------|---------|
+| **Method** | `search()` | `semanticSearch()` | `ask()` |
+| **When AI is Used** | Query time: Claude converts NL to Solr syntax | Query time: Claude parses filters, OpenAI generates embedding | Query time: OpenAI retrieves docs, Claude generates answer |
+| **Search Mechanism** | Solr BM25 ranking on keywords | Solr KNN with cosine similarity on vectors | Vector retrieval + LLM generation |
+| **Response** | Document list with metadata | Document list with similarity scores | Generated natural language answer |
+| **Speed** | ~100ms | ~500ms (embedding generation) | ~2s (retrieval + generation) |
+| **Cost** | $0.001 (Claude API only) | $0.01 (Claude + OpenAI embedding) | $0.05 (OpenAI + Claude generation) |
+| **Result Predictability** | High: Same query → same Solr results | Medium: Embedding models can vary | Low: LLM generation is non-deterministic |
+| **Faceting** | ✅ Native Solr faceting | ❌ Not implemented in VectorStore | ❌ No aggregation in RAG |
+| **Filtering** | ✅ Native Solr fq parameter | ✅ Converted to Solr filters | ⚠️ Only via initial retrieval |
+| **Memory/Context** | Conversation ID for query refinement | Conversation ID for filter refinement | Full conversation history for follow-ups |
 
-1. **Document Reception**: Client sends document(s) via REST API
-2. **Preparation**: IndexService converts requests to Document objects
-3. **Embedding Generation**: SolrVectorStore generates 1536-dim embeddings via OpenAI
-4. **Storage**: Documents + embeddings stored in Solr with typed metadata
-5. **Response**: Returns indexed count and document IDs
+### When to Use Each Approach
 
-### Semantic Search Flow
+| Use Case | Best Approach | Why |
+|----------|--------------|-----|
+| Product catalog search | Keyword | Need exact filters, facets, deterministic results |
+| Research paper discovery | Semantic | Concept matching more important than exact terms |
+| Customer support Q&A | RAG | Users need synthesized answers, not document lists |
+| Legal document search | Keyword | Exact terminology critical, need audit trail |
+| "Find similar" features | Semantic | Vector similarity captures conceptual relationships |
+| Technical documentation help | RAG | Complex questions need context from multiple docs |
 
-1. **Query Reception**: Client sends natural language query
-2. **Query Embedding**: OpenAI generates vector for query text
-3. **Filter Generation** (optional): Claude AI generates filter queries
-4. **KNN Search**: Solr executes vector similarity search with HNSW
-5. **Ranking**: Results ranked by cosine similarity (0-1)
-6. **Response**: Returns documents with similarity scores
-
-### Keyword Search Flow
-
-1. **Query Reception**: Client sends natural language query
-2. **Schema Retrieval**: System gets field types from Solr
-3. **Query Generation**: Claude AI generates structured Solr query
-4. **Execution**: Solr executes keyword search with filters/facets
-5. **Response**: Returns matched documents with metadata
-
-## 🧠 AI Integration
-
-### Claude AI (Query Generation)
-
-**Model**: claude-sonnet-4-5
-
-**Capabilities:**
-- Converts natural language to Solr query syntax
-- Understands field types (text, string, numeric, boolean, date)
-- Generates filter queries, facets, sorting
-- Maintains conversation context for refinement
-
-**System Prompts:**
-- `prompts/system-message.st`: Keyword search guidance (122 lines)
-- `prompts/semantic-search-system-message.st`: Semantic search guidance (150 lines)
-
-### OpenAI Embeddings
-
-**Model**: text-embedding-3-small
-
-**Specifications:**
-- **Dimensions**: 1536
-- **Context**: 8,191 tokens
-- **Cost**: ~$0.02 per 1M tokens
-- **Performance**: Fast, suitable for real-time search
-
-**Usage:**
-- Automatic embedding during indexing
-- Query embedding for semantic search
-- Batch processing for efficiency
-
-## 🏭 Production Deployment
-
-### Docker Build
-
-```bash
-./gradlew bootBuildImage
-```
-
-### Environment-Specific Configurations
-
-Create environment-specific property files:
-- `application-dev.properties`
-- `application-staging.properties`
-- `application-prod.properties`
-
-### Production Checklist
-
-- [ ] Increase Solr heap size (default: 1GB)
-- [ ] Configure Solr replication factor
-- [ ] Set up production PostgreSQL
-- [ ] Enable SSL for external connections
-- [ ] Implement authentication/authorization
-- [ ] Configure rate limiting
-- [ ] Set up monitoring (Prometheus/Grafana)
-- [ ] Configure log aggregation
-- [ ] Set up backup strategy
-
-### Health Checks
-
-The application includes Spring Boot Actuator endpoints:
-- **Health**: `/actuator/health`
-- **Info**: `/actuator/info`
-
-## 🚀 Performance Optimization
-
-### Indexing
-
-- Use batch indexing for multiple documents
-- Embeddings generated in single API call
-- Single Solr commit per batch
-
-### Searching
-
-- Set appropriate `topK` (default: 10)
-- Use similarity threshold to filter results (default: 0.7)
-- Request only needed fields with `fl` parameter
-- Leverage Solr's query cache
-
-### Monitoring
-
-- Track embedding API costs (OpenAI dashboard)
-- Monitor Solr query performance
-- Use Spring AI observation framework
-- Log slow queries for optimization
+See [TECHNICAL_DETAILS.md](TECHNICAL_DETAILS.md) for implementation details.
 
 ## 🤝 Contributing
 
