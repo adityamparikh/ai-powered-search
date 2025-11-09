@@ -249,7 +249,7 @@ public class SolrVectorStore extends AbstractObservationVectorStore {
 
             // Set fields to return (include score pseudo-field for similarity scoring)
             query.setFields(options.idFieldName(), options.contentFieldName(),
-                    options.vectorFieldName(), "score", options.metadataPrefix() + "*");
+                    "score", options.metadataPrefix() + "*");
 
             // Note: Similarity threshold filtering must be done post-query
             // because "score" is a pseudo-field that doesn't exist until query time
