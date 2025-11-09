@@ -175,9 +175,8 @@ public class SolrVectorStore extends AbstractObservationVectorStore {
                     .map(this::toSolrDocument)
                     .collect(toList());
 
-            // Add to Solr
-            UpdateResponse response = solrClient.add(collection, solrDocs);
-            solrClient.commit(collection);
+            // Add to Solr using commitWithin to avoid per-operation hard commits
+            UpdateResponse response = solrClient.add(collection, solrDocs, 1000);
 
             log.debug("Added {} documents to Solr collection '{}', status: {}",
                     documents.size(), collection, response.getStatus());
@@ -323,54 +322,26 @@ public class SolrVectorStore extends AbstractObservationVectorStore {
         if (filterExpression == null) {
             return null;
         }
-
-        // Check if this is an equality expression
-        if (filterExpression instanceof Filter.Expression) {
-            // Get the type of expression
-            String exprType = getExpressionType(filterExpression);
-
-            if ("EQ".equals(exprType)) {
-                // Extract key and value from the expression
-                String key = getExpressionKey(filterExpression);
-                String value = getExpressionValue(filterExpression);
-
-                if (key != null && value != null) {
-                    // Add metadata prefix if not already present
-                    if (!key.startsWith(options.metadataPrefix())) {
-                        key = options.metadataPrefix() + key;
-                    }
-
-                    // Remove quotes if present
-                    value = value.replaceAll("^['\"]|['\"]$", "");
-
-                    // Build Solr filter query
-                    String solrQuery = key + ":" + value;
-                    log.debug("Converted filter expression to Solr query: {}", solrQuery);
-                    return solrQuery;
-                }
-            }
+        String s = filterExpression.toString();
+        if (s == null || s.isBlank()) {
+            return null;
         }
-
-        // Fallback: try to parse the string representation
-        String filterStr = filterExpression.toString();
-        log.debug("Attempting to parse filter expression string: {}", filterStr);
-
-        // Try to extract from string like "Expression[type=EQ, left=Key[key=category], right=Value[value=AI]]"
-        if (filterStr.contains("type=EQ") && filterStr.contains("Key[key=") && filterStr.contains("Value[value=")) {
-            String key = extractBetween(filterStr, "Key[key=", "]");
-            String value = extractBetween(filterStr, "Value[value=", "]");
-
-            if (key != null && value != null) {
-                if (!key.startsWith(options.metadataPrefix())) {
-                    key = options.metadataPrefix() + key;
-                }
-                String solrQuery = key + ":" + value;
-                log.debug("Extracted and converted to Solr query: {}", solrQuery);
-                return solrQuery;
-            }
+        s = s.trim();
+        // If it already looks like a Solr filter (field:value or contains AND/OR with colons), pass-through
+        if (s.matches(".*\\w+\\s*:\\s*.+")) {
+            return s;
         }
-
-        log.warn("Could not convert filter expression to Solr syntax: {}", filterStr);
+        // Simple 'key == value' support
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("(?i)\\b([a-zA-Z0-9_]+)\\s*==\\s*'?([^']*)'?$").matcher(s);
+        if (m.find()) {
+            String key = m.group(1);
+            String value = m.group(2);
+            if (!key.startsWith(options.metadataPrefix())) {
+                key = options.metadataPrefix() + key;
+            }
+            return key + ":" + value;
+        }
+        log.warn("Unsupported filter expression, ignoring: {}", s);
         return null;
     }
 

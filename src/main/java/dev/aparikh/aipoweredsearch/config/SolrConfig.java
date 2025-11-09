@@ -62,7 +62,6 @@ import org.springframework.context.annotation.Configuration;
  * @version 0.0.1
  * @since 0.0.1
  * @see SolrConfigurationProperties
- * @see Http2SolrClient
  * @see EnableConfigurationProperties
  */
 @Configuration
@@ -146,7 +145,10 @@ public class SolrConfig {
         // requirements with version conflicts between Jetty 10.x (used by Solr 9.9.0) and Jetty 12.x
         // (used by Spring Boot 3.5.7). Using HttpSolrClient ensures compatibility.
         @SuppressWarnings("deprecation")
-        var client = new HttpSolrClient.Builder(url).build();
+        var client = new HttpSolrClient.Builder(url)
+                .withConnectionTimeout(CONNECTION_TIMEOUT_MS)
+                .withSocketTimeout(SOCKET_TIMEOUT_MS)
+                .build();
         return client;
     }
 }
