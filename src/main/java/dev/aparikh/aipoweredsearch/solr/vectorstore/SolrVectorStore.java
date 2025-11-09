@@ -234,6 +234,10 @@ public class SolrVectorStore extends AbstractObservationVectorStore {
                     options.vectorFieldName(), request.getTopK(), vectorString);
 
             SolrQuery query = new SolrQuery(knnQuery);
+            // Ensure Solr returns up to topK results
+            if (request.getTopK() > 0) {
+                query.setRows(request.getTopK());
+            }
 
             // Apply filter expression if present
             if (request.getFilterExpression() != null) {
