@@ -175,8 +175,9 @@ public class SolrVectorStore extends AbstractObservationVectorStore {
                     .map(this::toSolrDocument)
                     .collect(toList());
 
-            // Add to Solr using commitWithin to avoid per-operation hard commits
-            UpdateResponse response = solrClient.add(collection, solrDocs, 1000);
+            // Add to Solr
+            UpdateResponse response = solrClient.add(collection, solrDocs);
+            solrClient.commit(collection);
 
             log.debug("Added {} documents to Solr collection '{}', status: {}",
                     documents.size(), collection, response.getStatus());
@@ -345,63 +346,6 @@ public class SolrVectorStore extends AbstractObservationVectorStore {
         return null;
     }
 
-    private String getExpressionType(Filter.Expression expr) {
-        try {
-            // Use reflection to get the type
-            var typeField = expr.getClass().getDeclaredField("type");
-            typeField.setAccessible(true);
-            Object type = typeField.get(expr);
-            return type != null ? type.toString() : null;
-        } catch (Exception e) {
-            return null;
-        }
-    }
-
-    private String getExpressionKey(Filter.Expression expr) {
-        try {
-            // Use reflection to get the left/key
-            var leftField = expr.getClass().getDeclaredField("left");
-            leftField.setAccessible(true);
-            Object left = leftField.get(expr);
-            if (left != null) {
-                var keyField = left.getClass().getDeclaredField("key");
-                keyField.setAccessible(true);
-                return (String) keyField.get(left);
-            }
-        } catch (Exception e) {
-            // Ignore
-        }
-        return null;
-    }
-
-    private String getExpressionValue(Filter.Expression expr) {
-        try {
-            // Use reflection to get the right/value
-            var rightField = expr.getClass().getDeclaredField("right");
-            rightField.setAccessible(true);
-            Object right = rightField.get(expr);
-            if (right != null) {
-                var valueField = right.getClass().getDeclaredField("value");
-                valueField.setAccessible(true);
-                Object value = valueField.get(right);
-                return value != null ? value.toString() : null;
-            }
-        } catch (Exception e) {
-            // Ignore
-        }
-        return null;
-    }
-
-    private String extractBetween(String str, String start, String end) {
-        int startIdx = str.indexOf(start);
-        if (startIdx == -1) return null;
-        startIdx += start.length();
-
-        int endIdx = str.indexOf(end, startIdx);
-        if (endIdx == -1) return null;
-
-        return str.substring(startIdx, endIdx);
-    }
 
     private String floatArrayToString(float[] embedding) {
         StringBuilder sb = new StringBuilder("[");
