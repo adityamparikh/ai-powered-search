@@ -175,9 +175,8 @@ public class SolrVectorStore extends AbstractObservationVectorStore {
                     .map(this::toSolrDocument)
                     .collect(toList());
 
-            // Add to Solr
-            UpdateResponse response = solrClient.add(collection, solrDocs);
-            solrClient.commit(collection);
+            // Add to Solr using commitWithin to avoid per-operation hard commits
+            UpdateResponse response = solrClient.add(collection, solrDocs, 1000);
 
             log.debug("Added {} documents to Solr collection '{}', status: {}",
                     documents.size(), collection, response.getStatus());
@@ -194,8 +193,7 @@ public class SolrVectorStore extends AbstractObservationVectorStore {
     @Override
     public void doDelete(List<String> idList) {
         try {
-            UpdateResponse response = solrClient.deleteById(collection, idList);
-            solrClient.commit(collection);
+            UpdateResponse response = solrClient.deleteById(collection, idList, 1000);
 
             log.debug("Deleted {} documents from Solr collection '{}', status: {}",
                     idList.size(), collection, response.getStatus());
