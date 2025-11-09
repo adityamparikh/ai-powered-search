@@ -205,8 +205,17 @@ public class SearchService {
                     Map<String, Object> docMap = new HashMap<>();
                     docMap.put("id", doc.getId());
                     docMap.put("content", doc.getText());
-                    docMap.put("similarity_score", doc.getMetadata().get("distance")); // Add score
-                    docMap.putAll(doc.getMetadata());
+                    Object scoreObj = doc.getMetadata().get("score");
+                    if (scoreObj instanceof Number) {
+                        docMap.put("similarity_score", ((Number) scoreObj).doubleValue());
+                    } else if (scoreObj != null) {
+                        docMap.put("similarity_score", scoreObj);
+                    }
+                    // copy metadata but remove embedding/vector payloads
+                    Map<String, Object> meta = new HashMap<>(doc.getMetadata());
+                    meta.remove("embedding");
+                    meta.remove("vector");
+                    docMap.putAll(meta);
                     return docMap;
                 })
                 .toList();
