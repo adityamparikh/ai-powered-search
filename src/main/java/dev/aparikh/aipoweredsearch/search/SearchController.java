@@ -132,8 +132,12 @@ class SearchController {
             @PathVariable String collection,
             @Parameter(description = "Natural language search query", required = true,
                     example = "machine learning frameworks for Java")
-            @RequestParam("query") String query) {
-        return searchService.semanticSearch(collection, query);
+            @RequestParam("query") String query,
+            @Parameter(description = "Number of results to return (topK)", required = false, example = "10")
+            @RequestParam(name = "k", required = false) Integer k,
+            @Parameter(description = "Minimum similarity score threshold [0..1]", required = false, example = "0.7")
+            @RequestParam(name = "minScore", required = false) Double minScore) {
+        return searchService.semanticSearch(collection, query, k, minScore);
     }
 
     /**

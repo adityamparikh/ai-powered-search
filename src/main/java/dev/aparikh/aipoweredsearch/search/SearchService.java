@@ -155,7 +155,20 @@ public class SearchService {
      * @return search response with semantically similar documents
      */
     public SearchResponse semanticSearch(String collection, String freeTextQuery) {
-        log.debug("Semantic search for collection: {}, query: {}", collection, freeTextQuery);
+        return semanticSearch(collection, freeTextQuery, null, null);
+    }
+
+    /**
+     * Performs semantic search using vector similarity with optional tuning parameters.
+     *
+     * @param collection    the Solr collection to search
+     * @param freeTextQuery the natural language search query
+     * @param k             optional topK results to return
+     * @param minScore      optional minimum similarity score threshold [0..1]
+     * @return search response with semantically similar documents
+     */
+    public SearchResponse semanticSearch(String collection, String freeTextQuery, Integer k, Double minScore) {
+        log.debug("Semantic search for collection: {}, query: {}, k: {}, minScore: {}", collection, freeTextQuery, k, minScore);
 
         // Step 1: Get field schema information
         List<FieldInfo> fields = searchRepository.getFieldsWithSchema(collection);
@@ -186,9 +199,13 @@ public class SearchService {
 
         // Step 4: Execute semantic search using VectorStore
         // VectorStore will automatically generate embeddings from the query text
+        int topK = (k != null && k > 0) ? k : 10;
         Builder searchRequestBuilder = builder()
                         .query(queryGenerationResponse.q())
-                        .topK(10);
+                        .topK(topK);
+        if (minScore != null) {
+            searchRequestBuilder = searchRequestBuilder.similarityThreshold(minScore);
+        }
 
         if (filterExpression != null) {
             searchRequestBuilder = searchRequestBuilder.filterExpression(filterExpression);
