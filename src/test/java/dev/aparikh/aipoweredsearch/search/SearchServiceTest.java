@@ -10,6 +10,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.ai.chat.client.ChatClient;
+import dev.aparikh.aipoweredsearch.solr.vectorstore.VectorStoreFactory;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.ClassPathResource;
@@ -39,7 +40,7 @@ class SearchServiceTest {
     private ChatClient ragChatClient;
 
     @Mock
-    private VectorStore vectorStore;
+    private VectorStoreFactory vectorStoreFactory;
 
     private SearchService searchService;
 
@@ -68,7 +69,7 @@ class SearchServiceTest {
         Resource systemRes = new ClassPathResource("prompts/system-message.st");
         Resource semanticRes = new ClassPathResource("prompts/semantic-search-system-message.st");
 
-        searchService = new SearchService(systemRes, semanticRes, searchRepository, chatClient, ragChatClient, vectorStore);
+        searchService = new SearchService(systemRes, semanticRes, searchRepository, chatClient, ragChatClient, vectorStoreFactory);
     }
 
     @Test

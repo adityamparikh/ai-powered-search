@@ -147,13 +147,13 @@ public class SolrVectorStore extends AbstractObservationVectorStore {
                         Object embedding = doc.getMetadata().get("embedding");
                         return embedding == null || !(embedding instanceof float[]) || ((float[]) embedding).length == 0;
                     })
-                    .collect(toList());
+                    .toList();
 
             // Generate embeddings in batch for efficiency
             if (!documentsWithoutEmbeddings.isEmpty()) {
                 List<String> texts = documentsWithoutEmbeddings.stream()
                         .map(Document::getText)
-                        .collect(toList());
+                        .toList();
 
                 EmbeddingResponse embeddingResponse = this.embeddingModel.embedForResponse(texts);
 

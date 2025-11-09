@@ -6,6 +6,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.document.Document;
+import dev.aparikh.aipoweredsearch.solr.vectorstore.VectorStoreFactory;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
@@ -52,7 +53,7 @@ public class SearchService {
     private final SearchRepository searchRepository;
     private final ChatClient chatClient;
     private final ChatClient ragChatClient;
-    private final VectorStore vectorStore;
+    private final VectorStoreFactory vectorStoreFactory;
 
     /**
      * Constructs a new SearchService with required dependencies.
@@ -62,20 +63,20 @@ public class SearchService {
      * @param searchRepository the repository for low-level Solr operations
      * @param chatClient the ChatClient configured for search query generation
      * @param ragChatClient the ChatClient configured with QuestionAnswerAdvisor for RAG
-     * @param vectorStore the VectorStore implementation (SolrVectorStore) for semantic search
+     * @param vectorStoreFactory the factory to obtain per-collection VectorStore instances
      */
     public SearchService(@Value("classpath:/prompts/system-message.st") Resource systemResource,
                          @Value("classpath:/prompts/semantic-search-system-message.st") Resource semanticSystemResource,
                          SearchRepository searchRepository,
                          @Qualifier("searchChatClient") ChatClient chatClient,
                          @Qualifier("ragChatClient") ChatClient ragChatClient,
-                         VectorStore vectorStore) {
+                         VectorStoreFactory vectorStoreFactory) {
         this.systemResource = systemResource;
         this.semanticSystemResource = semanticSystemResource;
         this.searchRepository = searchRepository;
         this.chatClient = chatClient;
         this.ragChatClient = ragChatClient;
-        this.vectorStore = vectorStore;
+        this.vectorStoreFactory = vectorStoreFactory;
     }
 
 
@@ -186,7 +187,7 @@ public class SearchService {
         // Step 4: Execute semantic search using VectorStore
         // VectorStore will automatically generate embeddings from the query text
         Builder searchRequestBuilder = builder()
-                        .query(freeTextQuery)
+                        .query(queryGenerationResponse.q())
                         .topK(10);
 
         if (filterExpression != null) {
@@ -194,7 +195,7 @@ public class SearchService {
         }
 
         org.springframework.ai.vectorstore.SearchRequest searchRequest = searchRequestBuilder.build();
-        List<Document> results = vectorStore.similaritySearch(searchRequest);
+        List<Document> results = vectorStoreFactory.forCollection(collection).similaritySearch(searchRequest);
 
         log.debug("Semantic search returned {} results", results.size());
 
@@ -204,6 +205,7 @@ public class SearchService {
                     Map<String, Object> docMap = new HashMap<>();
                     docMap.put("id", doc.getId());
                     docMap.put("content", doc.getText());
+                    docMap.put("similarity_score", doc.getMetadata().get("distance")); // Add score
                     docMap.putAll(doc.getMetadata());
                     return docMap;
                 })
