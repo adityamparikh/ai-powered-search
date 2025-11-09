@@ -211,11 +211,8 @@ public class SearchService {
                     } else if (scoreObj != null) {
                         docMap.put("similarity_score", scoreObj);
                     }
-                    // copy metadata but remove embedding/vector payloads
-                    Map<String, Object> meta = new HashMap<>(doc.getMetadata());
-                    meta.remove("embedding");
-                    meta.remove("vector");
-                    docMap.putAll(meta);
+                    // copy metadata as-is
+                    docMap.putAll(doc.getMetadata());
                     return docMap;
                 })
                 .toList();

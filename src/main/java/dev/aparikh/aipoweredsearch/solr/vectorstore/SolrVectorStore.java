@@ -504,7 +504,8 @@ public class SolrVectorStore extends AbstractObservationVectorStore {
         }
 
         // Extract score and normalize for cosine similarity
-        Float score = (Float) solrDoc.getFieldValue("score");
+        Number scoreNum = (Number) solrDoc.getFieldValue("score");
+        Double score = scoreNum != null ? scoreNum.doubleValue() : null;
 
         // Apply similarity threshold if score is available
         if (score != null && similarityThreshold >= 0) {
@@ -561,10 +562,6 @@ public class SolrVectorStore extends AbstractObservationVectorStore {
             metadata.put("score", score);
         }
 
-        // Add embedding to metadata if present
-        if (embedding != null) {
-            metadata.put("embedding", embedding);
-        }
 
         // Build document
         return Document.builder()
