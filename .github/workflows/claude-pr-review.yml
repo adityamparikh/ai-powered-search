@@ -1,0 +1,221 @@
+name: Claude AI Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  pull_request_review_comment:
+    types: [created]
+
+jobs:
+  claude-review:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Setup Java
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'temurin'
+        java-version: '25'
+
+    - name: Get changed files
+      id: changed-files
+      uses: tj-actions/changed-files@v41
+      with:
+        files: |
+          *.java
+          *.kt
+          *.kts
+          *.xml
+          *.properties
+          *.yml
+          *.yaml
+
+    - name: Prepare review context
+      id: prepare-context
+      run: |
+        echo "## Pull Request Changes" > pr-changes.md
+        echo "" >> pr-changes.md
+        echo "**Changed Files:**" >> pr-changes.md
+        echo "${{ steps.changed-files.outputs.all_changed_files }}" | tr ' ' '\n' >> pr-changes.md
+        echo "" >> pr-changes.md
+
+        # Get the diff for changed files
+        echo "## Code Changes" >> pr-changes.md
+        for file in ${{ steps.changed-files.outputs.all_changed_files }}; do
+          echo "" >> pr-changes.md
+          echo "### $file" >> pr-changes.md
+          echo '```diff' >> pr-changes.md
+          git diff origin/${{ github.base_ref }}..HEAD -- "$file" | head -1000 >> pr-changes.md
+          echo '```' >> pr-changes.md
+        done
+
+        # Prepare the review prompt
+        cat > review-prompt.txt << 'EOF'
+        You are an expert code reviewer for a Spring Boot application with AI-powered search capabilities.
+        Please review the following code changes and provide feedback on:
+
+        1. **Code Quality**
+           - Clean code principles adherence
+           - SOLID principles compliance
+           - Design patterns usage
+           - Code maintainability and readability
+
+        2. **Security**
+           - SQL injection vulnerabilities
+           - XSS vulnerabilities
+           - Authentication/authorization issues
+           - Sensitive data exposure
+           - Dependency vulnerabilities
+
+        3. **Performance**
+           - Potential performance bottlenecks
+           - N+1 query problems
+           - Inefficient algorithms
+           - Memory leaks
+           - Resource management
+
+        4. **Best Practices**
+           - Spring Boot conventions
+           - RESTful API design
+           - Error handling
+           - Logging practices
+           - Testing coverage
+
+        5. **AI/ML Specific**
+           - Prompt engineering quality
+           - Vector store usage efficiency
+           - Embedding model configuration
+           - RAG implementation correctness
+
+        Format your response as:
+        ## Summary
+        Brief overview of the changes
+
+        ## Strengths
+        - What's done well
+
+        ## Issues Found
+        ### Critical (Must Fix)
+        - Issues that block merging
+
+        ### Important (Should Fix)
+        - Issues that should be addressed
+
+        ### Suggestions (Nice to Have)
+        - Optional improvements
+
+        ## Code Examples
+        Provide specific code suggestions where applicable
+        EOF
+
+    - name: Claude AI Review
+      id: claude-review
+      env:
+        ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      run: |
+        # Install Python and anthropic SDK
+        pip install anthropic
+
+        # Create Python script for Claude review
+        cat > claude_review.py << 'PYTHON_EOF'
+        import os
+        import sys
+        from anthropic import Anthropic
+
+        # Read the review prompt and changes
+        with open('review-prompt.txt', 'r') as f:
+            prompt = f.read()
+
+        with open('pr-changes.md', 'r') as f:
+            changes = f.read()
+
+        # Limit changes to avoid token limits
+        if len(changes) > 30000:
+            changes = changes[:30000] + "\n\n[... diff truncated due to size ...]"
+
+        # Initialize Claude
+        client = Anthropic(api_key=os.environ['ANTHROPIC_API_KEY'])
+
+        try:
+            # Request review from Claude
+            message = client.messages.create(
+                model="claude-3-5-sonnet-20241022",
+                max_tokens=4000,
+                temperature=0,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": f"{prompt}\n\n---\n\nCode changes to review:\n\n{changes}"
+                    }
+                ]
+            )
+
+            # Write review to file
+            with open('claude-review.md', 'w') as f:
+                f.write(message.content[0].text)
+
+            print("Review completed successfully")
+
+        except Exception as e:
+            print(f"Error during review: {e}")
+            sys.exit(1)
+        PYTHON_EOF
+
+        # Run the review
+        python claude_review.py
+
+    - name: Post review comment
+      if: success()
+      uses: actions/github-script@v7
+      with:
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        script: |
+          const fs = require('fs');
+          const review = fs.readFileSync('claude-review.md', 'utf8');
+
+          // Post the review as a comment
+          await github.rest.issues.createComment({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: context.issue.number,
+            body: `## 🤖 Claude AI Code Review\n\n${review}\n\n---\n*This review was automatically generated by Claude AI (claude-3-5-sonnet). Please consider the suggestions but use your judgment.*`
+          });
+
+    - name: Check for critical issues
+      id: check-critical
+      run: |
+        if grep -q "### Critical (Must Fix)" claude-review.md; then
+          echo "has_critical=true" >> $GITHUB_OUTPUT
+          echo "❌ Critical issues found in code review" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "has_critical=false" >> $GITHUB_OUTPUT
+          echo "✅ No critical issues found in code review" >> $GITHUB_STEP_SUMMARY
+        fi
+
+    - name: Set PR status
+      if: always()
+      uses: actions/github-script@v7
+      with:
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        script: |
+          const hasCritical = '${{ steps.check-critical.outputs.has_critical }}' === 'true';
+
+          await github.rest.repos.createCommitStatus({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            sha: context.payload.pull_request.head.sha,
+            state: hasCritical ? 'failure' : 'success',
+            description: hasCritical
+              ? 'Critical issues found - review required'
+              : 'Code review passed',
+            context: 'Claude AI Review'
+          });

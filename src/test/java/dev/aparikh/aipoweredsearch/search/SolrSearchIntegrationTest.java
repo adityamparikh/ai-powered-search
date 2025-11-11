@@ -1,8 +1,6 @@
-package dev.aparikh.aipoweredsearch.search.repository;
+package dev.aparikh.aipoweredsearch.search;
 
 import dev.aparikh.aipoweredsearch.config.PostgresTestConfiguration;
-import dev.aparikh.aipoweredsearch.search.MockChatModelConfiguration;
-import dev.aparikh.aipoweredsearch.search.SolrTestBase;
 import dev.aparikh.aipoweredsearch.search.model.SearchRequest;
 import dev.aparikh.aipoweredsearch.search.model.SearchResponse;
 import org.junit.jupiter.api.Test;

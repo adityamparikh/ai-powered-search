@@ -1,0 +1,183 @@
+# Claude AI Code Review Configuration
+
+# Enable/disable Claude reviews
+enabled: true
+
+# Review settings
+review:
+  # Model to use for reviews
+  model: claude-3-5-sonnet-20241022
+
+  # Maximum tokens for response
+  max_tokens: 4000
+
+  # Temperature (0 = deterministic, 1 = creative)
+  temperature: 0
+
+  # Review on these PR events
+  triggers:
+    - opened
+    - synchronize
+    - reopened
+
+# File patterns to review
+include_patterns:
+  - "*.java"
+  - "*.kt"
+  - "*.kts"
+  - "build.gradle*"
+  - "pom.xml"
+  - "*.properties"
+  - "*.yml"
+  - "*.yaml"
+  - "Dockerfile*"
+
+# File patterns to exclude from review
+exclude_patterns:
+  - "**/test/**"
+  - "**/generated/**"
+  - "**/*.min.js"
+  - "**/*.min.css"
+  - "**/node_modules/**"
+  - "**/target/**"
+  - "**/build/**"
+
+# Review focus areas
+focus_areas:
+  code_quality:
+    enabled: true
+    priority: high
+    checks:
+      - clean_code_principles
+      - solid_principles
+      - design_patterns
+      - maintainability
+      - readability
+      - naming_conventions
+
+  security:
+    enabled: true
+    priority: critical
+    checks:
+      - sql_injection
+      - xss_vulnerabilities
+      - authentication_issues
+      - authorization_issues
+      - sensitive_data_exposure
+      - dependency_vulnerabilities
+      - owasp_top_10
+
+  performance:
+    enabled: true
+    priority: high
+    checks:
+      - algorithm_efficiency
+      - database_queries
+      - memory_management
+      - resource_leaks
+      - caching_opportunities
+      - async_processing
+
+  spring_boot:
+    enabled: true
+    priority: medium
+    checks:
+      - spring_conventions
+      - rest_api_design
+      - dependency_injection
+      - configuration_best_practices
+      - actuator_endpoints
+      - security_configuration
+
+  ai_ml:
+    enabled: true
+    priority: high
+    checks:
+      - prompt_engineering
+      - vector_store_efficiency
+      - embedding_configuration
+      - rag_implementation
+      - model_selection
+      - token_optimization
+
+  testing:
+    enabled: true
+    priority: high
+    checks:
+      - test_coverage
+      - test_quality
+      - mocking_practices
+      - integration_tests
+      - unit_tests
+
+# Severity levels for issues
+severity_levels:
+  critical:
+    block_merge: true
+    label: "critical-issue"
+    color: "d73a4a"
+
+  high:
+    block_merge: false
+    label: "high-priority"
+    color: "e99695"
+
+  medium:
+    block_merge: false
+    label: "medium-priority"
+    color: "fbca04"
+
+  low:
+    block_merge: false
+    label: "suggestion"
+    color: "0075ca"
+
+# Comment formatting
+comment:
+  # Add emoji to make comments more readable
+  use_emoji: true
+
+  # Include code suggestions
+  include_suggestions: true
+
+  # Include links to documentation
+  include_doc_links: true
+
+  # Maximum comment length (characters)
+  max_length: 10000
+
+# Integration settings
+integrations:
+  # Post review summary to Slack
+  slack:
+    enabled: false
+    webhook_url: "${SLACK_WEBHOOK_URL}"
+
+  # Create GitHub issues for critical findings
+  github_issues:
+    enabled: false
+    auto_create: false
+    assignee: "${PR_AUTHOR}"
+
+# Rate limiting
+rate_limit:
+  # Maximum reviews per hour
+  max_per_hour: 10
+
+  # Maximum reviews per PR
+  max_per_pr: 3
+
+# Custom prompts (optional)
+custom_prompts:
+  # Additional context about the project
+  project_context: |
+    This is an AI-powered search application using Spring Boot 3.5.7 and Java 21 LTS.
+    It integrates Apache Solr for search, Anthropic Claude for AI, and OpenAI for embeddings.
+    The application follows package-by-feature architecture and uses Spring AI for LLM integration.
+
+  # Additional review guidelines
+  additional_guidelines: |
+    - Focus on Spring AI best practices
+    - Ensure proper use of reactive programming where applicable
+    - Check for proper error handling with AI service calls
+    - Verify that API keys and secrets are properly managed

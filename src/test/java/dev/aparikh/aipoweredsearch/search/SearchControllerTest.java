@@ -1,7 +1,6 @@
-package dev.aparikh.aipoweredsearch.search.controller;
+package dev.aparikh.aipoweredsearch.search;
 
 import dev.aparikh.aipoweredsearch.search.model.SearchResponse;
-import dev.aparikh.aipoweredsearch.search.service.SearchService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;

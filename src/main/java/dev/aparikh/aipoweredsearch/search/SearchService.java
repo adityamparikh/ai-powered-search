@@ -1,0 +1,261 @@
+package dev.aparikh.aipoweredsearch.search;
+
+import dev.aparikh.aipoweredsearch.search.model.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.memory.ChatMemory;
+import org.springframework.ai.document.Document;
+import org.springframework.ai.vectorstore.VectorStore;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.io.Resource;
+import org.springframework.stereotype.Service;
+
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+import static org.springframework.ai.vectorstore.SearchRequest.Builder;
+import static org.springframework.ai.vectorstore.SearchRequest.builder;
+
+/**
+ * Service layer for AI-enhanced search operations.
+ *
+ * <p>This service orchestrates various search strategies including:
+ * <ul>
+ *   <li>Traditional keyword search with AI-powered query generation</li>
+ *   <li>Semantic vector search using embeddings and similarity matching</li>
+ *   <li>RAG-based conversational question answering</li>
+ * </ul>
+ *
+ * <p>The service integrates multiple AI models and search backends:
+ * <ul>
+ *   <li>Claude AI (Anthropic) for natural language understanding and response generation</li>
+ *   <li>OpenAI embeddings for vector similarity search</li>
+ *   <li>Apache Solr for both traditional and vector-based search</li>
+ *   <li>PostgreSQL for conversation history persistence</li>
+ * </ul>
+ *
+ * @author Aditya Parikh
+ * @since 1.0.0
+ * @see SearchRepository
+ * @see SearchController
+ */
+@Service
+public class SearchService {
+
+    private final Logger log = LoggerFactory.getLogger(SearchService.class);
+
+    private final Resource systemResource;
+    private final Resource semanticSystemResource;
+    private final SearchRepository searchRepository;
+    private final ChatClient chatClient;
+    private final ChatClient ragChatClient;
+    private final VectorStore vectorStore;
+
+    /**
+     * Constructs a new SearchService with required dependencies.
+     *
+     * @param systemResource the system prompt template for traditional search query generation
+     * @param semanticSystemResource the system prompt template for semantic search filter parsing
+     * @param searchRepository the repository for low-level Solr operations
+     * @param chatClient the ChatClient configured for search query generation
+     * @param ragChatClient the ChatClient configured with QuestionAnswerAdvisor for RAG
+     * @param vectorStore the VectorStore implementation (SolrVectorStore) for semantic search
+     */
+    public SearchService(@Value("classpath:/prompts/system-message.st") Resource systemResource,
+                         @Value("classpath:/prompts/semantic-search-system-message.st") Resource semanticSystemResource,
+                         SearchRepository searchRepository,
+                         @Qualifier("searchChatClient") ChatClient chatClient,
+                         @Qualifier("ragChatClient") ChatClient ragChatClient,
+                         VectorStore vectorStore) {
+        this.systemResource = systemResource;
+        this.semanticSystemResource = semanticSystemResource;
+        this.searchRepository = searchRepository;
+        this.chatClient = chatClient;
+        this.ragChatClient = ragChatClient;
+        this.vectorStore = vectorStore;
+    }
+
+
+    /**
+     * Performs AI-enhanced traditional search on a Solr collection.
+     *
+     * <p>This method uses Claude AI to intelligently parse natural language queries
+     * and generate optimized Solr search parameters including:
+     * <ul>
+     *   <li>Query terms (q parameter)</li>
+     *   <li>Filter queries (fq parameter) for refinement</li>
+     *   <li>Sorting criteria</li>
+     *   <li>Field list for response</li>
+     *   <li>Faceting parameters for aggregation</li>
+     * </ul>
+     *
+     * <p>Example queries that Claude can understand:
+     * <ul>
+     *   <li>"find all Java books published after 2020, sorted by date"</li>
+     *   <li>"search for spring framework tutorials with code examples"</li>
+     *   <li>"show me electronics under $500, group by brand"</li>
+     * </ul>
+     *
+     * @param collection the name of the Solr collection to search
+     * @param freeTextQuery the natural language search query
+     * @return a {@link SearchResponse} containing matched documents and facets
+     * @throws IllegalArgumentException if collection or query is null or empty
+     */
+    public SearchResponse search(String collection, String freeTextQuery) {
+        log.debug("Searching for collection: {}, query: {}", collection, freeTextQuery);
+
+        List<FieldInfo> fields = searchRepository.getFieldsWithSchema(collection);
+
+        String userMessage = String.format("""
+                The free text query is: %s
+                The available fields with their types are: %s
+                """, freeTextQuery, fields);
+
+        String conversationId = "007";
+
+        QueryGenerationResponse queryGenerationResponse = chatClient.prompt()
+                .system(systemResource)
+                .user(userMessage)
+                .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, conversationId))
+                .call()
+                .entity(QueryGenerationResponse.class);
+
+
+        assert queryGenerationResponse != null;
+        log.debug("Query generation response: {}", queryGenerationResponse);
+        SearchRequest searchRequest = new SearchRequest(
+                queryGenerationResponse.q(),
+                queryGenerationResponse.fq(),
+                queryGenerationResponse.sort(),
+                queryGenerationResponse.fl(),
+                new SearchRequest.Facet(queryGenerationResponse.facetFields(), queryGenerationResponse.facetQuery())
+        );
+        log.debug("Search request: {}", searchRequest);
+        return searchRepository.search(collection, searchRequest);
+    }
+
+    /**
+     * Performs semantic search using vector similarity.
+     *
+     * <p>This method:
+     * <ol>
+     *   <li>Uses Claude AI to parse natural language filters from the query</li>
+     *   <li>Generates a vector embedding from the free text query using OpenAI (automatically by VectorStore)</li>
+     *   <li>Executes vector similarity search in Solr with KNN using VectorStore</li>
+     *   <li>Returns semantically similar results ranked by cosine similarity</li>
+     * </ol>
+     * </p>
+     *
+     * @param collection    the Solr collection to search
+     * @param freeTextQuery the natural language search query
+     * @return search response with semantically similar documents
+     */
+    public SearchResponse semanticSearch(String collection, String freeTextQuery) {
+        log.debug("Semantic search for collection: {}, query: {}", collection, freeTextQuery);
+
+        // Step 1: Get field schema information
+        List<FieldInfo> fields = searchRepository.getFieldsWithSchema(collection);
+
+        // Step 2: Use Claude AI to parse filters and other search parameters
+        String userMessage = String.format("""
+                The free text query is: %s
+                The available fields with their types are: %s
+                """, freeTextQuery, fields);
+
+        String conversationId = "007";
+
+        QueryGenerationResponse queryGenerationResponse = chatClient.prompt()
+                .system(semanticSystemResource)
+                .user(userMessage)
+                .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, conversationId))
+                .call()
+                .entity(QueryGenerationResponse.class);
+
+        assert queryGenerationResponse != null;
+        log.debug("Query generation response for semantic search: {}", queryGenerationResponse);
+
+        // Step 3: Build filter expression if present
+        String filterExpression = null;
+        if (queryGenerationResponse.fq() != null && !queryGenerationResponse.fq().isEmpty()) {
+            filterExpression = String.join(" AND ", queryGenerationResponse.fq());
+        }
+
+        // Step 4: Execute semantic search using VectorStore
+        // VectorStore will automatically generate embeddings from the query text
+        Builder searchRequestBuilder = builder()
+                        .query(freeTextQuery)
+                        .topK(10);
+
+        if (filterExpression != null) {
+            searchRequestBuilder = searchRequestBuilder.filterExpression(filterExpression);
+        }
+
+        org.springframework.ai.vectorstore.SearchRequest searchRequest = searchRequestBuilder.build();
+        List<Document> results = vectorStore.similaritySearch(searchRequest);
+
+        log.debug("Semantic search returned {} results", results.size());
+
+        // Step 5: Convert Spring AI Documents back to SearchResponse format
+        List<Map<String, Object>> documents = results.stream()
+                .map(doc -> {
+                    Map<String, Object> docMap = new HashMap<>();
+                    docMap.put("id", doc.getId());
+                    docMap.put("content", doc.getText());
+                    docMap.putAll(doc.getMetadata());
+                    return docMap;
+                })
+                .toList();
+
+        // Note: Faceting not currently supported in VectorStore similaritySearch
+        // Could be enhanced by making a parallel Solr query for facets if needed
+        return new SearchResponse(documents, Map.of());
+    }
+
+    /**
+     * Performs conversational question-answering with RAG (Retrieval-Augmented Generation).
+     *
+     * <p>This method:
+     * <ol>
+     *   <li>Uses QuestionAnswerAdvisor to automatically retrieve relevant context from VectorStore</li>
+     *   <li>Passes the question and retrieved context to Claude AI</li>
+     *   <li>Returns a natural language answer based on the indexed documents</li>
+     *   <li>Maintains conversation history for follow-up questions</li>
+     * </ol>
+     * </p>
+     *
+     * <p>Unlike semantic search which returns document matches, this method returns
+     * a conversational answer synthesized from the retrieved documents.</p>
+     *
+     * @param askRequest the question and conversation context
+     * @return conversational answer with source document IDs
+     */
+    public AskResponse ask(AskRequest askRequest) {
+        log.debug("RAG question answering for: {}", askRequest.question());
+
+        String conversationId = askRequest.conversationId() != null ?
+                askRequest.conversationId() : "default";
+
+        // The QuestionAnswerAdvisor automatically:
+        // 1. Searches the VectorStore for relevant documents
+        // 2. Adds them as context to the prompt
+        // 3. Claude generates an answer based on that context
+        String answer = ragChatClient.prompt()
+                .user(askRequest.question())
+                .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, conversationId))
+                .call()
+                .content();
+
+        log.debug("RAG answer generated: {}", answer);
+
+        // Note: We don't have direct access to which documents were retrieved by QuestionAnswerAdvisor
+        // In a production system, you might want to:
+        // 1. Manually retrieve documents first
+        // 2. Pass them to Claude
+        // 3. Return the document IDs as sources
+        // For now, we return an empty sources list
+        return new AskResponse(answer, conversationId, List.of());
+    }
+}

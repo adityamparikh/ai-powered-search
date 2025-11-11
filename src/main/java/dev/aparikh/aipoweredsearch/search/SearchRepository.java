@@ -1,4 +1,4 @@
-package dev.aparikh.aipoweredsearch.search.repository;
+package dev.aparikh.aipoweredsearch.search;
 
 import dev.aparikh.aipoweredsearch.search.model.FieldInfo;
 import dev.aparikh.aipoweredsearch.search.model.SearchRequest;
@@ -14,7 +14,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Repository;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -57,10 +56,10 @@ public class SearchRepository {
 
         try {
             QueryResponse response = solrClient.query(collection, query);
-            
+
             // Handle facet fields - they can be null if no facets are requested
-            Map<String, List<SearchResponse.FacetCount>> facetCountsMap = 
-                response.getFacetFields() != null ? 
+            Map<String, List<SearchResponse.FacetCount>> facetCountsMap =
+                response.getFacetFields() != null ?
                     response.getFacetFields().stream()
                             .collect(Collectors.toMap(
                                     f -> f.getName(),
@@ -68,13 +67,88 @@ public class SearchRepository {
                                             .map(c -> new SearchResponse.FacetCount(c.getName(), c.getCount()))
                                             .toList()))
                     : Map.of();
-                    
+
             return new SearchResponse(
                     response.getResults().stream().map(d -> (Map<String, Object>) d).toList(),
                     facetCountsMap
             );
         } catch (Exception e) {
             throw new RuntimeException(e);
+        }
+    }
+
+    /**
+     * Performs semantic search using vector similarity (KNN).
+     *
+     * @param collection     the Solr collection to search
+     * @param queryVector    the query embedding vector
+     * @param searchRequest  search parameters (filters, sort, fields, facets)
+     * @param topK          number of nearest neighbors to return
+     * @return search response with semantically similar documents
+     */
+    public SearchResponse semanticSearch(String collection, List<Float> queryVector, SearchRequest searchRequest, int topK) {
+        log.debug("Performing semantic search in collection: {} with topK: {}", collection, topK);
+
+        // Build KNN query using Solr's vector search syntax
+        // Format: {!knn f=vector topK=10}[0.1, 0.2, 0.3, ...]
+        String vectorString = queryVector.stream()
+                .map(String::valueOf)
+                .collect(Collectors.joining(", ", "[", "]"));
+
+        String knnQuery = String.format("{!knn f=vector topK=%d}%s", topK, vectorString);
+
+        SolrQuery query = new SolrQuery(knnQuery);
+
+        // Apply filter queries from search request
+        if (searchRequest.filterQueries() != null) {
+            searchRequest.filterQueries().forEach(query::addFilterQuery);
+        }
+
+        // Apply custom sort (default is by vector similarity score)
+        if (searchRequest.hasSort()) {
+            query.set("sort", searchRequest.sort());
+        }
+
+        // Set fields to return
+        if (searchRequest.hasFieldList()) {
+            query.setFields(searchRequest.fieldList());
+        } else {
+            // Default fields for semantic search
+            query.setFields("*", "score");
+        }
+
+        // Handle faceting
+        if (searchRequest.hasFacets()) {
+            query.setFacet(true);
+            searchRequest.facet().fields().forEach(query::addFacetField);
+            if (searchRequest.facet().query() != null) {
+                query.addFacetQuery(searchRequest.facet().query());
+            }
+        }
+
+        try {
+            QueryResponse response = solrClient.query(collection, query);
+
+            log.debug("Semantic search returned {} results", response.getResults().size());
+
+            // Handle facet fields
+            Map<String, List<SearchResponse.FacetCount>> facetCountsMap =
+                response.getFacetFields() != null ?
+                    response.getFacetFields().stream()
+                            .collect(Collectors.toMap(
+                                    f -> f.getName(),
+                                    f -> f.getValues().stream()
+                                            .map(c -> new SearchResponse.FacetCount(c.getName(), c.getCount()))
+                                            .toList()))
+                    : Map.of();
+
+            return new SearchResponse(
+                    response.getResults().stream().map(d -> (Map<String, Object>) d).toList(),
+                    facetCountsMap
+            );
+        } catch (Exception e) {
+            log.error("Error performing semantic search in collection: {}", collection, e);
+            throw new RuntimeException("Semantic search failed: " + e.getMessage(), e);
         }
     }
 
