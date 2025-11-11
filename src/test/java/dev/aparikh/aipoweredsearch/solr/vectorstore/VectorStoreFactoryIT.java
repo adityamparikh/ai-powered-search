@@ -8,11 +8,7 @@ import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.test.mock.mockito.MockBean;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Import;
-import org.springframework.context.annotation.Primary;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.SolrContainer;
@@ -36,8 +32,7 @@ import static org.mockito.Mockito.when;
  * Integration tests for VectorStoreFactory using Solr Testcontainers.
  * Tests caching behavior, concurrent access, and proper VectorStore creation.
  */
-@SpringBootTest(classes = {VectorStoreFactoryIT.TestConfig.class},
-    properties = "spring.main.web-application-type=none")
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
 @Testcontainers
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class VectorStoreFactoryIT {
@@ -329,18 +324,5 @@ class VectorStoreFactoryIT {
         assertThat(store2Again).isSameAs(store2);
         assertThat(store3Again).isSameAs(store3);
         assertThat(vectorStoreFactory.getCacheSize()).isEqualTo(3);
-    }
-
-    @TestConfiguration
-    @Import({VectorStoreFactory.class})
-    static class TestConfig {
-
-        @Bean
-        @Primary
-        public SolrClient solrClient() {
-            String solrUrl = "http://" + solrContainer.getHost() + ":" +
-                           solrContainer.getSolrPort() + "/solr";
-            return new Http2SolrClient.Builder(solrUrl).build();
-        }
     }
 }
