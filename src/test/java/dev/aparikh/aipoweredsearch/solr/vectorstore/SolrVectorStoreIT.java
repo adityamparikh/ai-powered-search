@@ -437,7 +437,7 @@ class SolrVectorStoreIT {
         public SolrClient solrClient() {
             // Base Solr URL without collection - collection is specified separately in VectorStore.builder()
             String solrUrl = "http://" + solrContainer.getHost() + ":" + solrContainer.getSolrPort() + "/solr";
-            return new org.apache.solr.client.solrj.impl.HttpSolrClient.Builder(solrUrl).build();
+            return new org.apache.solr.client.solrj.impl.Http2SolrClient.Builder(solrUrl).build();
         }
 
         @Bean

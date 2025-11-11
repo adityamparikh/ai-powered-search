@@ -15,6 +15,7 @@ import org.testcontainers.utility.DockerImageName;
 import java.util.List;
 import java.util.Map;
 
+import static org.apache.solr.client.solrj.impl.Http2SolrClient.*;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
@@ -115,7 +116,7 @@ class SolrVectorStoreDebugTest {
     private void testWithRealEmbeddings() {
         try {
             String solrUrl = "http://" + solrContainer.getHost() + ":" + solrContainer.getSolrPort() + "/solr";
-            SolrClient solrClient = new org.apache.solr.client.solrj.impl.HttpSolrClient.Builder(solrUrl).build();
+            SolrClient solrClient = new Builder(solrUrl).build();
 
             OpenAiApi openAiApi = OpenAiApi.builder()
                     .apiKey(System.getenv("OPENAI_API_KEY"))

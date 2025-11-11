@@ -428,18 +428,6 @@ public class SolrVectorStore extends AbstractObservationVectorStore {
             }
         }
 
-        // Extract vector embedding
-        float[] embedding = null;
-        Object vectorObj = solrDoc.getFieldValue(options.vectorFieldName());
-        if (vectorObj instanceof List) {
-            @SuppressWarnings("unchecked")
-            List<Number> vectorList = (List<Number>) vectorObj;
-            embedding = new float[vectorList.size()];
-            for (int i = 0; i < vectorList.size(); i++) {
-                embedding[i] = vectorList.get(i).floatValue();
-            }
-        }
-
         // Extract metadata (fields with metadata prefix)
         Map<String, Object> metadata = new HashMap<>();
         solrDoc.getFieldNames().forEach(fieldName -> {
