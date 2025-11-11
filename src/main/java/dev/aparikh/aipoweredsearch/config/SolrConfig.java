@@ -68,7 +68,8 @@ import java.util.concurrent.TimeUnit;
 public class SolrConfig {
 
     private static final int CONNECTION_TIMEOUT_MS = 10000;
-    private static final int SOCKET_TIMEOUT_MS = 60000;
+    private static final int IDLE_TIMEOUT_MS = 60000;
+    private static final int REQUEST_TIMEOUT_MS = 60000;
     private static final String SOLR_PATH = "solr/";
 
     /**
@@ -90,7 +91,8 @@ public class SolrConfig {
      *
      * <ul>
      *   <li><strong>Connection Timeout</strong>: 10,000ms - Time to establish initial connection
-     *   <li><strong>Socket Timeout</strong>: 60,000ms - Time to wait for data/response
+     *   <li><strong>Idle Timeout</strong>: 60,000ms - Time before an idle connection is closed
+     *   <li><strong>Request Timeout</strong>: 60,000ms - Time to wait for a response from the server
      * </ul>
      *
      * <p><strong>Client Type:</strong>
@@ -140,9 +142,9 @@ public class SolrConfig {
 
         // Use Http2SolrClient (HTTP/2) with configured timeouts
         Http2SolrClient.Builder builder = new Http2SolrClient.Builder(url)
-                        .withConnectionTimeout(CONNECTION_TIMEOUT_MS, TimeUnit.MILLISECONDS)
-                        .withIdleTimeout(SOCKET_TIMEOUT_MS, TimeUnit.MILLISECONDS)
-                        .withRequestTimeout(SOCKET_TIMEOUT_MS, TimeUnit.MILLISECONDS);
-                return builder.build();
+                .withConnectionTimeout(CONNECTION_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+                .withIdleTimeout(IDLE_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+                .withRequestTimeout(REQUEST_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+        return builder.build();
     }
 }

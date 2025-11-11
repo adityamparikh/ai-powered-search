@@ -52,7 +52,9 @@ dependencies {
     implementation("commons-io:commons-io:2.15.1")
     implementation("org.apache.commons:commons-lang3:3.18.0")
 
-    // Apache HttpComponents for Spring REST clients (to avoid Jetty conflicts)
+    // Apache HttpComponents 5.x - kept for potential future use with REST clients
+    // Note: Currently not actively used as HTTP/2 support is provided by Jetty 11.x
+    // These can be removed if confirmed unnecessary after further testing
     implementation("org.apache.httpcomponents.client5:httpclient5:5.3.1")
     implementation("org.apache.httpcomponents.core5:httpcore5:5.2.5")
 

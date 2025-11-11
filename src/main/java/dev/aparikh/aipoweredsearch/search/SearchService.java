@@ -226,7 +226,14 @@ public class SearchService {
         }
 
         org.springframework.ai.vectorstore.SearchRequest searchRequest = searchRequestBuilder.build();
-        List<Document> results = vectorStoreFactory.forCollection(collection).similaritySearch(searchRequest);
+
+        // Get VectorStore instance with null check
+        VectorStore vectorStore = vectorStoreFactory.forCollection(collection);
+        if (vectorStore == null) {
+            throw new IllegalStateException("Failed to get VectorStore for collection: " + collection);
+        }
+
+        List<Document> results = vectorStore.similaritySearch(searchRequest);
 
         log.debug("Semantic search returned {} results", results.size());
 
