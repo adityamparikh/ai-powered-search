@@ -18,6 +18,7 @@ public class TestUtils {
 
     /**
      * Creates a Solr collection with vector field support for testing.
+     * If the collection already exists, this method does nothing.
      *
      * @param solrClient the Solr client to use
      * @param collectionName the name of the collection to create
@@ -26,6 +27,21 @@ public class TestUtils {
      */
     public static void createSolrCollectionWithVectorField(SolrClient solrClient, String collectionName)
             throws IOException, SolrServerException {
+
+        // Check if collection already exists
+        try {
+            CollectionAdminRequest.List listRequest = new CollectionAdminRequest.List();
+            CollectionAdminResponse listResponse = listRequest.process(solrClient);
+            @SuppressWarnings("unchecked")
+            List<String> collections = (List<String>) listResponse.getResponse().get("collections");
+
+            if (collections != null && collections.contains(collectionName)) {
+                // Collection already exists, skip creation
+                return;
+            }
+        } catch (Exception e) {
+            // If list fails, try to create anyway
+        }
 
         // Create the collection with default config
         CollectionAdminRequest.Create createRequest = CollectionAdminRequest

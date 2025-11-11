@@ -1,6 +1,8 @@
 package dev.aparikh.aipoweredsearch.solr.vectorstore;
 
 import dev.aparikh.aipoweredsearch.TestUtils;
+import dev.aparikh.aipoweredsearch.config.SolrConfig;
+import dev.aparikh.aipoweredsearch.config.SolrTestConfiguration;
 import org.apache.solr.client.solrj.SolrClient;
 import org.apache.solr.client.solrj.impl.Http2SolrClient;
 import org.junit.jupiter.api.*;
@@ -32,15 +34,12 @@ import static org.mockito.Mockito.when;
  * Integration tests for VectorStoreFactory using Solr Testcontainers.
  * Tests caching behavior, concurrent access, and proper VectorStore creation.
  */
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
+@SpringBootTest(
+        webEnvironment = SpringBootTest.WebEnvironment.NONE,
+classes = {SolrTestConfiguration.class, SolrConfig.class, VectorStoreFactory.class})
 @Testcontainers
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class VectorStoreFactoryIT {
-
-    @Container
-    private static final SolrContainer solrContainer = new SolrContainer(
-            DockerImageName.parse("solr:slim"))
-            .withEnv("SOLR_HEAP", "512m");
 
     @Autowired
     private VectorStoreFactory vectorStoreFactory;
@@ -55,29 +54,14 @@ class VectorStoreFactoryIT {
     private static final String TEST_COLLECTION_2 = "test_collection_2";
     private static final String TEST_COLLECTION_3 = "test_collection_3";
 
-    @DynamicPropertySource
-    static void solrProperties(DynamicPropertyRegistry registry) {
-        registry.add("solr.url", () ->
-            "http://" + solrContainer.getHost() + ":" + solrContainer.getSolrPort() + "/solr");
-    }
-
-    @BeforeAll
-    static void beforeAll() throws Exception {
-        // Create test collections with vector field support
-        String solrUrl = "http://" + solrContainer.getHost() + ":" + solrContainer.getSolrPort() + "/solr";
-
-        try (Http2SolrClient adminClient = new Http2SolrClient.Builder(solrUrl).build()) {
-            // Create collections for testing
-            TestUtils.createSolrCollectionWithVectorField(adminClient, TEST_COLLECTION_1);
-            TestUtils.createSolrCollectionWithVectorField(adminClient, TEST_COLLECTION_2);
-            TestUtils.createSolrCollectionWithVectorField(adminClient, TEST_COLLECTION_3);
-        }
-    }
-
     @BeforeEach
-    void setUp() {
-        // Clear cache before each test
-        vectorStoreFactory.clearCache();
+    void beforeEach() throws Exception {
+
+            // Create collections for testing
+            TestUtils.createSolrCollectionWithVectorField(solrClient, TEST_COLLECTION_1);
+            TestUtils.createSolrCollectionWithVectorField(solrClient, TEST_COLLECTION_2);
+            TestUtils.createSolrCollectionWithVectorField(solrClient, TEST_COLLECTION_3);
+            vectorStoreFactory.clearCache();
 
         // Mock embedding model to return test embeddings
         List<Float> mockEmbedding = TestUtils.generateMockEmbedding(1536);
@@ -88,6 +72,8 @@ class VectorStoreFactoryIT {
         when(embeddingModel.embed(any(String.class)))
                 .thenReturn(embeddingArray);
     }
+
+
 
     @Test
     @Order(1)
