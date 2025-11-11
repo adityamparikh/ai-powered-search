@@ -19,9 +19,9 @@ jobs:
       (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
     runs-on: ubuntu-latest
     permissions:
-      contents: read
-      pull-requests: read
-      issues: read
+      contents: write  # Allow Claude to make code changes
+      pull-requests: write  # Allow Claude to update PRs
+      issues: write  # Allow Claude to comment on issues
       id-token: write
       actions: read # Required for Claude to read CI results on PRs
     steps:
@@ -29,6 +29,13 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+          cache: 'gradle'
 
       - name: Run Claude Code
         id: claude
@@ -40,11 +47,23 @@ jobs:
           additional_permissions: |
             actions: read
 
-          # Optional: Give a custom prompt to Claude. If this is not specified, Claude will perform the instructions specified in the comment that tagged it.
-          # prompt: 'Update the pull request description to include a summary of changes.'
+          # Custom context for Spring Boot application
+          prompt: |
+            You are working on a Spring Boot 3.5.7 application with Java 21.
+            This is an AI-powered search application using Apache Solr for search,
+            Anthropic Claude for AI, and OpenAI for embeddings.
+            The project uses Gradle for build management.
+            When making changes, ensure Spring Boot best practices and
+            maintain the package-by-feature architecture.
 
-          # Optional: Add claude_args to customize behavior and configuration
-          # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
-          # or https://docs.claude.com/en/docs/claude-code/cli-reference for available options
-          # claude_args: '--allowed-tools Bash(gh pr:*)'
+          # Claude args configured for Java/Spring Boot development
+          claude_args: |
+            --allowed-tools Bash(./gradlew:*) \
+            --allowed-tools Bash(git:*) \
+            --allowed-tools Bash(gh:*) \
+            --allowed-tools Edit \
+            --allowed-tools Read \
+            --allowed-tools Write \
+            --allowed-tools Glob \
+            --allowed-tools Grep
 
