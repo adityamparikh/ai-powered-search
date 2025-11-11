@@ -106,6 +106,13 @@ public class SearchService {
      * @throws IllegalArgumentException if collection or query is null or empty
      */
     public SearchResponse search(String collection, String freeTextQuery) {
+        if (collection == null || collection.trim().isEmpty()) {
+            throw new IllegalArgumentException("Collection name cannot be null or blank");
+        }
+        if (freeTextQuery == null || freeTextQuery.trim().isEmpty()) {
+            throw new IllegalArgumentException("Query cannot be null or blank");
+        }
+
         log.debug("Searching for collection: {}, query: {}", collection, freeTextQuery);
 
         List<FieldInfo> fields = searchRepository.getFieldsWithSchema(collection);
@@ -182,6 +189,13 @@ public class SearchService {
      * @return search response with semantically similar documents
      */
     public SearchResponse semanticSearch(String collection, String freeTextQuery, Integer k, Double minScore, String fieldsCsv) {
+        if (collection == null || collection.trim().isEmpty()) {
+            throw new IllegalArgumentException("Collection name cannot be null or blank");
+        }
+        if (freeTextQuery == null || freeTextQuery.trim().isEmpty()) {
+            throw new IllegalArgumentException("Query cannot be null or blank");
+        }
+
         log.debug("Semantic search for collection: {}, query: {}, k: {}, minScore: {}, fields: {}", collection, freeTextQuery, k, minScore, fieldsCsv);
 
         // Step 1: Get field schema information
@@ -227,12 +241,8 @@ public class SearchService {
 
         org.springframework.ai.vectorstore.SearchRequest searchRequest = searchRequestBuilder.build();
 
-        // Get VectorStore instance with null check
+        // Get VectorStore instance - factory guarantees non-null return or exception
         VectorStore vectorStore = vectorStoreFactory.forCollection(collection);
-        if (vectorStore == null) {
-            throw new IllegalStateException("Failed to get VectorStore for collection: " + collection);
-        }
-
         List<Document> results = vectorStore.similaritySearch(searchRequest);
 
         log.debug("Semantic search returned {} results", results.size());

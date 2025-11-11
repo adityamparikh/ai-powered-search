@@ -81,20 +81,8 @@ class VectorStoreFactoryTest {
     void testNullCollectionHandling() {
         // When & Then
         assertThatThrownBy(() -> factory.forCollection(null))
-                .isInstanceOf(NullPointerException.class);
-    }
-
-    @Test
-    void testEmptyCollectionName() {
-        // Given
-        String emptyCollection = "";
-
-        // When
-        VectorStore vectorStore = factory.forCollection(emptyCollection);
-
-        // Then
-        assertThat(vectorStore).isNotNull();
-        // Empty string is technically valid, but should be validated at a higher level
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Collection name cannot be null or blank");
     }
 
     @Test
@@ -215,5 +203,118 @@ class VectorStoreFactoryTest {
             VectorStore cachedStore = factory.forCollection(collection);
             assertThat(cachedStore).isSameAs(store);
         }
+    }
+
+    @Test
+    void testClearCache() {
+        // Given - populate cache with multiple collections
+        String collection1 = "collection1";
+        String collection2 = "collection2";
+        String collection3 = "collection3";
+
+        VectorStore store1 = factory.forCollection(collection1);
+        VectorStore store2 = factory.forCollection(collection2);
+        VectorStore store3 = factory.forCollection(collection3);
+
+        assertThat(factory.getCacheSize()).isEqualTo(3);
+
+        // When - clear the cache
+        factory.clearCache();
+
+        // Then - cache should be empty
+        assertThat(factory.getCacheSize()).isEqualTo(0);
+
+        // And - new instances should be created after clearing
+        VectorStore newStore1 = factory.forCollection(collection1);
+        assertThat(newStore1).isNotNull();
+        assertThat(newStore1).isNotSameAs(store1); // Different instance after clear
+        assertThat(factory.getCacheSize()).isEqualTo(1);
+    }
+
+    @Test
+    void testEvictSpecificCollection() {
+        // Given - populate cache with multiple collections
+        String collection1 = "collection1";
+        String collection2 = "collection2";
+        String collection3 = "collection3";
+
+        VectorStore store1 = factory.forCollection(collection1);
+        VectorStore store2 = factory.forCollection(collection2);
+        VectorStore store3 = factory.forCollection(collection3);
+
+        assertThat(factory.getCacheSize()).isEqualTo(3);
+
+        // When - evict a specific collection
+        VectorStore evictedStore = factory.evict(collection2);
+
+        // Then
+        assertThat(evictedStore).isSameAs(store2); // Returns the evicted instance
+        assertThat(factory.getCacheSize()).isEqualTo(2); // Cache size reduced
+
+        // The other collections should still be cached
+        assertThat(factory.forCollection(collection1)).isSameAs(store1);
+        assertThat(factory.forCollection(collection3)).isSameAs(store3);
+
+        // A new instance should be created for the evicted collection
+        VectorStore newStore2 = factory.forCollection(collection2);
+        assertThat(newStore2).isNotNull();
+        assertThat(newStore2).isNotSameAs(store2); // Different instance after eviction
+    }
+
+    @Test
+    void testEvictNonExistentCollection() {
+        // Given
+        String existingCollection = "existing";
+        String nonExistentCollection = "nonexistent";
+
+        factory.forCollection(existingCollection);
+        assertThat(factory.getCacheSize()).isEqualTo(1);
+
+        // When - evict a collection that doesn't exist
+        VectorStore result = factory.evict(nonExistentCollection);
+
+        // Then
+        assertThat(result).isNull(); // Should return null for non-existent
+        assertThat(factory.getCacheSize()).isEqualTo(1); // Cache size unchanged
+    }
+
+    @Test
+    void testGetCacheSize() {
+        // Given - empty cache
+        assertThat(factory.getCacheSize()).isEqualTo(0);
+
+        // When - add collections one by one
+        factory.forCollection("col1");
+        assertThat(factory.getCacheSize()).isEqualTo(1);
+
+        factory.forCollection("col2");
+        assertThat(factory.getCacheSize()).isEqualTo(2);
+
+        factory.forCollection("col3");
+        assertThat(factory.getCacheSize()).isEqualTo(3);
+
+        // Access existing collection shouldn't change size
+        factory.forCollection("col1");
+        assertThat(factory.getCacheSize()).isEqualTo(3);
+
+        // After eviction
+        factory.evict("col2");
+        assertThat(factory.getCacheSize()).isEqualTo(2);
+
+        // After clear
+        factory.clearCache();
+        assertThat(factory.getCacheSize()).isEqualTo(0);
+    }
+
+    @Test
+    void testBlankCollectionName() {
+        // When & Then - blank collection names should throw exception
+        assertThatThrownBy(() -> factory.forCollection(""))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Collection name cannot be null or blank");
+
+        assertThatThrownBy(() -> factory.forCollection("   "))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Collection name cannot be null or blank");
     }
 }

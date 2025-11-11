@@ -31,12 +31,6 @@ import java.util.concurrent.ConcurrentHashMap;
 @Component
 public class VectorStoreFactory {
 
-    /**
-     * Suggested maximum cache size for monitoring purposes.
-     * This is not enforced but can be used for alerting.
-     */
-    private static final int SUGGESTED_MAX_SIZE = 100;
-
     private final SolrClient solrClient;
     private final EmbeddingModel embeddingModel;
 
@@ -62,11 +56,11 @@ public class VectorStoreFactory {
      *
      * @param collection the name of the Solr collection
      * @return a VectorStore instance for the specified collection
-     * @throws NullPointerException if collection is null
+     * @throws IllegalArgumentException if collection is null or blank
      */
     public VectorStore forCollection(String collection) {
-        if (collection == null) {
-            throw new NullPointerException("Collection name cannot be null");
+        if (collection == null || collection.trim().isEmpty()) {
+            throw new IllegalArgumentException("Collection name cannot be null or blank");
         }
 
         // ConcurrentHashMap.computeIfAbsent is atomic and efficient
