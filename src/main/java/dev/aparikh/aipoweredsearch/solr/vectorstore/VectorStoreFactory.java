@@ -69,13 +69,6 @@ public class VectorStoreFactory {
             throw new NullPointerException("Collection name cannot be null");
         }
 
-        // Log warning if cache is growing large (optional monitoring)
-        int size = cache.size();
-        if (size >= SUGGESTED_MAX_SIZE && size % 10 == 0) {
-            // In production, this could trigger metrics/alerts
-            // For now, we just note it internally
-        }
-
         // ConcurrentHashMap.computeIfAbsent is atomic and efficient
         // It guarantees that the mapping function is called at most once
         return cache.computeIfAbsent(collection, c ->
