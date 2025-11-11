@@ -13,6 +13,7 @@ jobs:
       contents: read
       pull-requests: write
       issues: write
+      statuses: write  # Add permission to create commit statuses
 
     steps:
     - name: Checkout code
@@ -24,7 +25,7 @@ jobs:
       uses: actions/setup-java@v4
       with:
         distribution: 'temurin'
-        java-version: '25'
+        java-version: '21'
 
     - name: Get changed files
       id: changed-files
@@ -148,7 +149,7 @@ jobs:
         try:
             # Request review from Claude
             message = client.messages.create(
-                model="claude-3-5-sonnet-20241022",
+                model="claude-3-5-sonnet-latest",
                 max_tokens=4000,
                 temperature=0,
                 messages=[
@@ -209,13 +210,20 @@ jobs:
         script: |
           const hasCritical = '${{ steps.check-critical.outputs.has_critical }}' === 'true';
 
-          await github.rest.repos.createCommitStatus({
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            sha: context.payload.pull_request.head.sha,
-            state: hasCritical ? 'failure' : 'success',
-            description: hasCritical
-              ? 'Critical issues found - review required'
-              : 'Code review passed',
-            context: 'Claude AI Review'
-          });
+          try {
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: context.payload.pull_request.head.sha,
+              state: hasCritical ? 'failure' : 'success',
+              description: hasCritical
+                ? 'Critical issues found - review required'
+                : 'Code review passed',
+              context: 'Claude AI Review'
+            });
+            console.log('✅ Successfully set commit status');
+          } catch (error) {
+            console.log(`⚠️ Could not set commit status: ${error.message}`);
+            console.log('This is not a critical error - the review comment was still posted');
+            // Don't fail the workflow if we can't set the status
+          }
