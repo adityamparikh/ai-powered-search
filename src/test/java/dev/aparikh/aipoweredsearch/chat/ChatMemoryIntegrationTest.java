@@ -1,6 +1,7 @@
 package dev.aparikh.aipoweredsearch.chat;
 
 import dev.aparikh.aipoweredsearch.config.PostgresTestConfiguration;
+import org.apache.solr.client.solrj.SolrClient;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.memory.ChatMemory;
@@ -25,6 +26,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.util.ArrayList;
@@ -53,6 +55,9 @@ class ChatMemoryIntegrationTest {
 
     @Autowired
     private ChatMemory chatMemory;
+
+    @MockitoBean
+    SolrClient solrClient;
 
 
     @Test

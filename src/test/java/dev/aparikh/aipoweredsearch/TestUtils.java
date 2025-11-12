@@ -55,7 +55,7 @@ public class TestUtils {
 
         // Wait for collection to be ready
         try {
-            Thread.sleep(2000);
+            Thread.sleep(500);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new RuntimeException("Interrupted while waiting for collection creation", e);
