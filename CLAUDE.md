@@ -29,7 +29,7 @@ The application follows a **package-by-feature** structure organized around two 
 
 - **Configuration** (`dev.aparikh.aipoweredsearch.config`):
   - `SpringAiConfig`: Multi-LLM configuration for Anthropic (chat) and OpenAI (embeddings)
-  - `SolrConfig`: Solr client configuration with HttpSolrClient
+  - `SolrConfig`: Solr client configuration with Http2SolrClient
   - Chat Memory: PostgreSQL-backed conversational context with conversation ID "007"
 
 ### Key Dependencies
@@ -336,7 +336,7 @@ dev.aparikh.aipoweredsearch/
 ## Important Implementation Details
 
 ### Solr Client Configuration
-The project uses `HttpSolrClient` (HTTP/1.1) instead of `Http2SolrClient` to avoid Jetty 12.x dependency conflicts. Jetty HTTP/2 modules are explicitly excluded in `build.gradle.kts`.
+The project uses `Http2SolrClient` for improved performance with HTTP/2 features including multiplexing, header compression, and better connection management. The client is configured with appropriate timeouts for production use.
 
 ### Vector Search POST Method
 Vector searches use POST method to avoid "URI too long" errors when sending large embedding arrays (1536 dimensions).

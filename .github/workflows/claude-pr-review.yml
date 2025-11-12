@@ -9,10 +9,12 @@ on:
 jobs:
   claude-review:
     runs-on: ubuntu-latest
+    timeout-minutes: 10  # Overall job timeout
     permissions:
       contents: read
       pull-requests: write
       issues: write
+      statuses: write  # Add permission to create commit statuses
 
     steps:
     - name: Checkout code
@@ -24,7 +26,7 @@ jobs:
       uses: actions/setup-java@v4
       with:
         distribution: 'temurin'
-        java-version: '25'
+        java-version: '21'
 
     - name: Get changed files
       id: changed-files
@@ -119,6 +121,7 @@ jobs:
 
     - name: Claude AI Review
       id: claude-review
+      timeout-minutes: 5  # Add timeout to prevent hanging
       env:
         ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       run: |
@@ -129,26 +132,61 @@ jobs:
         cat > claude_review.py << 'PYTHON_EOF'
         import os
         import sys
-        from anthropic import Anthropic
+        import time
+        from anthropic import Anthropic, APITimeoutError, APIError
+
+        print("Starting Claude AI review...")
+
+        # Check if API key exists
+        if not os.environ.get('ANTHROPIC_API_KEY'):
+            print("ERROR: ANTHROPIC_API_KEY is not set")
+            # Create a placeholder review
+            with open('claude-review.md', 'w') as f:
+                f.write("## ⚠️ Review Unavailable\n\nThe Anthropic API key is not configured. Please set the `ANTHROPIC_API_KEY` secret in your repository settings.")
+            sys.exit(0)  # Don't fail the workflow
 
         # Read the review prompt and changes
-        with open('review-prompt.txt', 'r') as f:
-            prompt = f.read()
+        try:
+            with open('review-prompt.txt', 'r') as f:
+                prompt = f.read()
+            print(f"Prompt loaded: {len(prompt)} characters")
+        except Exception as e:
+            print(f"ERROR: Could not read review-prompt.txt: {e}")
+            sys.exit(1)
 
-        with open('pr-changes.md', 'r') as f:
-            changes = f.read()
+        try:
+            with open('pr-changes.md', 'r') as f:
+                changes = f.read()
+            print(f"Changes loaded: {len(changes)} characters")
+        except Exception as e:
+            print(f"ERROR: Could not read pr-changes.md: {e}")
+            sys.exit(1)
 
         # Limit changes to avoid token limits
         if len(changes) > 30000:
             changes = changes[:30000] + "\n\n[... diff truncated due to size ...]"
+            print("Changes truncated to 30000 characters")
 
-        # Initialize Claude
-        client = Anthropic(api_key=os.environ['ANTHROPIC_API_KEY'])
+        # Initialize Claude with timeout
+        try:
+            client = Anthropic(
+                api_key=os.environ['ANTHROPIC_API_KEY'],
+                timeout=60.0,  # 60 second timeout for API calls
+                max_retries=2
+            )
+            print("Anthropic client initialized")
+        except Exception as e:
+            print(f"ERROR: Could not initialize Anthropic client: {e}")
+            sys.exit(1)
 
         try:
+            print("Sending request to Claude API...")
+            start_time = time.time()
+
             # Request review from Claude
+            # Using the latest Claude Sonnet model
             message = client.messages.create(
-                model="claude-3-5-sonnet-20241022",
+                model="claude-3-5-sonnet-20241022",  # Use correct model name
                 max_tokens=4000,
                 temperature=0,
                 messages=[
@@ -159,36 +197,77 @@ jobs:
                 ]
             )
 
+            elapsed = time.time() - start_time
+            print(f"API call completed in {elapsed:.2f} seconds")
+
             # Write review to file
             with open('claude-review.md', 'w') as f:
                 f.write(message.content[0].text)
 
             print("Review completed successfully")
 
+        except APITimeoutError as e:
+            print(f"ERROR: API request timed out: {e}")
+            with open('claude-review.md', 'w') as f:
+                f.write("## ⏱️ Review Timeout\n\nThe Claude API request timed out. Please try again later.")
+            sys.exit(0)  # Don't fail the workflow
+        except APIError as e:
+            print(f"ERROR: API error: {e}")
+            with open('claude-review.md', 'w') as f:
+                f.write(f"## ❌ API Error\n\nCould not complete the review due to an API error: {e}")
+            sys.exit(0)  # Don't fail the workflow
         except Exception as e:
-            print(f"Error during review: {e}")
+            print(f"ERROR: Unexpected error during review: {e}")
+            with open('claude-review.md', 'w') as f:
+                f.write(f"## ❌ Review Error\n\nAn unexpected error occurred: {e}")
             sys.exit(1)
         PYTHON_EOF
 
-        # Run the review
-        python claude_review.py
+        # Run the review with explicit timeout
+        timeout 240 python claude_review.py || {
+            echo "Review script timed out or failed"
+            echo "## ⏱️ Review Timeout" > claude-review.md
+            echo "" >> claude-review.md
+            echo "The review process took too long and was terminated." >> claude-review.md
+        }
 
     - name: Post review comment
-      if: success()
+      if: always()  # Always run this step
       uses: actions/github-script@v7
       with:
         github-token: ${{ secrets.GITHUB_TOKEN }}
         script: |
           const fs = require('fs');
-          const review = fs.readFileSync('claude-review.md', 'utf8');
+          let review;
+
+          // Check if review file exists and has content
+          try {
+            if (fs.existsSync('claude-review.md')) {
+              review = fs.readFileSync('claude-review.md', 'utf8');
+              if (!review || review.trim() === '') {
+                review = "## ⚠️ Review Not Available\n\nThe review file was empty. This might indicate an issue with the API key or the review process.";
+              }
+            } else {
+              review = "## ⚠️ Review Not Available\n\nThe review could not be generated. Please check the workflow logs for more information.";
+            }
+          } catch (error) {
+            console.error('Error reading review file:', error);
+            review = `## ❌ Error Reading Review\n\nCould not read the review file: ${error.message}`;
+          }
 
           // Post the review as a comment
-          await github.rest.issues.createComment({
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            issue_number: context.issue.number,
-            body: `## 🤖 Claude AI Code Review\n\n${review}\n\n---\n*This review was automatically generated by Claude AI (claude-3-5-sonnet). Please consider the suggestions but use your judgment.*`
-          });
+          try {
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `## 🤖 Claude AI Code Review\n\n${review}\n\n---\n*This review was automatically generated by Claude 3.5 Sonnet. Please consider the suggestions but use your judgment.*`
+            });
+            console.log('✅ Review comment posted successfully');
+          } catch (error) {
+            console.error('Failed to post review comment:', error);
+            // Don't fail the workflow if we can't post the comment
+          }
 
     - name: Check for critical issues
       id: check-critical
@@ -209,13 +288,20 @@ jobs:
         script: |
           const hasCritical = '${{ steps.check-critical.outputs.has_critical }}' === 'true';
 
-          await github.rest.repos.createCommitStatus({
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            sha: context.payload.pull_request.head.sha,
-            state: hasCritical ? 'failure' : 'success',
-            description: hasCritical
-              ? 'Critical issues found - review required'
-              : 'Code review passed',
-            context: 'Claude AI Review'
-          });
+          try {
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: context.payload.pull_request.head.sha,
+              state: hasCritical ? 'failure' : 'success',
+              description: hasCritical
+                ? 'Critical issues found - review required'
+                : 'Code review passed',
+              context: 'Claude AI Review'
+            });
+            console.log('✅ Successfully set commit status');
+          } catch (error) {
+            console.log(`⚠️ Could not set commit status: ${error.message}`);
+            console.log('This is not a critical error - the review comment was still posted');
+            // Don't fail the workflow if we can't set the status
+          }

@@ -3,7 +3,8 @@ package dev.aparikh.aipoweredsearch.indexing;
 import dev.aparikh.aipoweredsearch.indexing.model.BatchIndexRequest;
 import dev.aparikh.aipoweredsearch.indexing.model.IndexRequest;
 import dev.aparikh.aipoweredsearch.indexing.model.IndexResponse;
-import dev.aparikh.aipoweredsearch.solr.vectorstore.SolrVectorStore;
+import dev.aparikh.aipoweredsearch.solr.vectorstore.VectorStoreFactory;
+import org.springframework.ai.vectorstore.VectorStore;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -28,13 +29,18 @@ import static org.mockito.Mockito.verify;
 class IndexServiceTest {
 
     @Mock
-    private SolrVectorStore vectorStore;
+    private VectorStoreFactory vectorStoreFactory;
+
+    @Mock
+    private VectorStore vectorStore;
 
     private IndexService indexService;
 
     @BeforeEach
     void setUp() {
-        indexService = new IndexService(vectorStore);
+        indexService = new IndexService(vectorStoreFactory);
+        org.mockito.Mockito.when(vectorStoreFactory.forCollection(org.mockito.ArgumentMatchers.anyString()))
+                .thenReturn(vectorStore);
     }
 
     @Test

@@ -25,14 +25,24 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-actuator")
     implementation("org.springframework.boot:spring-boot-starter-web")
     implementation("org.springframework.ai:spring-ai-starter-model-anthropic")
-    implementation("org.springframework.ai:spring-ai-openai")
+    implementation("org.springframework.ai:spring-ai-openai") {
+        // Exclude all Jetty artifacts to avoid conflicts; SolrJ will bring its own pinned Jetty 11
+        exclude(group = "org.eclipse.jetty")
+        exclude(group = "org.eclipse.jetty.http2")
+    }
     implementation("org.springframework.ai:spring-ai-starter-model-chat-memory-repository-jdbc")
     implementation("org.springframework.ai:spring-ai-vector-store")
     implementation("org.springframework.ai:spring-ai-advisors-vector-store")
     implementation("org.postgresql:postgresql")
     // Apache Solr client with HTTP/2 support
-    // Let Solr bring in its own Jetty HTTP/2 dependencies transitively
     implementation("org.apache.solr:solr-solrj:9.9.0")
+    // Jetty HTTP/2 client dependencies required for Http2SolrClient (Jetty 11)
+    implementation("org.eclipse.jetty:jetty-client")
+    implementation("org.eclipse.jetty.http2:http2-client")
+    implementation("org.eclipse.jetty.http2:http2-http-client-transport")
+    implementation("org.eclipse.jetty:jetty-io")
+    implementation("org.eclipse.jetty:jetty-util")
+    implementation("org.eclipse.jetty:jetty-alpn-java-client")
 
     // Swagger UI / OpenAPI documentation
     implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:2.4.0")
@@ -40,6 +50,7 @@ dependencies {
     // Additional Solr dependencies
     implementation("commons-io:commons-io:2.15.1")
     implementation("org.apache.commons:commons-lang3:3.18.0")
+
 
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("org.springframework.boot:spring-boot-testcontainers")
@@ -55,6 +66,8 @@ dependencies {
 dependencyManagement {
     imports {
         mavenBom("org.springframework.ai:spring-ai-bom:${property("springAiVersion")}")
+        // Pin Jetty to 11.x for SolrJ Http2SolrClient to avoid Jetty 12 conflicts
+        mavenBom("org.eclipse.jetty:jetty-bom:11.0.24")
     }
 }
 

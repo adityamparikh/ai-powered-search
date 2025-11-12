@@ -1,9 +1,9 @@
 package dev.aparikh.aipoweredsearch.chat;
 
 import dev.aparikh.aipoweredsearch.config.PostgresTestConfiguration;
+import org.apache.solr.client.solrj.SolrClient;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
@@ -16,6 +16,8 @@ import org.springframework.ai.embedding.Embedding;
 import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.embedding.EmbeddingRequest;
 import org.springframework.ai.embedding.EmbeddingResponse;
+import org.springframework.ai.vectorstore.SearchRequest;
+import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -24,6 +26,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.util.ArrayList;
@@ -52,6 +55,10 @@ class ChatMemoryIntegrationTest {
 
     @Autowired
     private ChatMemory chatMemory;
+
+    @MockitoBean
+    SolrClient solrClient;
+
 
     @Test
     void searchChatClientShouldMaintainConversationMemory() {
@@ -188,6 +195,16 @@ class ChatMemoryIntegrationTest {
 
         @Bean
         @Primary
+        public VectorStore mockVectorStore() {
+            VectorStore vectorStore = mock(VectorStore.class);
+            // Return empty results for any similarity search
+            when(vectorStore.similaritySearch(any(SearchRequest.class))).thenReturn(List.of());
+            when(vectorStore.similaritySearch(any(String.class))).thenReturn(List.of());
+            return vectorStore;
+        }
+
+        @Bean
+        @Primary
         public ChatModel mockChatModel() {
             ChatModel chatModel = mock(ChatModel.class);
 
@@ -257,6 +274,9 @@ class ChatMemoryIntegrationTest {
             });
 
             when(embeddingModel.embed(any(org.springframework.ai.document.Document.class)))
+                    .thenReturn(mockEmbeddingVector);
+
+            when(embeddingModel.embed(any(String.class)))
                     .thenReturn(mockEmbeddingVector);
 
             when(embeddingModel.call(any(EmbeddingRequest.class))).thenAnswer(invocation -> {

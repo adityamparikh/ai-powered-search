@@ -3,6 +3,7 @@ package dev.aparikh.aipoweredsearch.indexing;
 import dev.aparikh.aipoweredsearch.indexing.model.BatchIndexRequest;
 import dev.aparikh.aipoweredsearch.indexing.model.IndexRequest;
 import dev.aparikh.aipoweredsearch.indexing.model.IndexResponse;
+import dev.aparikh.aipoweredsearch.solr.vectorstore.VectorStoreFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.document.Document;
@@ -32,10 +33,10 @@ public class IndexService {
 
     private static final Logger log = LoggerFactory.getLogger(IndexService.class);
 
-    private final VectorStore vectorStore;
+    private final VectorStoreFactory vectorStoreFactory;
 
-    public IndexService(VectorStore vectorStore) {
-        this.vectorStore = vectorStore;
+    public IndexService(VectorStoreFactory vectorStoreFactory) {
+        this.vectorStoreFactory = vectorStoreFactory;
     }
 
     /**
@@ -65,7 +66,8 @@ public class IndexService {
                     .build();
 
             // Store in Solr using VectorStore - embeddings generated automatically
-            vectorStore.add(Collections.singletonList(document));
+            VectorStore vs = vectorStoreFactory.forCollection(collection);
+            vs.add(Collections.singletonList(document));
 
             log.info("Successfully indexed document '{}' in collection '{}'", docId, collection);
 
@@ -129,7 +131,8 @@ public class IndexService {
 
             // Batch store in Solr using VectorStore - embeddings generated automatically
             if (!documents.isEmpty()) {
-                vectorStore.add(documents);
+                VectorStore vs = vectorStoreFactory.forCollection(collection);
+                vs.add(documents);
                 log.info("Successfully indexed {} documents in collection '{}'", documents.size(), collection);
             }
 

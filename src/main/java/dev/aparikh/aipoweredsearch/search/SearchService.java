@@ -6,6 +6,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.document.Document;
+import dev.aparikh.aipoweredsearch.solr.vectorstore.VectorStoreFactory;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
@@ -52,7 +53,7 @@ public class SearchService {
     private final SearchRepository searchRepository;
     private final ChatClient chatClient;
     private final ChatClient ragChatClient;
-    private final VectorStore vectorStore;
+    private final VectorStoreFactory vectorStoreFactory;
 
     /**
      * Constructs a new SearchService with required dependencies.
@@ -62,20 +63,20 @@ public class SearchService {
      * @param searchRepository the repository for low-level Solr operations
      * @param chatClient the ChatClient configured for search query generation
      * @param ragChatClient the ChatClient configured with QuestionAnswerAdvisor for RAG
-     * @param vectorStore the VectorStore implementation (SolrVectorStore) for semantic search
+     * @param vectorStoreFactory the factory to obtain per-collection VectorStore instances
      */
     public SearchService(@Value("classpath:/prompts/system-message.st") Resource systemResource,
                          @Value("classpath:/prompts/semantic-search-system-message.st") Resource semanticSystemResource,
                          SearchRepository searchRepository,
                          @Qualifier("searchChatClient") ChatClient chatClient,
                          @Qualifier("ragChatClient") ChatClient ragChatClient,
-                         VectorStore vectorStore) {
+                         VectorStoreFactory vectorStoreFactory) {
         this.systemResource = systemResource;
         this.semanticSystemResource = semanticSystemResource;
         this.searchRepository = searchRepository;
         this.chatClient = chatClient;
         this.ragChatClient = ragChatClient;
-        this.vectorStore = vectorStore;
+        this.vectorStoreFactory = vectorStoreFactory;
     }
 
 
@@ -105,6 +106,13 @@ public class SearchService {
      * @throws IllegalArgumentException if collection or query is null or empty
      */
     public SearchResponse search(String collection, String freeTextQuery) {
+        if (collection == null || collection.trim().isEmpty()) {
+            throw new IllegalArgumentException("Collection name cannot be null or blank");
+        }
+        if (freeTextQuery == null || freeTextQuery.trim().isEmpty()) {
+            throw new IllegalArgumentException("Query cannot be null or blank");
+        }
+
         log.debug("Searching for collection: {}, query: {}", collection, freeTextQuery);
 
         List<FieldInfo> fields = searchRepository.getFieldsWithSchema(collection);
@@ -154,7 +162,41 @@ public class SearchService {
      * @return search response with semantically similar documents
      */
     public SearchResponse semanticSearch(String collection, String freeTextQuery) {
-        log.debug("Semantic search for collection: {}, query: {}", collection, freeTextQuery);
+        return semanticSearch(collection, freeTextQuery, null, null);
+    }
+
+    /**
+     * Performs semantic search using vector similarity with optional tuning parameters.
+     *
+     * @param collection    the Solr collection to search
+     * @param freeTextQuery the natural language search query
+     * @param k             optional topK results to return
+     * @param minScore      optional minimum similarity score threshold [0..1]
+     * @return search response with semantically similar documents
+     */
+    public SearchResponse semanticSearch(String collection, String freeTextQuery, Integer k, Double minScore) {
+        return semanticSearch(collection, freeTextQuery, k, minScore, null);
+    }
+
+    /**
+     * Performs semantic search using vector similarity with optional tuning parameters and field selection.
+     *
+     * @param collection    the Solr collection to search
+     * @param freeTextQuery the natural language search query
+     * @param k             optional topK results to return
+     * @param minScore      optional minimum similarity score threshold [0..1]
+     * @param fieldsCsv     optional comma-separated list of fields to include in the response (metadata keys or 'content')
+     * @return search response with semantically similar documents
+     */
+    public SearchResponse semanticSearch(String collection, String freeTextQuery, Integer k, Double minScore, String fieldsCsv) {
+        if (collection == null || collection.trim().isEmpty()) {
+            throw new IllegalArgumentException("Collection name cannot be null or blank");
+        }
+        if (freeTextQuery == null || freeTextQuery.trim().isEmpty()) {
+            throw new IllegalArgumentException("Query cannot be null or blank");
+        }
+
+        log.debug("Semantic search for collection: {}, query: {}, k: {}, minScore: {}, fields: {}", collection, freeTextQuery, k, minScore, fieldsCsv);
 
         // Step 1: Get field schema information
         List<FieldInfo> fields = searchRepository.getFieldsWithSchema(collection);
@@ -185,26 +227,73 @@ public class SearchService {
 
         // Step 4: Execute semantic search using VectorStore
         // VectorStore will automatically generate embeddings from the query text
+        int topK = (k != null && k > 0) ? k : 10;
         Builder searchRequestBuilder = builder()
-                        .query(freeTextQuery)
-                        .topK(10);
+                        .query(queryGenerationResponse.q())
+                        .topK(topK);
+        if (minScore != null) {
+            searchRequestBuilder = searchRequestBuilder.similarityThreshold(minScore);
+        }
 
         if (filterExpression != null) {
             searchRequestBuilder = searchRequestBuilder.filterExpression(filterExpression);
         }
 
         org.springframework.ai.vectorstore.SearchRequest searchRequest = searchRequestBuilder.build();
+
+        // Get VectorStore instance - factory guarantees non-null return or exception
+        VectorStore vectorStore = vectorStoreFactory.forCollection(collection);
         List<Document> results = vectorStore.similaritySearch(searchRequest);
 
         log.debug("Semantic search returned {} results", results.size());
 
-        // Step 5: Convert Spring AI Documents back to SearchResponse format
+        // Parse requested fields (metadata keys or 'content'). Id and similarity_score are always included.
+        java.util.Set<String> selectedFields = null;
+        if (fieldsCsv != null && !fieldsCsv.isBlank()) {
+            selectedFields = java.util.Arrays.stream(fieldsCsv.split(","))
+                    .map(String::trim)
+                    .filter(s -> !s.isEmpty())
+                    .collect(java.util.stream.Collectors.toSet());
+        }
+        final java.util.Set<String> finalSelected = selectedFields;
+
+        // Step 5: Convert Spring AI Documents back to SearchResponse format with field filtering
         List<Map<String, Object>> documents = results.stream()
                 .map(doc -> {
                     Map<String, Object> docMap = new HashMap<>();
                     docMap.put("id", doc.getId());
-                    docMap.put("content", doc.getText());
-                    docMap.putAll(doc.getMetadata());
+
+                    // similarity score (always included if present)
+                    Object scoreObj = doc.getMetadata().get("score");
+                    if (scoreObj instanceof Number) {
+                        docMap.put("similarity_score", ((Number) scoreObj).doubleValue());
+                    } else if (scoreObj != null) {
+                        docMap.put("similarity_score", scoreObj);
+                    }
+
+                    // Prepare safe metadata (strip embedding/vector/score entries)
+                    Map<String, Object> safeMeta = new java.util.HashMap<>(doc.getMetadata());
+                    safeMeta.remove("embedding");
+                    safeMeta.remove("vector");
+                    safeMeta.remove("score");
+
+                    boolean includeContent = finalSelected == null || finalSelected.contains("content");
+                    if (includeContent) {
+                        docMap.put("content", doc.getText());
+                    }
+
+                    if (finalSelected == null) {
+                        // Include all metadata by default
+                        docMap.putAll(safeMeta);
+                    } else {
+                        // Include only selected metadata keys
+                        for (String key : finalSelected) {
+                            if (!"content".equals(key) && safeMeta.containsKey(key)) {
+                                docMap.put(key, safeMeta.get(key));
+                            }
+                        }
+                    }
+
                     return docMap;
                 })
                 .toList();

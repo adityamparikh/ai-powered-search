@@ -147,13 +147,13 @@ public class SolrVectorStore extends AbstractObservationVectorStore {
                         Object embedding = doc.getMetadata().get("embedding");
                         return embedding == null || !(embedding instanceof float[]) || ((float[]) embedding).length == 0;
                     })
-                    .collect(toList());
+                    .toList();
 
             // Generate embeddings in batch for efficiency
             if (!documentsWithoutEmbeddings.isEmpty()) {
                 List<String> texts = documentsWithoutEmbeddings.stream()
                         .map(Document::getText)
-                        .collect(toList());
+                        .toList();
 
                 EmbeddingResponse embeddingResponse = this.embeddingModel.embedForResponse(texts);
 
@@ -175,9 +175,8 @@ public class SolrVectorStore extends AbstractObservationVectorStore {
                     .map(this::toSolrDocument)
                     .collect(toList());
 
-            // Add to Solr
-            UpdateResponse response = solrClient.add(collection, solrDocs);
-            solrClient.commit(collection);
+            // Add to Solr using commitWithin to avoid per-operation hard commits
+            UpdateResponse response = solrClient.add(collection, solrDocs, 1000);
 
             log.debug("Added {} documents to Solr collection '{}', status: {}",
                     documents.size(), collection, response.getStatus());
@@ -194,8 +193,7 @@ public class SolrVectorStore extends AbstractObservationVectorStore {
     @Override
     public void doDelete(List<String> idList) {
         try {
-            UpdateResponse response = solrClient.deleteById(collection, idList);
-            solrClient.commit(collection);
+            UpdateResponse response = solrClient.deleteById(collection, idList, 1000);
 
             log.debug("Deleted {} documents from Solr collection '{}', status: {}",
                     idList.size(), collection, response.getStatus());
@@ -234,6 +232,10 @@ public class SolrVectorStore extends AbstractObservationVectorStore {
                     options.vectorFieldName(), request.getTopK(), vectorString);
 
             SolrQuery query = new SolrQuery(knnQuery);
+            // Ensure Solr returns up to topK results
+            if (request.getTopK() > 0) {
+                query.setRows(request.getTopK());
+            }
 
             // Apply filter expression if present
             if (request.getFilterExpression() != null) {
@@ -245,7 +247,7 @@ public class SolrVectorStore extends AbstractObservationVectorStore {
 
             // Set fields to return (include score pseudo-field for similarity scoring)
             query.setFields(options.idFieldName(), options.contentFieldName(),
-                    options.vectorFieldName(), "score", options.metadataPrefix() + "*");
+                    "score", options.metadataPrefix() + "*");
 
             // Note: Similarity threshold filtering must be done post-query
             // because "score" is a pseudo-field that doesn't exist until query time
@@ -319,114 +321,29 @@ public class SolrVectorStore extends AbstractObservationVectorStore {
         if (filterExpression == null) {
             return null;
         }
-
-        // Check if this is an equality expression
-        if (filterExpression instanceof Filter.Expression) {
-            // Get the type of expression
-            String exprType = getExpressionType(filterExpression);
-
-            if ("EQ".equals(exprType)) {
-                // Extract key and value from the expression
-                String key = getExpressionKey(filterExpression);
-                String value = getExpressionValue(filterExpression);
-
-                if (key != null && value != null) {
-                    // Add metadata prefix if not already present
-                    if (!key.startsWith(options.metadataPrefix())) {
-                        key = options.metadataPrefix() + key;
-                    }
-
-                    // Remove quotes if present
-                    value = value.replaceAll("^['\"]|['\"]$", "");
-
-                    // Build Solr filter query
-                    String solrQuery = key + ":" + value;
-                    log.debug("Converted filter expression to Solr query: {}", solrQuery);
-                    return solrQuery;
-                }
-            }
-        }
-
-        // Fallback: try to parse the string representation
-        String filterStr = filterExpression.toString();
-        log.debug("Attempting to parse filter expression string: {}", filterStr);
-
-        // Try to extract from string like "Expression[type=EQ, left=Key[key=category], right=Value[value=AI]]"
-        if (filterStr.contains("type=EQ") && filterStr.contains("Key[key=") && filterStr.contains("Value[value=")) {
-            String key = extractBetween(filterStr, "Key[key=", "]");
-            String value = extractBetween(filterStr, "Value[value=", "]");
-
-            if (key != null && value != null) {
-                if (!key.startsWith(options.metadataPrefix())) {
-                    key = options.metadataPrefix() + key;
-                }
-                String solrQuery = key + ":" + value;
-                log.debug("Extracted and converted to Solr query: {}", solrQuery);
-                return solrQuery;
-            }
-        }
-
-        log.warn("Could not convert filter expression to Solr syntax: {}", filterStr);
-        return null;
-    }
-
-    private String getExpressionType(Filter.Expression expr) {
-        try {
-            // Use reflection to get the type
-            var typeField = expr.getClass().getDeclaredField("type");
-            typeField.setAccessible(true);
-            Object type = typeField.get(expr);
-            return type != null ? type.toString() : null;
-        } catch (Exception e) {
+        String s = filterExpression.toString();
+        if (s == null || s.isBlank()) {
             return null;
         }
-    }
-
-    private String getExpressionKey(Filter.Expression expr) {
-        try {
-            // Use reflection to get the left/key
-            var leftField = expr.getClass().getDeclaredField("left");
-            leftField.setAccessible(true);
-            Object left = leftField.get(expr);
-            if (left != null) {
-                var keyField = left.getClass().getDeclaredField("key");
-                keyField.setAccessible(true);
-                return (String) keyField.get(left);
-            }
-        } catch (Exception e) {
-            // Ignore
+        s = s.trim();
+        // If it already looks like a Solr filter (field:value or contains AND/OR with colons), pass-through
+        if (s.matches(".*\\w+\\s*:\\s*.+")) {
+            return s;
         }
+        // Simple 'key == value' support
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("(?i)\\b([a-zA-Z0-9_]+)\\s*==\\s*'?([^']*)'?$").matcher(s);
+        if (m.find()) {
+            String key = m.group(1);
+            String value = m.group(2);
+            if (!key.startsWith(options.metadataPrefix())) {
+                key = options.metadataPrefix() + key;
+            }
+            return key + ":" + value;
+        }
+        log.warn("Unsupported filter expression, ignoring: {}", s);
         return null;
     }
 
-    private String getExpressionValue(Filter.Expression expr) {
-        try {
-            // Use reflection to get the right/value
-            var rightField = expr.getClass().getDeclaredField("right");
-            rightField.setAccessible(true);
-            Object right = rightField.get(expr);
-            if (right != null) {
-                var valueField = right.getClass().getDeclaredField("value");
-                valueField.setAccessible(true);
-                Object value = valueField.get(right);
-                return value != null ? value.toString() : null;
-            }
-        } catch (Exception e) {
-            // Ignore
-        }
-        return null;
-    }
-
-    private String extractBetween(String str, String start, String end) {
-        int startIdx = str.indexOf(start);
-        if (startIdx == -1) return null;
-        startIdx += start.length();
-
-        int endIdx = str.indexOf(end, startIdx);
-        if (endIdx == -1) return null;
-
-        return str.substring(startIdx, endIdx);
-    }
 
     private String floatArrayToString(float[] embedding) {
         StringBuilder sb = new StringBuilder("[");
@@ -500,25 +417,14 @@ public class SolrVectorStore extends AbstractObservationVectorStore {
         }
 
         // Extract score and normalize for cosine similarity
-        Float score = (Float) solrDoc.getFieldValue("score");
+        Number scoreNum = (Number) solrDoc.getFieldValue("score");
+        Double score = scoreNum != null ? scoreNum.doubleValue() : null;
 
         // Apply similarity threshold if score is available
         if (score != null && similarityThreshold >= 0) {
             // Solr returns cosine similarity in [0,1] range with 1 being most similar
             if (score < similarityThreshold) {
                 return null; // Filter out documents below threshold
-            }
-        }
-
-        // Extract vector embedding
-        float[] embedding = null;
-        Object vectorObj = solrDoc.getFieldValue(options.vectorFieldName());
-        if (vectorObj instanceof List) {
-            @SuppressWarnings("unchecked")
-            List<Number> vectorList = (List<Number>) vectorObj;
-            embedding = new float[vectorList.size()];
-            for (int i = 0; i < vectorList.size(); i++) {
-                embedding[i] = vectorList.get(i).floatValue();
             }
         }
 
@@ -557,10 +463,6 @@ public class SolrVectorStore extends AbstractObservationVectorStore {
             metadata.put("score", score);
         }
 
-        // Add embedding to metadata if present
-        if (embedding != null) {
-            metadata.put("embedding", embedding);
-        }
 
         // Build document
         return Document.builder()
