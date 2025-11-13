@@ -52,6 +52,8 @@ import static org.springframework.ai.vectorstore.SearchRequest.builder;
 @Service
 public class SearchService {
 
+    private static final String DEFAULT_CONVERSATION_ID = "007";
+
     private final Logger log = LoggerFactory.getLogger(SearchService.class);
 
     private final Resource systemResource;
@@ -112,34 +114,12 @@ public class SearchService {
      * @throws IllegalArgumentException if collection or query is null or empty
      */
     public SearchResponse search(String collection, String freeTextQuery) {
-        if (collection == null || collection.trim().isEmpty()) {
-            throw new IllegalArgumentException("Collection name cannot be null or blank");
-        }
-        if (freeTextQuery == null || freeTextQuery.trim().isEmpty()) {
-            throw new IllegalArgumentException("Query cannot be null or blank");
-        }
-
+        validateSearchInputs(collection, freeTextQuery);
         log.debug("Searching for collection: {}, query: {}", collection, freeTextQuery);
 
-        List<FieldInfo> fields = searchRepository.getFieldsWithSchema(collection);
+        String userMessage = buildQueryUserMessage(freeTextQuery, collection);
+        QueryGenerationResponse queryGenerationResponse = generateQueryWithAI(systemResource, userMessage);
 
-        String userMessage = String.format("""
-                The free text query is: %s
-                The available fields with their types are: %s
-                """, freeTextQuery, fields);
-
-        String conversationId = "007";
-
-        QueryGenerationResponse queryGenerationResponse = chatClient.prompt()
-                .system(systemResource)
-                .user(userMessage)
-                .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, conversationId))
-                .call()
-                .entity(QueryGenerationResponse.class);
-
-
-        assert queryGenerationResponse != null;
-        log.debug("Query generation response: {}", queryGenerationResponse);
         SearchRequest searchRequest = new SearchRequest(
                 queryGenerationResponse.q(),
                 queryGenerationResponse.fq(),
@@ -195,41 +175,15 @@ public class SearchService {
      * @return search response with semantically similar documents
      */
     public SearchResponse semanticSearch(String collection, String freeTextQuery, Integer k, Double minScore, String fieldsCsv) {
-        if (collection == null || collection.trim().isEmpty()) {
-            throw new IllegalArgumentException("Collection name cannot be null or blank");
-        }
-        if (freeTextQuery == null || freeTextQuery.trim().isEmpty()) {
-            throw new IllegalArgumentException("Query cannot be null or blank");
-        }
-
+        validateSearchInputs(collection, freeTextQuery);
         log.debug("Semantic search for collection: {}, query: {}, k: {}, minScore: {}, fields: {}", collection, freeTextQuery, k, minScore, fieldsCsv);
 
-        // Step 1: Get field schema information
-        List<FieldInfo> fields = searchRepository.getFieldsWithSchema(collection);
-
-        // Step 2: Use Claude AI to parse filters and other search parameters
-        String userMessage = String.format("""
-                The free text query is: %s
-                The available fields with their types are: %s
-                """, freeTextQuery, fields);
-
-        String conversationId = "007";
-
-        QueryGenerationResponse queryGenerationResponse = chatClient.prompt()
-                .system(semanticSystemResource)
-                .user(userMessage)
-                .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, conversationId))
-                .call()
-                .entity(QueryGenerationResponse.class);
-
-        assert queryGenerationResponse != null;
-        log.debug("Query generation response for semantic search: {}", queryGenerationResponse);
+        // Step 1 & 2: Generate query with AI
+        String userMessage = buildQueryUserMessage(freeTextQuery, collection);
+        QueryGenerationResponse queryGenerationResponse = generateQueryWithAI(semanticSystemResource, userMessage);
 
         // Step 3: Build filter expression if present
-        String filterExpression = null;
-        if (queryGenerationResponse.fq() != null && !queryGenerationResponse.fq().isEmpty()) {
-            filterExpression = String.join(" AND ", queryGenerationResponse.fq());
-        }
+        String filterExpression = buildFilterExpression(queryGenerationResponse.fq());
 
         // Step 4: Execute semantic search using VectorStore
         // VectorStore will automatically generate embeddings from the query text
@@ -340,42 +294,16 @@ public class SearchService {
                                        Integer k,
                                        Double minScore,
                                        String fieldsCsv) {
-        if (collection == null || collection.trim().isEmpty()) {
-            throw new IllegalArgumentException("Collection name cannot be null or blank");
-        }
-        if (freeTextQuery == null || freeTextQuery.trim().isEmpty()) {
-            throw new IllegalArgumentException("Query cannot be null or blank");
-        }
-
+        validateSearchInputs(collection, freeTextQuery);
         log.debug("Hybrid search for collection: {}, query: {}, k: {}, minScore: {}, fields: {}",
                 collection, freeTextQuery, k, minScore, fieldsCsv);
 
-        // Step 1: Get field schema information
-        List<FieldInfo> fields = searchRepository.getFieldsWithSchema(collection);
-
-        // Step 2: Use Claude AI to parse query and filters
-        String userMessage = String.format("""
-                The free text query is: %s
-                The available fields with their types are: %s
-                """, freeTextQuery, fields);
-
-        String conversationId = "007";
-
-        QueryGenerationResponse queryGenerationResponse = chatClient.prompt()
-                .system(systemResource)
-                .user(userMessage)
-                .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, conversationId))
-                .call()
-                .entity(QueryGenerationResponse.class);
-
-        assert queryGenerationResponse != null;
-        log.debug("Query generation response for hybrid search: {}", queryGenerationResponse);
+        // Step 1 & 2: Generate query with AI
+        String userMessage = buildQueryUserMessage(freeTextQuery, collection);
+        QueryGenerationResponse queryGenerationResponse = generateQueryWithAI(systemResource, userMessage);
 
         // Step 3: Build filter expression if present
-        String filterExpression = null;
-        if (queryGenerationResponse.fq() != null && !queryGenerationResponse.fq().isEmpty()) {
-            filterExpression = String.join(" AND ", queryGenerationResponse.fq());
-        }
+        String filterExpression = buildFilterExpression(queryGenerationResponse.fq());
 
         // Step 4: Execute hybrid search using RRF in Solr
         // Repository will handle embedding generation internally
@@ -434,5 +362,71 @@ public class SearchService {
         // 3. Return the document IDs as sources
         // For now, we return an empty sources list
         return new AskResponse(answer, conversationId, List.of());
+    }
+
+    // ============== Helper Methods ==============
+
+    /**
+     * Validates search input parameters.
+     *
+     * @param collection    the collection name
+     * @param freeTextQuery the search query
+     * @throws IllegalArgumentException if validation fails
+     */
+    private void validateSearchInputs(String collection, String freeTextQuery) {
+        if (collection == null || collection.trim().isEmpty()) {
+            throw new IllegalArgumentException("Collection name cannot be null or blank");
+        }
+        if (freeTextQuery == null || freeTextQuery.trim().isEmpty()) {
+            throw new IllegalArgumentException("Query cannot be null or blank");
+        }
+    }
+
+    /**
+     * Builds a user message for Claude AI by combining the query with field schema information.
+     *
+     * @param freeTextQuery the user's search query
+     * @param collection    the collection name to fetch field information from
+     * @return formatted user message string
+     */
+    private String buildQueryUserMessage(String freeTextQuery, String collection) {
+        List<FieldInfo> fields = searchRepository.getFieldsWithSchema(collection);
+        return String.format("""
+                The free text query is: %s
+                The available fields with their types are: %s
+                """, freeTextQuery, fields);
+    }
+
+    /**
+     * Generates a structured query using Claude AI.
+     *
+     * @param systemPrompt the system prompt resource to use
+     * @param userMessage  the user message containing query and field information
+     * @return the AI-generated query response
+     */
+    private QueryGenerationResponse generateQueryWithAI(Resource systemPrompt, String userMessage) {
+        QueryGenerationResponse response = chatClient.prompt()
+                .system(systemPrompt)
+                .user(userMessage)
+                .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, DEFAULT_CONVERSATION_ID))
+                .call()
+                .entity(QueryGenerationResponse.class);
+
+        assert response != null;
+        log.debug("Query generation response: {}", response);
+        return response;
+    }
+
+    /**
+     * Builds a filter expression from a list of filter queries.
+     *
+     * @param filterQueries list of filter query strings
+     * @return combined filter expression or null if no filters
+     */
+    private String buildFilterExpression(List<String> filterQueries) {
+        if (filterQueries != null && !filterQueries.isEmpty()) {
+            return String.join(" AND ", filterQueries);
+        }
+        return null;
     }
 }

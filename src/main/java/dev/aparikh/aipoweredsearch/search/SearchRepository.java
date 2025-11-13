@@ -4,6 +4,7 @@ import dev.aparikh.aipoweredsearch.embedding.EmbeddingService;
 import dev.aparikh.aipoweredsearch.search.model.FieldInfo;
 import dev.aparikh.aipoweredsearch.search.model.SearchRequest;
 import dev.aparikh.aipoweredsearch.search.model.SearchResponse;
+import dev.aparikh.aipoweredsearch.solr.SolrQueryUtils;
 import org.apache.solr.client.solrj.SolrClient;
 import org.apache.solr.client.solrj.SolrQuery;
 import org.apache.solr.client.solrj.request.schema.SchemaRequest;
@@ -95,8 +96,7 @@ public class SearchRepository {
         // Build KNN query using Solr's vector search syntax
         // Format: {!knn f=vector topK=10}[0.1, 0.2, 0.3, ...]
         String vectorString = embeddingService.formatVectorForSolr(queryVector);
-
-        String knnQuery = String.format("{!knn f=vector topK=%d}%s", topK, vectorString);
+        String knnQuery = SolrQueryUtils.buildKnnQuery(topK, vectorString);
 
         SolrQuery query = new SolrQuery(knnQuery);
 
@@ -205,8 +205,9 @@ public class SearchRepository {
             solrQuery.set("q", "{!edismax qf='content'}(" + query + ")");
 
             // Re-rank query: KNN vector search
+            String knnQuery = SolrQueryUtils.buildKnnQuery(topK, vectorString);
             solrQuery.set("rq", "{!rerank reRankQuery=$rqq reRankDocs=" + topK + " reRankWeight=1}");
-            solrQuery.set("rqq", "{!knn f=vector topK=" + topK + "}" + vectorString);
+            solrQuery.set("rqq", knnQuery);
 
             // Enable RRF
             solrQuery.set("rrf", "true");

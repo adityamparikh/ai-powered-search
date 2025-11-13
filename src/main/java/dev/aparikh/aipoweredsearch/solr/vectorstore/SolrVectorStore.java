@@ -1,5 +1,7 @@
 package dev.aparikh.aipoweredsearch.solr.vectorstore;
 
+import dev.aparikh.aipoweredsearch.embedding.VectorFormatUtils;
+import dev.aparikh.aipoweredsearch.solr.SolrQueryUtils;
 import org.apache.solr.client.solrj.SolrClient;
 import org.apache.solr.client.solrj.SolrQuery;
 import org.apache.solr.client.solrj.SolrRequest;
@@ -227,8 +229,8 @@ public class SolrVectorStore extends AbstractObservationVectorStore {
             float[] queryEmbedding = embeddingResponse.getResults().getFirst().getOutput();
 
             // Build KNN query
-            String vectorString = floatArrayToString(queryEmbedding);
-            String knnQuery = String.format("{!knn f=%s topK=%d}%s",
+            String vectorString = VectorFormatUtils.formatVectorForSolr(queryEmbedding);
+            String knnQuery = SolrQueryUtils.buildKnnQuery(
                     options.vectorFieldName(), request.getTopK(), vectorString);
 
             SolrQuery query = new SolrQuery(knnQuery);
@@ -342,17 +344,6 @@ public class SolrVectorStore extends AbstractObservationVectorStore {
         }
         log.warn("Unsupported filter expression, ignoring: {}", s);
         return null;
-    }
-
-
-    private String floatArrayToString(float[] embedding) {
-        StringBuilder sb = new StringBuilder("[");
-        for (int i = 0; i < embedding.length; i++) {
-            if (i > 0) sb.append(", ");
-            sb.append(embedding[i]);
-        }
-        sb.append("]");
-        return sb.toString();
     }
 
     private SolrInputDocument toSolrDocument(Document document) {

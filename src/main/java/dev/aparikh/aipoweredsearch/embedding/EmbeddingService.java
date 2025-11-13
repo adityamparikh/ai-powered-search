@@ -3,7 +3,6 @@ package dev.aparikh.aipoweredsearch.embedding;
 import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.stereotype.Service;
 
-import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -74,11 +73,7 @@ public class EmbeddingService {
      * @return a List containing the same values as Float objects
      */
     public List<Float> convertToList(float[] embedding) {
-        List<Float> result = new ArrayList<>(embedding.length);
-        for (float f : embedding) {
-            result.add(f);
-        }
-        return result;
+        return VectorFormatUtils.convertToList(embedding);
     }
 
     /**
@@ -91,9 +86,7 @@ public class EmbeddingService {
      * @return a string representation suitable for Solr KNN queries
      */
     public String formatVectorForSolr(List<Float> embedding) {
-        return embedding.stream()
-                .map(String::valueOf)
-                .collect(java.util.stream.Collectors.joining(", ", "[", "]"));
+        return VectorFormatUtils.formatVectorForSolr(embedding);
     }
 
     /**
