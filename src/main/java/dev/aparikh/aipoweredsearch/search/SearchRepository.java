@@ -180,20 +180,23 @@ public class SearchRepository {
      *
      * @param collection        the Solr collection to search
      * @param query             the text query for keyword search
-     * @param queryVector       the embedding vector for semantic search
      * @param topK              number of results to return from vector search
      * @param filterExpression  optional filter query
      * @param fieldsCsv         optional comma-separated list of fields to return
      * @param minScore          optional minimum score threshold
      * @return search response with RRF-ranked documents
      */
-    public SearchResponse hybridSearch(String collection, String query, List<Float> queryVector,
-                                       int topK, String filterExpression, String fieldsCsv, Double minScore) {
+    public SearchResponse hybridSearch(String collection,
+                                       String query,
+                                       int topK,
+                                       String filterExpression,
+                                       String fieldsCsv,
+                                       Double minScore) {
         log.debug("Performing hybrid search in collection: {} with query: {}", collection, query);
 
         try {
-            // Build the vector string for KNN query
-            String vectorString = embeddingService.formatVectorForSolr(queryVector);
+            // Generate embedding for the query text and format for Solr
+            String vectorString = embeddingService.embedAndFormatForSolr(query);
 
             // Create SolrQuery with RRF parameters
             SolrQuery solrQuery = new SolrQuery();

@@ -1,6 +1,5 @@
 package dev.aparikh.aipoweredsearch.search;
 
-import dev.aparikh.aipoweredsearch.embedding.EmbeddingService;
 import dev.aparikh.aipoweredsearch.search.model.FieldInfo;
 import dev.aparikh.aipoweredsearch.search.model.QueryGenerationResponse;
 import dev.aparikh.aipoweredsearch.search.model.SearchRequest;
@@ -42,9 +41,6 @@ class SearchServiceTest {
     @Mock
     private VectorStoreFactory vectorStoreFactory;
 
-    @Mock
-    private EmbeddingService embeddingService;
-
     private SearchService searchService;
 
     private ChatClient.CallResponseSpec callResponseSpec;
@@ -69,7 +65,7 @@ class SearchServiceTest {
         Resource systemRes = new ClassPathResource("prompts/system-message.st");
         Resource semanticRes = new ClassPathResource("prompts/semantic-search-system-message.st");
 
-        searchService = new SearchService(systemRes, semanticRes, searchRepository, chatClient, ragChatClient, vectorStoreFactory, embeddingService);
+        searchService = new SearchService(systemRes, semanticRes, searchRepository, chatClient, ragChatClient, vectorStoreFactory);
     }
 
     @Test

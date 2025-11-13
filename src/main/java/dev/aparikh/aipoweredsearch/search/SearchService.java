@@ -1,6 +1,5 @@
 package dev.aparikh.aipoweredsearch.search;
 
-import dev.aparikh.aipoweredsearch.embedding.EmbeddingService;
 import dev.aparikh.aipoweredsearch.search.model.AskRequest;
 import dev.aparikh.aipoweredsearch.search.model.AskResponse;
 import dev.aparikh.aipoweredsearch.search.model.FieldInfo;
@@ -61,7 +60,6 @@ public class SearchService {
     private final ChatClient chatClient;
     private final ChatClient ragChatClient;
     private final VectorStoreFactory vectorStoreFactory;
-    private final EmbeddingService embeddingService;
 
     /**
      * Constructs a new SearchService with required dependencies.
@@ -72,22 +70,19 @@ public class SearchService {
      * @param chatClient the ChatClient configured for search query generation
      * @param ragChatClient the ChatClient configured with QuestionAnswerAdvisor for RAG
      * @param vectorStoreFactory the factory to obtain per-collection VectorStore instances
-     * @param embeddingService the service for generating text embeddings
      */
     public SearchService(@Value("classpath:/prompts/system-message.st") Resource systemResource,
                          @Value("classpath:/prompts/semantic-search-system-message.st") Resource semanticSystemResource,
                          SearchRepository searchRepository,
                          @Qualifier("searchChatClient") ChatClient chatClient,
                          @Qualifier("ragChatClient") ChatClient ragChatClient,
-                         VectorStoreFactory vectorStoreFactory,
-                         EmbeddingService embeddingService) {
+                         VectorStoreFactory vectorStoreFactory) {
         this.systemResource = systemResource;
         this.semanticSystemResource = semanticSystemResource;
         this.searchRepository = searchRepository;
         this.chatClient = chatClient;
         this.ragChatClient = ragChatClient;
         this.vectorStoreFactory = vectorStoreFactory;
-        this.embeddingService = embeddingService;
     }
 
 
@@ -340,7 +335,11 @@ public class SearchService {
      * @param fieldsCsv     optional comma-separated list of fields to include in the response
      * @return search response with hybrid-ranked documents
      */
-    public SearchResponse hybridSearch(String collection, String freeTextQuery, Integer k, Double minScore, String fieldsCsv) {
+    public SearchResponse hybridSearch(String collection,
+                                       String freeTextQuery,
+                                       Integer k,
+                                       Double minScore,
+                                       String fieldsCsv) {
         if (collection == null || collection.trim().isEmpty()) {
             throw new IllegalArgumentException("Collection name cannot be null or blank");
         }
@@ -372,22 +371,19 @@ public class SearchService {
         assert queryGenerationResponse != null;
         log.debug("Query generation response for hybrid search: {}", queryGenerationResponse);
 
-        // Step 3: Generate query vector embedding using EmbeddingService
-        List<Float> queryVector = embeddingService.embedAsList(queryGenerationResponse.q());
-
-        // Step 4: Build filter expression if present
+        // Step 3: Build filter expression if present
         String filterExpression = null;
         if (queryGenerationResponse.fq() != null && !queryGenerationResponse.fq().isEmpty()) {
             filterExpression = String.join(" AND ", queryGenerationResponse.fq());
         }
 
-        // Step 5: Execute hybrid search using RRF in Solr
+        // Step 4: Execute hybrid search using RRF in Solr
+        // Repository will handle embedding generation internally
         int topK = (k != null && k > 0) ? k : 100;
 
         return searchRepository.hybridSearch(
                 collection,
                 queryGenerationResponse.q(),
-                queryVector,
                 topK,
                 filterExpression,
                 fieldsCsv,

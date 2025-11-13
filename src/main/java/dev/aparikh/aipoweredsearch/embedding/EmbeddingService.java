@@ -110,6 +110,24 @@ public class EmbeddingService {
     }
 
     /**
+     * Generates an embedding for the given text and formats it directly for Solr KNN queries.
+     *
+     * <p>This is a convenience method that combines {@link #embed(String)} and
+     * {@link #formatVectorForSolr(float[])} into a single operation, avoiding the need
+     * to store intermediate representations.</p>
+     *
+     * <p>Example output: {@code "[0.123, -0.456, 0.789, ...]"}</p>
+     *
+     * @param text the text to embed and format
+     * @return a Solr-compatible vector string representation
+     * @throws IllegalArgumentException if text is null or empty
+     */
+    public String embedAndFormatForSolr(String text) {
+        float[] embedding = embed(text);
+        return formatVectorForSolr(embedding);
+    }
+
+    /**
      * Returns the underlying embedding model.
      *
      * <p>This method is provided for advanced use cases where direct access
