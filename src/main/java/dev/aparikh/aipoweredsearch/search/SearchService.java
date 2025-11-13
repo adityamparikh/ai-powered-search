@@ -1,12 +1,18 @@
 package dev.aparikh.aipoweredsearch.search;
 
-import dev.aparikh.aipoweredsearch.search.model.*;
+import dev.aparikh.aipoweredsearch.embedding.EmbeddingService;
+import dev.aparikh.aipoweredsearch.search.model.AskRequest;
+import dev.aparikh.aipoweredsearch.search.model.AskResponse;
+import dev.aparikh.aipoweredsearch.search.model.FieldInfo;
+import dev.aparikh.aipoweredsearch.search.model.QueryGenerationResponse;
+import dev.aparikh.aipoweredsearch.search.model.SearchRequest;
+import dev.aparikh.aipoweredsearch.search.model.SearchResponse;
+import dev.aparikh.aipoweredsearch.solr.vectorstore.VectorStoreFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.document.Document;
-import dev.aparikh.aipoweredsearch.solr.vectorstore.VectorStoreFactory;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
@@ -27,6 +33,7 @@ import static org.springframework.ai.vectorstore.SearchRequest.builder;
  * <ul>
  *   <li>Traditional keyword search with AI-powered query generation</li>
  *   <li>Semantic vector search using embeddings and similarity matching</li>
+ *   <li>Hybrid search combining lexical and semantic search using RRF (Reciprocal Rank Fusion)</li>
  *   <li>RAG-based conversational question answering</li>
  * </ul>
  *
@@ -34,7 +41,7 @@ import static org.springframework.ai.vectorstore.SearchRequest.builder;
  * <ul>
  *   <li>Claude AI (Anthropic) for natural language understanding and response generation</li>
  *   <li>OpenAI embeddings for vector similarity search</li>
- *   <li>Apache Solr for both traditional and vector-based search</li>
+ *   <li>Apache Solr for both traditional and vector-based search with RRF support</li>
  *   <li>PostgreSQL for conversation history persistence</li>
  * </ul>
  *
@@ -54,6 +61,7 @@ public class SearchService {
     private final ChatClient chatClient;
     private final ChatClient ragChatClient;
     private final VectorStoreFactory vectorStoreFactory;
+    private final EmbeddingService embeddingService;
 
     /**
      * Constructs a new SearchService with required dependencies.
@@ -64,19 +72,22 @@ public class SearchService {
      * @param chatClient the ChatClient configured for search query generation
      * @param ragChatClient the ChatClient configured with QuestionAnswerAdvisor for RAG
      * @param vectorStoreFactory the factory to obtain per-collection VectorStore instances
+     * @param embeddingService the service for generating text embeddings
      */
     public SearchService(@Value("classpath:/prompts/system-message.st") Resource systemResource,
                          @Value("classpath:/prompts/semantic-search-system-message.st") Resource semanticSystemResource,
                          SearchRepository searchRepository,
                          @Qualifier("searchChatClient") ChatClient chatClient,
                          @Qualifier("ragChatClient") ChatClient ragChatClient,
-                         VectorStoreFactory vectorStoreFactory) {
+                         VectorStoreFactory vectorStoreFactory,
+                         EmbeddingService embeddingService) {
         this.systemResource = systemResource;
         this.semanticSystemResource = semanticSystemResource;
         this.searchRepository = searchRepository;
         this.chatClient = chatClient;
         this.ragChatClient = ragChatClient;
         this.vectorStoreFactory = vectorStoreFactory;
+        this.embeddingService = embeddingService;
     }
 
 
@@ -301,6 +312,87 @@ public class SearchService {
         // Note: Faceting not currently supported in VectorStore similaritySearch
         // Could be enhanced by making a parallel Solr query for facets if needed
         return new SearchResponse(documents, Map.of());
+    }
+
+    /**
+     * Performs hybrid search combining traditional keyword search with semantic vector search using RRF.
+     *
+     * <p>This method leverages Reciprocal Rank Fusion (RRF) to combine results from two search strategies:
+     * <ul>
+     *   <li>Lexical search: Traditional keyword-based search using Solr's edismax query parser</li>
+     *   <li>Semantic search: Vector similarity search using KNN with embeddings</li>
+     * </ul>
+     * </p>
+     *
+     * <p>RRF improves search quality by:
+     * <ol>
+     *   <li>Running both searches independently</li>
+     *   <li>Ranking results from each search</li>
+     *   <li>Combining rankings using the formula: score = sum(1 / (k + rank))</li>
+     *   <li>Re-ranking final results by the combined score</li>
+     * </ol>
+     * </p>
+     *
+     * @param collection    the Solr collection to search
+     * @param freeTextQuery the natural language search query
+     * @param k             optional topK results for vector search (defaults to 100)
+     * @param minScore      optional minimum similarity score threshold [0..1]
+     * @param fieldsCsv     optional comma-separated list of fields to include in the response
+     * @return search response with hybrid-ranked documents
+     */
+    public SearchResponse hybridSearch(String collection, String freeTextQuery, Integer k, Double minScore, String fieldsCsv) {
+        if (collection == null || collection.trim().isEmpty()) {
+            throw new IllegalArgumentException("Collection name cannot be null or blank");
+        }
+        if (freeTextQuery == null || freeTextQuery.trim().isEmpty()) {
+            throw new IllegalArgumentException("Query cannot be null or blank");
+        }
+
+        log.debug("Hybrid search for collection: {}, query: {}, k: {}, minScore: {}, fields: {}",
+                collection, freeTextQuery, k, minScore, fieldsCsv);
+
+        // Step 1: Get field schema information
+        List<FieldInfo> fields = searchRepository.getFieldsWithSchema(collection);
+
+        // Step 2: Use Claude AI to parse query and filters
+        String userMessage = String.format("""
+                The free text query is: %s
+                The available fields with their types are: %s
+                """, freeTextQuery, fields);
+
+        String conversationId = "007";
+
+        QueryGenerationResponse queryGenerationResponse = chatClient.prompt()
+                .system(systemResource)
+                .user(userMessage)
+                .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, conversationId))
+                .call()
+                .entity(QueryGenerationResponse.class);
+
+        assert queryGenerationResponse != null;
+        log.debug("Query generation response for hybrid search: {}", queryGenerationResponse);
+
+        // Step 3: Generate query vector embedding using EmbeddingService
+        List<Float> queryVector = embeddingService.embedAsList(queryGenerationResponse.q());
+
+        // Step 4: Build filter expression if present
+        String filterExpression = null;
+        if (queryGenerationResponse.fq() != null && !queryGenerationResponse.fq().isEmpty()) {
+            filterExpression = String.join(" AND ", queryGenerationResponse.fq());
+        }
+
+        // Step 5: Execute hybrid search using RRF in Solr
+        int topK = (k != null && k > 0) ? k : 100;
+
+        return searchRepository.hybridSearch(
+                collection,
+                queryGenerationResponse.q(),
+                queryVector,
+                topK,
+                filterExpression,
+                fieldsCsv,
+                minScore
+        );
     }
 
     /**

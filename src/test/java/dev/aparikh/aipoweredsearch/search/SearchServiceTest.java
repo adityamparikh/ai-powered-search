@@ -1,17 +1,17 @@
 package dev.aparikh.aipoweredsearch.search;
 
+import dev.aparikh.aipoweredsearch.embedding.EmbeddingService;
 import dev.aparikh.aipoweredsearch.search.model.FieldInfo;
 import dev.aparikh.aipoweredsearch.search.model.QueryGenerationResponse;
 import dev.aparikh.aipoweredsearch.search.model.SearchRequest;
 import dev.aparikh.aipoweredsearch.search.model.SearchResponse;
+import dev.aparikh.aipoweredsearch.solr.vectorstore.VectorStoreFactory;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.ai.chat.client.ChatClient;
-import dev.aparikh.aipoweredsearch.solr.vectorstore.VectorStoreFactory;
-import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.core.io.Resource;
@@ -42,6 +42,9 @@ class SearchServiceTest {
     @Mock
     private VectorStoreFactory vectorStoreFactory;
 
+    @Mock
+    private EmbeddingService embeddingService;
+
     private SearchService searchService;
 
     private ChatClient.CallResponseSpec callResponseSpec;
@@ -66,7 +69,7 @@ class SearchServiceTest {
         Resource systemRes = new ClassPathResource("prompts/system-message.st");
         Resource semanticRes = new ClassPathResource("prompts/semantic-search-system-message.st");
 
-        searchService = new SearchService(systemRes, semanticRes, searchRepository, chatClient, ragChatClient, vectorStoreFactory);
+        searchService = new SearchService(systemRes, semanticRes, searchRepository, chatClient, ragChatClient, vectorStoreFactory, embeddingService);
     }
 
     @Test
