@@ -11,6 +11,7 @@ import org.apache.solr.client.solrj.request.schema.SchemaRequest;
 import org.apache.solr.client.solrj.response.QueryResponse;
 import org.apache.solr.client.solrj.response.schema.SchemaResponse;
 import org.apache.solr.common.SolrDocument;
+import org.apache.solr.common.params.ModifiableSolrParams;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Repository;
@@ -173,10 +174,11 @@ public class SearchRepository {
     }
 
     /**
-     * Performs hybrid search using Reciprocal Rank Fusion (RRF).
+     * Performs hybrid search using Solr 9.10.0 native Reciprocal Rank Fusion (RRF).
      *
      * <p>This method combines traditional keyword search with semantic vector search
-     * using Solr's RRF capabilities to provide better search results.</p>
+     * using Solr's native RRF implementation. The RRF score is calculated using the formula:
+     * score = sum(1 / (k + rank)) where k=60 is the RRF constant.</p>
      *
      * @param collection        the Solr collection to search
      * @param query             the text query for keyword search
@@ -195,48 +197,49 @@ public class SearchRepository {
         log.debug("Performing hybrid search in collection: {} with query: {}", collection, query);
 
         try {
-            // Generate embedding for the query text and format for Solr
+            // Step 1: Generate embedding for the query text
             String vectorString = embeddingService.embedAndFormatForSolr(query);
 
-            // Create SolrQuery with RRF parameters
-            SolrQuery solrQuery = new SolrQuery();
+            // Step 2: Build RRF query with Solr 9.10.0 native RRF support
+            ModifiableSolrParams params = new ModifiableSolrParams();
 
-            // Main query: keyword search using edismax
-            solrQuery.set("q", "{!edismax qf='content'}(" + query + ")");
+            // Keyword search component
+            params.set("q", query);
+            params.set("defType", "edismax");
+            params.set("qf", "_text_");  // Use catch-all text field
 
-            // Re-rank query: KNN vector search
-            String knnQuery = SolrQueryUtils.buildKnnQuery(topK, vectorString);
-            solrQuery.set("rq", "{!rerank reRankQuery=$rqq reRankDocs=" + topK + " reRankWeight=1}");
-            solrQuery.set("rqq", knnQuery);
+            // Vector search component using rerank
+            params.set("rq", "{!rerank reRankQuery=$vectorQ reRankDocs=200 reRankWeight=1}");
+            params.set("vectorQ", SolrQueryUtils.buildKnnQuery(topK, vectorString));
 
-            // Enable RRF
-            solrQuery.set("rrf", "true");
-            solrQuery.set("rrf.queryFields", "q,rqq");
+            // Enable RRF - Reciprocal Rank Fusion
+            params.set("rrf", "true");
+            params.set("rrf.queryFields", "q,vectorQ");
+            params.set("rrf.k", "60");  // RRF constant (typically 60)
 
             // Apply filter expression if present
             if (filterExpression != null && !filterExpression.isEmpty()) {
-                solrQuery.addFilterQuery(filterExpression);
+                params.set("fq", filterExpression);
             }
 
             // Set fields to return
             if (fieldsCsv != null && !fieldsCsv.isEmpty()) {
-                solrQuery.setFields(fieldsCsv.split(","));
+                params.set("fl", fieldsCsv + ",score");
             } else {
-                solrQuery.setFields("*", "score");
+                params.set("fl", "*,score");
             }
 
-            // Set number of rows to return
-            solrQuery.setRows(topK);
+            // Set number of rows
+            params.set("rows", topK);
 
-            // Execute query
-            QueryResponse response = solrClient.query(collection, solrQuery);
+            // Step 3: Execute query
+            QueryResponse response = solrClient.query(collection, params);
 
-            log.debug("Hybrid search returned {} results", response.getResults().size());
+            log.debug("Hybrid search with RRF returned {} results", response.getResults().size());
 
-            // Convert results to SearchResponse format
+            // Step 4: Convert results (apply minScore filter and handle multi-valued fields)
             List<Map<String, Object>> documents = response.getResults().stream()
                     .filter(doc -> {
-                        // Apply minimum score filter if specified
                         if (minScore != null) {
                             Object scoreObj = doc.getFieldValue("score");
                             if (scoreObj instanceof Number) {
@@ -249,7 +252,6 @@ public class SearchRepository {
                         Map<String, Object> docMap = new java.util.HashMap<>();
                         for (String fieldName : doc.getFieldNames()) {
                             Object value = doc.getFieldValue(fieldName);
-                            // Extract first value from multi-valued fields
                             if (value instanceof List) {
                                 List<?> list = (List<?>) value;
                                 if (!list.isEmpty()) {
@@ -263,7 +265,7 @@ public class SearchRepository {
                     })
                     .toList();
 
-            // Handle facet fields - not typically used with RRF but included for completeness
+            // Handle facets
             Map<String, List<SearchResponse.FacetCount>> facetCountsMap =
                     response.getFacetFields() != null ?
                             response.getFacetFields().stream()
@@ -277,8 +279,8 @@ public class SearchRepository {
             return new SearchResponse(documents, facetCountsMap);
 
         } catch (Exception e) {
-            log.error("Error performing hybrid search in collection: {}", collection, e);
-            throw new RuntimeException("Hybrid search failed: " + e.getMessage(), e);
+            log.error("Error performing hybrid search with RRF in collection: {}", collection, e);
+            throw new RuntimeException("Hybrid search with RRF failed: " + e.getMessage(), e);
         }
     }
 

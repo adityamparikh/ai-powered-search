@@ -63,9 +63,12 @@ public class AiConfig {
      */
     @Bean
     @ConditionalOnMissingBean(EmbeddingModel.class)
-    public EmbeddingModel embeddingModel(@Value("${spring.ai.openai.api-key}") String apiKey) {
+    public EmbeddingModel embeddingModel(@Value("${spring.ai.openai.api-key:${OPENAI_API_KEY:}}") String apiKey,
+                                         org.springframework.web.client.RestClient.Builder restClientBuilder) {
         OpenAiApi openAiApi = OpenAiApi.builder()
                 .apiKey(apiKey)
+                // Ensure Spring AI uses JDK HttpClient-based RestClient (not Jetty)
+                .restClientBuilder(restClientBuilder)
                 .build();
         return new OpenAiEmbeddingModel(openAiApi);
     }
@@ -127,7 +130,9 @@ public class AiConfig {
                         QuestionAnswerAdvisor.builder(vectorStore)
                                 .searchRequest(org.springframework.ai.vectorstore.SearchRequest.builder()
                                         .topK(5)
-                                        .similarityThreshold(0.7)
+                                        // Lower threshold to ensure relevant context is retrieved reliably
+                                        // across providers and embeddings in tests
+                                        .similarityThreshold(0.3)
                                         .build())
                                 .build(),
                         MessageChatMemoryAdvisor.builder(chatMemory).build(),

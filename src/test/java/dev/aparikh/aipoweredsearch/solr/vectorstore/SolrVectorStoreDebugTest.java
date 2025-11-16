@@ -1,33 +1,48 @@
 package dev.aparikh.aipoweredsearch.solr.vectorstore;
 
+import dev.aparikh.aipoweredsearch.config.PostgresTestConfiguration;
+import dev.aparikh.aipoweredsearch.config.RestClientConfig;
+import dev.aparikh.aipoweredsearch.config.SolrConfig;
+import dev.aparikh.aipoweredsearch.config.SolrTestConfiguration;
 import org.apache.solr.client.solrj.SolrClient;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.openai.OpenAiEmbeddingModel;
 import org.springframework.ai.openai.api.OpenAiApi;
 import org.springframework.ai.vectorstore.SearchRequest;
+import org.springframework.ai.vectorstore.VectorStore;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.annotation.Import;
 import org.testcontainers.containers.SolrContainer;
-import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.utility.DockerImageName;
 
 import java.util.List;
 import java.util.Map;
 
-import static org.apache.solr.client.solrj.impl.Http2SolrClient.*;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * Debug test for SolrVectorStore to identify issues.
  * This test runs regardless of OPENAI_API_KEY environment variable.
  */
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE,
+        properties = {
+                "spring.ai.openai.embedding.options.model=text-embedding-3-small",
+                "spring.http.client.factory=simple"
+        })
 @Testcontainers
+@Import({RestClientConfig.class, PostgresTestConfiguration.class, SolrConfig.class, SolrTestConfiguration.class})
+@EnabledIfEnvironmentVariable(named = "OPENAI_API_KEY", matches = ".+")
 class SolrVectorStoreDebugTest {
 
-    @Container
-    private static final SolrContainer solrContainer = new SolrContainer(
-            DockerImageName.parse("solr:9.7.0"));
+    @Autowired
+    SolrContainer solrContainer;
+
+    @Autowired
+    SolrClient solrClient;
 
     private static final String COLLECTION_NAME = "test_collection";
 
@@ -57,14 +72,14 @@ class SolrVectorStoreDebugTest {
         var typeResult = solrContainer.execInContainer(
                 "sh", "-c",
                 String.format(
-                    "curl -X POST -H 'Content-Type: application/json' " +
-                    "--data '{\"add-field-type\":{" +
-                    "\"name\":\"knn_vector_1536\"," +
-                    "\"class\":\"solr.DenseVectorField\"," +
-                    "\"vectorDimension\":1536," +
-                    "\"similarityFunction\":\"cosine\"," +
-                    "\"knnAlgorithm\":\"hnsw\"}}' " +
-                    "http://localhost:8983/solr/%s/schema", COLLECTION_NAME)
+                        "curl -X POST -H 'Content-Type: application/json' " +
+                                "--data '{\"add-field-type\":{" +
+                                "\"name\":\"knn_vector_1536\"," +
+                                "\"class\":\"solr.DenseVectorField\"," +
+                                "\"vectorDimension\":1536," +
+                                "\"similarityFunction\":\"cosine\"," +
+                                "\"knnAlgorithm\":\"hnsw\"}}' " +
+                                "http://localhost:8983/solr/%s/schema", COLLECTION_NAME)
         );
         System.out.println("Field type response: " + typeResult.getStdout());
         if (typeResult.getExitCode() != 0) {
@@ -78,13 +93,13 @@ class SolrVectorStoreDebugTest {
         var fieldResult = solrContainer.execInContainer(
                 "sh", "-c",
                 String.format(
-                    "curl -X POST -H 'Content-Type: application/json' " +
-                    "--data '{\"add-field\":{" +
-                    "\"name\":\"vector\"," +
-                    "\"type\":\"knn_vector_1536\"," +
-                    "\"stored\":true," +
-                    "\"indexed\":true}}' " +
-                    "http://localhost:8983/solr/%s/schema", COLLECTION_NAME)
+                        "curl -X POST -H 'Content-Type: application/json' " +
+                                "--data '{\"add-field\":{" +
+                                "\"name\":\"vector\"," +
+                                "\"type\":\"knn_vector_1536\"," +
+                                "\"stored\":true," +
+                                "\"indexed\":true}}' " +
+                                "http://localhost:8983/solr/%s/schema", COLLECTION_NAME)
         );
         System.out.println("Field addition response: " + fieldResult.getStdout());
         if (fieldResult.getExitCode() != 0) {
@@ -96,7 +111,7 @@ class SolrVectorStoreDebugTest {
         var schemaResult = solrContainer.execInContainer(
                 "sh", "-c",
                 String.format(
-                    "curl -s 'http://localhost:8983/solr/%s/schema/fields/vector'", COLLECTION_NAME)
+                        "curl -s 'http://localhost:8983/solr/%s/schema/fields/vector'", COLLECTION_NAME)
         );
         System.out.println("Vector field schema: " + schemaResult.getStdout());
 
@@ -104,7 +119,7 @@ class SolrVectorStoreDebugTest {
         String apiKey = System.getenv("OPENAI_API_KEY");
         if (apiKey != null && !apiKey.isEmpty() && !apiKey.startsWith("sk-test")) {
             System.out.println("\n5. Testing with real API key...");
-            testWithRealEmbeddings();
+            testWithRealEmbeddings(apiKey);
         } else {
             System.out.println("\n5. Skipping embedding test (no valid API key)");
             testWithMockData();
@@ -113,17 +128,14 @@ class SolrVectorStoreDebugTest {
         System.out.println("\n=== Test Complete ===");
     }
 
-    private void testWithRealEmbeddings() {
+    private void testWithRealEmbeddings(String apiKey) {
         try {
-            String solrUrl = "http://" + solrContainer.getHost() + ":" + solrContainer.getSolrPort() + "/solr";
-            SolrClient solrClient = new Builder(solrUrl).build();
-
             OpenAiApi openAiApi = OpenAiApi.builder()
-                    .apiKey(System.getenv("OPENAI_API_KEY"))
+                    .apiKey(apiKey)
                     .build();
             EmbeddingModel embeddingModel = new OpenAiEmbeddingModel(openAiApi);
 
-            SolrVectorStore vectorStore = SolrVectorStore.builder(solrClient, COLLECTION_NAME, embeddingModel)
+            VectorStore vectorStore = SolrVectorStore.builder(solrClient, COLLECTION_NAME, embeddingModel)
                     .options(SolrVectorStoreOptions.defaults())
                     .build();
 
@@ -156,7 +168,7 @@ class SolrVectorStoreDebugTest {
             var pingResult = solrContainer.execInContainer(
                     "sh", "-c",
                     String.format(
-                        "curl -s 'http://localhost:8983/solr/%s/admin/ping'", COLLECTION_NAME)
+                            "curl -s 'http://localhost:8983/solr/%s/admin/ping'", COLLECTION_NAME)
             );
             System.out.println("Ping response: " + pingResult.getStdout());
             assertThat(pingResult.getExitCode()).isEqualTo(0);

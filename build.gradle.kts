@@ -19,7 +19,7 @@ repositories {
     mavenCentral()
 }
 
-extra["springAiVersion"] = "1.1.0-M4"
+extra["springAiVersion"] = "1.1.0"
 
 dependencies {
     implementation("org.springframework.boot:spring-boot-starter-actuator")
@@ -55,11 +55,14 @@ dependencies {
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("org.springframework.boot:spring-boot-testcontainers")
     testImplementation("org.springframework.ai:spring-ai-spring-boot-testcontainers")
+    testImplementation("org.springframework.ai:spring-ai-ollama")
     testImplementation("org.testcontainers:junit-jupiter")
     testImplementation("org.testcontainers:solr")
     testImplementation("org.testcontainers:postgresql")
+    testImplementation("org.testcontainers:ollama")
     testImplementation("org.awaitility:awaitility:4.2.0")
     testImplementation("io.micrometer:micrometer-observation-test")
+    testImplementation("org.springframework.boot:spring-boot-devtools")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 

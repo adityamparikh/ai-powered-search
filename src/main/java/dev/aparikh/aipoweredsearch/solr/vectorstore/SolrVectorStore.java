@@ -177,8 +177,11 @@ public class SolrVectorStore extends AbstractObservationVectorStore {
                     .map(this::toSolrDocument)
                     .collect(toList());
 
-            // Add to Solr using commitWithin to avoid per-operation hard commits
+            // Add to Solr using commitWithin, then perform an explicit soft commit to
+            // make documents immediately searchable for tests/integration scenarios.
             UpdateResponse response = solrClient.add(collection, solrDocs, 1000);
+            // Ensure the newly added docs are visible to subsequent queries immediately
+            solrClient.commit(collection);
 
             log.debug("Added {} documents to Solr collection '{}', status: {}",
                     documents.size(), collection, response.getStatus());
