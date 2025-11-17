@@ -87,7 +87,7 @@ class SearchRepositoryIT extends SolrTestBase {
                 .thenReturn("[0.1, 0.2, 0.3, 0.4, 0.5]");
 
         // When
-        SearchResponse response = searchRepository.hybridSearch(
+        SearchResponse response = searchRepository.executeHybridRerankSearch(
                 TEST_COLLECTION,
                 query,
                 topK,
@@ -120,7 +120,7 @@ class SearchRepositoryIT extends SolrTestBase {
                 .thenReturn("[0.1, 0.2, 0.3, 0.4, 0.5]");
 
         // When
-        SearchResponse response = searchRepository.hybridSearch(
+        SearchResponse response = searchRepository.executeHybridRerankSearch(
                 TEST_COLLECTION,
                 query,
                 topK,
@@ -153,7 +153,7 @@ class SearchRepositoryIT extends SolrTestBase {
                 .thenReturn("[0.1, 0.2, 0.3, 0.4, 0.5]");
 
         // When
-        SearchResponse response = searchRepository.hybridSearch(
+        SearchResponse response = searchRepository.executeHybridRerankSearch(
                 TEST_COLLECTION,
                 query,
                 topK,
@@ -187,7 +187,7 @@ class SearchRepositoryIT extends SolrTestBase {
                 .thenReturn("[0.1, 0.2, 0.3, 0.4, 0.5]");
 
         // When
-        SearchResponse response = searchRepository.hybridSearch(
+        SearchResponse response = searchRepository.executeHybridRerankSearch(
                 TEST_COLLECTION,
                 query,
                 topK,
@@ -220,7 +220,7 @@ class SearchRepositoryIT extends SolrTestBase {
                 .thenReturn("[0.9, 0.9, 0.9, 0.9, 0.9]"); // Very different vector
 
         // When
-        SearchResponse response = searchRepository.hybridSearch(
+        SearchResponse response = searchRepository.executeHybridRerankSearch(
                 TEST_COLLECTION,
                 query,
                 topK,
@@ -246,7 +246,7 @@ class SearchRepositoryIT extends SolrTestBase {
                 .thenReturn("[0.1, 0.2, 0.3, 0.4, 0.5]");
 
         // When
-        SearchResponse response = searchRepository.hybridSearch(
+        SearchResponse response = searchRepository.executeHybridRerankSearch(
                 TEST_COLLECTION,
                 query,
                 topK,
@@ -280,7 +280,7 @@ class SearchRepositoryIT extends SolrTestBase {
                 .thenReturn("[0.1, 0.2, 0.3, 0.4, 0.5]");
 
         // When
-        SearchResponse response = searchRepository.hybridSearch(
+        SearchResponse response = searchRepository.executeHybridRerankSearch(
                 TEST_COLLECTION,
                 query,
                 topK,
@@ -314,7 +314,7 @@ class SearchRepositoryIT extends SolrTestBase {
                 .thenReturn("[0.1, 0.2, 0.3, 0.4, 0.5]");
 
         // When
-        SearchResponse response = searchRepository.hybridSearch(
+        SearchResponse response = searchRepository.executeHybridRerankSearch(
                 TEST_COLLECTION,
                 query,
                 topK,

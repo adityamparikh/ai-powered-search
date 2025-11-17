@@ -85,83 +85,6 @@ public class SearchRepository {
         }
     }
 
-    /**
-     * Performs semantic search using vector similarity (KNN).
-     *
-     * @param collection     the Solr collection to search
-     * @param queryVector    the query embedding vector
-     * @param searchRequest  search parameters (filters, sort, fields, facets)
-     * @param topK          number of nearest neighbors to return
-     * @return search response with semantically similar documents
-     * @deprecated This method is not used. SearchService uses VectorStore directly for semantic search.
-     *             This method will be removed in a future version.
-     */
-    @Deprecated(since = "1.0.0", forRemoval = true)
-    public SearchResponse semanticSearch(String collection, List<Float> queryVector, SearchRequest searchRequest, int topK) {
-        log.debug("Performing semantic search in collection: {} with topK: {}", collection, topK);
-
-        // Build KNN query using Solr's vector search syntax
-        // Format: {!knn f=vector topK=10}[0.1, 0.2, 0.3, ...]
-        String vectorString = embeddingService.formatVectorForSolr(queryVector);
-        String knnQuery = SolrQueryUtils.buildKnnQuery(topK, vectorString);
-
-        SolrQuery query = new SolrQuery(knnQuery);
-
-        // Apply filter queries from search request
-        if (searchRequest.filterQueries() != null) {
-            searchRequest.filterQueries().forEach(query::addFilterQuery);
-        }
-
-        // Apply custom sort (default is by vector similarity score)
-        if (searchRequest.hasSort()) {
-            query.set("sort", searchRequest.sort());
-        }
-
-        // Set fields to return
-        if (searchRequest.hasFieldList()) {
-            query.setFields(searchRequest.fieldList());
-        } else {
-            // Default fields for semantic search
-            query.setFields("*", "score");
-        }
-
-        // Handle faceting
-        if (searchRequest.hasFacets()) {
-            query.setFacet(true);
-            searchRequest.facet().fields().forEach(query::addFacetField);
-            if (searchRequest.facet().query() != null) {
-                query.addFacetQuery(searchRequest.facet().query());
-            }
-        }
-
-        try {
-            // Use POST method to avoid URI Too Long errors with large vector embeddings
-            QueryResponse response = solrClient.query(collection, query, SolrRequest.METHOD.POST);
-
-            log.debug("Semantic search returned {} results", response.getResults().size());
-
-            // Handle facet fields
-            Map<String, List<SearchResponse.FacetCount>> facetCountsMap =
-                response.getFacetFields() != null ?
-                    response.getFacetFields().stream()
-                            .collect(Collectors.toMap(
-                                    f -> f.getName(),
-                                    f -> f.getValues().stream()
-                                            .map(c -> new SearchResponse.FacetCount(c.getName(), c.getCount()))
-                                            .collect(Collectors.toList())))
-                        : new java.util.HashMap<>();
-
-            return new SearchResponse(
-                    response.getResults().stream()
-                            .map(d -> new java.util.HashMap<String, Object>(d))
-                            .collect(Collectors.toList()),
-                    facetCountsMap
-            );
-        } catch (Exception e) {
-            log.error("Error performing semantic search in collection: {}", collection, e);
-            throw new RuntimeException("Semantic search failed: " + e.getMessage(), e);
-        }
-    }
 
     public Set<String> getActuallyUsedFields(String collection) {
         Set<String> usedFields = new HashSet<>();
@@ -300,20 +223,6 @@ public class SearchRepository {
             log.warn("Hybrid search failed, attempting keyword-only fallback");
             return fallbackToKeywordSearch(collection, query, topK, filterExpression, fieldsCsv, minScore);
         }
-    }
-
-    /**
-     * @deprecated Use {@link #executeHybridRerankSearch(String, String, int, String, String, Double)} instead.
-     * This method will be removed in a future version.
-     */
-    @Deprecated(since = "1.0.0", forRemoval = true)
-    public SearchResponse hybridSearch(String collection,
-                                       String query,
-                                       int topK,
-                                       String filterExpression,
-                                       String fieldsCsv,
-                                       Double minScore) {
-        return executeHybridRerankSearch(collection, query, topK, filterExpression, fieldsCsv, minScore);
     }
 
     /**

@@ -143,7 +143,7 @@ class SearchServiceTest {
                 ),
                 Collections.emptyMap()
         );
-        when(searchRepository.hybridSearch(
+        when(searchRepository.executeHybridRerankSearch(
                 anyString(),
                 anyString(),
                 any(Integer.class),
@@ -191,7 +191,7 @@ class SearchServiceTest {
                 List.of(Map.of("id", "1", "content", "Spring Boot Tutorial", "score", 0.92)),
                 Collections.emptyMap()
         );
-        when(searchRepository.hybridSearch(
+        when(searchRepository.executeHybridRerankSearch(
                 collection,
                 "java spring boot tutorials",
                 topK,
@@ -242,7 +242,7 @@ class SearchServiceTest {
                 ),
                 Collections.emptyMap()
         );
-        when(searchRepository.hybridSearch(
+        when(searchRepository.executeHybridRerankSearch(
                 collection,
                 "natural language processing",
                 topK,
@@ -295,7 +295,7 @@ class SearchServiceTest {
                 ),
                 Collections.emptyMap()
         );
-        when(searchRepository.hybridSearch(
+        when(searchRepository.executeHybridRerankSearch(
                 collection,
                 "cloud computing platforms",
                 100,
@@ -348,7 +348,7 @@ class SearchServiceTest {
                 ),
                 Collections.emptyMap()
         );
-        when(searchRepository.hybridSearch(
+        when(searchRepository.executeHybridRerankSearch(
                 collection,
                 "python tutorials",
                 100,
@@ -394,7 +394,7 @@ class SearchServiceTest {
                 Collections.emptyList(),
                 Collections.emptyMap()
         );
-        when(searchRepository.hybridSearch(
+        when(searchRepository.executeHybridRerankSearch(
                 anyString(),
                 anyString(),
                 any(Integer.class),

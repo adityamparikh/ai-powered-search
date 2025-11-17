@@ -76,7 +76,7 @@ class SearchRepositoryTest {
         when(solrClient.query(eq(collection), any(SolrParams.class), eq(SolrRequest.METHOD.POST))).thenReturn(queryResponse);
 
         // When
-        SearchResponse response = searchRepository.hybridSearch(collection, query, topK, null, null, null);
+        SearchResponse response = searchRepository.executeHybridRerankSearch(collection, query, topK, null, null, null);
 
         // Then
         assertNotNull(response);
@@ -125,7 +125,7 @@ class SearchRepositoryTest {
         when(solrClient.query(eq(collection), any(SolrParams.class), eq(SolrRequest.METHOD.POST))).thenReturn(queryResponse);
 
         // When
-        searchRepository.hybridSearch(collection, query, topK, filterExpression, null, null);
+        searchRepository.executeHybridRerankSearch(collection, query, topK, filterExpression, null, null);
 
         // Then
         ArgumentCaptor<SolrParams> queryCaptor = ArgumentCaptor.forClass(SolrParams.class);
@@ -159,7 +159,7 @@ class SearchRepositoryTest {
         when(solrClient.query(eq(collection), any(SolrParams.class), eq(SolrRequest.METHOD.POST))).thenReturn(queryResponse);
 
         // When
-        searchRepository.hybridSearch(collection, query, topK, null, fieldsCsv, null);
+        searchRepository.executeHybridRerankSearch(collection, query, topK, null, fieldsCsv, null);
 
         // Then
         ArgumentCaptor<SolrParams> queryCaptor = ArgumentCaptor.forClass(SolrParams.class);
@@ -190,7 +190,7 @@ class SearchRepositoryTest {
         when(solrClient.query(eq(collection), any(SolrParams.class), eq(SolrRequest.METHOD.POST))).thenReturn(queryResponse);
 
         // When
-        searchRepository.hybridSearch(collection, query, topK, null, null, null);
+        searchRepository.executeHybridRerankSearch(collection, query, topK, null, null, null);
 
         // Then
         ArgumentCaptor<SolrParams> queryCaptor = ArgumentCaptor.forClass(SolrParams.class);
@@ -238,7 +238,7 @@ class SearchRepositoryTest {
         when(solrClient.query(eq(collection), any(SolrParams.class), eq(SolrRequest.METHOD.POST))).thenReturn(queryResponse);
 
         // When
-        SearchResponse response = searchRepository.hybridSearch(collection, query, topK, null, null, minScore);
+        SearchResponse response = searchRepository.executeHybridRerankSearch(collection, query, topK, null, null, minScore);
 
         // Then
         assertNotNull(response);
@@ -276,7 +276,7 @@ class SearchRepositoryTest {
         when(solrClient.query(eq(collection), any(SolrParams.class), eq(SolrRequest.METHOD.POST))).thenReturn(queryResponse);
 
         // When
-        SearchResponse response = searchRepository.hybridSearch(collection, query, topK, null, null, null);
+        SearchResponse response = searchRepository.executeHybridRerankSearch(collection, query, topK, null, null, null);
 
         // Then
         assertNotNull(response);
@@ -304,7 +304,7 @@ class SearchRepositoryTest {
         when(solrClient.query(eq(collection), any(SolrParams.class), eq(SolrRequest.METHOD.POST))).thenReturn(queryResponse);
 
         // When
-        SearchResponse response = searchRepository.hybridSearch(collection, query, topK, null, null, null);
+        SearchResponse response = searchRepository.executeHybridRerankSearch(collection, query, topK, null, null, null);
 
         // Then
         assertNotNull(response);
@@ -336,7 +336,7 @@ class SearchRepositoryTest {
         when(solrClient.query(eq(collection), any(SolrParams.class), eq(SolrRequest.METHOD.POST))).thenReturn(queryResponse);
 
         // When
-        searchRepository.hybridSearch(collection, query, topK, null, null, null);
+        searchRepository.executeHybridRerankSearch(collection, query, topK, null, null, null);
 
         // Then
         ArgumentCaptor<SolrParams> queryCaptor = ArgumentCaptor.forClass(SolrParams.class);
@@ -372,7 +372,7 @@ class SearchRepositoryTest {
         when(solrClient.query(eq(collection), any(SolrParams.class), eq(SolrRequest.METHOD.POST))).thenReturn(queryResponse);
 
         // When
-        searchRepository.hybridSearch(collection, query, topK, null, null, null);
+        searchRepository.executeHybridRerankSearch(collection, query, topK, null, null, null);
 
         // Then
         ArgumentCaptor<SolrParams> queryCaptor = ArgumentCaptor.forClass(SolrParams.class);
@@ -412,7 +412,7 @@ class SearchRepositoryTest {
         when(solrClient.query(eq(collection), any(SolrParams.class), eq(SolrRequest.METHOD.POST))).thenReturn(queryResponse);
 
         // When
-        searchRepository.hybridSearch(collection, query, topK, null, null, null);
+        searchRepository.executeHybridRerankSearch(collection, query, topK, null, null, null);
 
         // Then - should not throw exception
         ArgumentCaptor<SolrParams> queryCaptor = ArgumentCaptor.forClass(SolrParams.class);
@@ -444,7 +444,7 @@ class SearchRepositoryTest {
         when(solrClient.query(eq(collection), any(SolrParams.class), eq(SolrRequest.METHOD.POST))).thenReturn(queryResponse);
 
         // When
-        searchRepository.hybridSearch(collection, query, topK, filterExpression, null, null);
+        searchRepository.executeHybridRerankSearch(collection, query, topK, filterExpression, null, null);
 
         // Then - should not add filter query
         ArgumentCaptor<SolrParams> queryCaptor = ArgumentCaptor.forClass(SolrParams.class);

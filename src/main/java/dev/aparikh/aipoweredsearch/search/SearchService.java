@@ -242,7 +242,7 @@ public class SearchService {
         // Repository will handle embedding generation internally
         int topK = (k != null && k > 0) ? k : 100;
 
-        return searchRepository.hybridSearch(
+        return searchRepository.executeHybridRerankSearch(
                 collection,
                 queryGenerationResponse.q(),
                 topK,
