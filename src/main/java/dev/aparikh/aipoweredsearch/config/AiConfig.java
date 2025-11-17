@@ -163,7 +163,9 @@ public class AiConfig {
         return builder.defaultAdvisors(
                         MessageChatMemoryAdvisor.builder(chatMemory).build(),
                         SimpleLoggerAdvisor.builder().build(),
-                        new PromptCacheMetricsAdvisor(cachingEnabled)
+                        PromptCacheMetricsAdvisor.builder()
+                                .cachingEnabled(cachingEnabled)
+                                .build()
                 )
                 .build();
     }
@@ -216,7 +218,9 @@ public class AiConfig {
                                 .build(),
                         MessageChatMemoryAdvisor.builder(chatMemory).build(),
                         SimpleLoggerAdvisor.builder().build(),
-                        new PromptCacheMetricsAdvisor(cachingEnabled)
+                        PromptCacheMetricsAdvisor.builder()
+                                .cachingEnabled(cachingEnabled)
+                                .build()
                 )
                 .build();
     }

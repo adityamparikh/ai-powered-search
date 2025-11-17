@@ -5,8 +5,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.ai.anthropic.api.AnthropicApi;
 import org.springframework.ai.chat.client.ChatClientRequest;
 import org.springframework.ai.chat.client.ChatClientResponse;
-import org.springframework.ai.chat.client.advisor.api.CallAdvisor;
-import org.springframework.ai.chat.client.advisor.api.CallAdvisorChain;
+import org.springframework.ai.chat.client.advisor.api.AdvisorChain;
+import org.springframework.ai.chat.client.advisor.api.BaseAdvisor;
 import org.springframework.ai.chat.metadata.Usage;
 import org.springframework.ai.chat.model.ChatResponse;
 
@@ -35,7 +35,7 @@ import org.springframework.ai.chat.model.ChatResponse;
  * @author Aditya Parikh
  * @see AnthropicApi.Usage
  */
-public class PromptCacheMetricsAdvisor implements CallAdvisor {
+public class PromptCacheMetricsAdvisor implements BaseAdvisor {
 
     private static final Logger log = LoggerFactory.getLogger(PromptCacheMetricsAdvisor.class);
 
@@ -43,19 +43,75 @@ public class PromptCacheMetricsAdvisor implements CallAdvisor {
 
     public PromptCacheMetricsAdvisor(boolean cachingEnabled) {
         this.cachingEnabled = cachingEnabled;
+        log.info("[Prompt Caching] PromptCacheMetricsAdvisor@{} initialized with cachingEnabled={}, order={}",
+                System.identityHashCode(this), cachingEnabled, getOrder());
+    }
+
+    /**
+     * Returns a new builder for {@link PromptCacheMetricsAdvisor}.
+     *
+     * <p>This enables a consistent builder paradigm alongside other Spring AI advisors
+     * that already expose builders.</p>
+     */
+    public static Builder builder() {
+        return new Builder();
+    }
+
+    /**
+     * Fluent builder for {@link PromptCacheMetricsAdvisor}.
+     */
+    public static final class Builder {
+        private boolean cachingEnabled;
+
+        private Builder() {
+        }
+
+        /**
+         * Enables or disables prompt caching metrics logging.
+         *
+         * @param cachingEnabled whether caching is enabled
+         * @return this builder instance
+         */
+        public Builder cachingEnabled(boolean cachingEnabled) {
+            this.cachingEnabled = cachingEnabled;
+            return this;
+        }
+
+        /**
+         * Builds the {@link PromptCacheMetricsAdvisor}.
+         *
+         * @return a configured advisor instance
+         */
+        public PromptCacheMetricsAdvisor build() {
+            return new PromptCacheMetricsAdvisor(this.cachingEnabled);
+        }
     }
 
     @Override
-    public ChatClientResponse adviseCall(ChatClientRequest request, CallAdvisorChain chain) {
-        // Continue the chain
-        ChatClientResponse response = chain.nextCall(request);
+    public ChatClientRequest before(ChatClientRequest request, AdvisorChain advisorChain) {
+        log.info("[Prompt Caching] PromptCacheMetricsAdvisor@{}.before() invoked",
+                System.identityHashCode(this));
+        // Just pass through - we only care about the response
+        return request;
+    }
 
-        // Log cache metrics if caching is enabled
-        if (cachingEnabled && response != null && response.chatResponse() != null) {
-            logCacheMetrics(response.chatResponse());
+    @Override
+    public ChatClientResponse after(ChatClientResponse response, AdvisorChain advisorChain) {
+        try {
+            log.info("[Prompt Caching] PromptCacheMetricsAdvisor@{}.after() invoked, cachingEnabled={}, response={}, chatResponse={}",
+                    System.identityHashCode(this), cachingEnabled, response != null, response != null && response.chatResponse() != null);
+
+            // Log cache metrics if caching is enabled
+            if (cachingEnabled && response != null && response.chatResponse() != null) {
+                logCacheMetrics(response.chatResponse());
+            }
+
+            log.info("[Prompt Caching] PromptCacheMetricsAdvisor@{}.after() END", System.identityHashCode(this));
+            return response;
+        } catch (Exception e) {
+            log.error("[Prompt Caching] PromptCacheMetricsAdvisor@{}.after() ERROR", System.identityHashCode(this), e);
+            throw e;
         }
-
-        return response;
     }
 
     /**
@@ -66,11 +122,14 @@ public class PromptCacheMetricsAdvisor implements CallAdvisor {
     private void logCacheMetrics(ChatResponse response) {
         Usage usage = response.getMetadata().getUsage();
         if (usage == null || usage.getNativeUsage() == null) {
+            log.debug("[Prompt Caching] No usage metadata available");
             return;
         }
 
         Object nativeUsage = usage.getNativeUsage();
         if (!(nativeUsage instanceof AnthropicApi.Usage anthropicUsage)) {
+            log.debug("[Prompt Caching] Native usage is not AnthropicApi.Usage: {}",
+                    nativeUsage != null ? nativeUsage.getClass().getName() : "null");
             return;
         }
 
@@ -79,11 +138,17 @@ public class PromptCacheMetricsAdvisor implements CallAdvisor {
         Integer regularInputTokens = anthropicUsage.inputTokens();
         Integer outputTokens = anthropicUsage.outputTokens();
 
+        log.debug("[Prompt Caching] Token metrics - Creation: {}, Read: {}, Regular: {}, Output: {}",
+                cacheCreationTokens, cacheReadTokens, regularInputTokens, outputTokens);
+
         // Only log if there's cache activity
         if ((cacheCreationTokens != null && cacheCreationTokens > 0) ||
                 (cacheReadTokens != null && cacheReadTokens > 0)) {
 
             logCacheActivity(cacheCreationTokens, cacheReadTokens, regularInputTokens, outputTokens);
+        } else {
+            log.debug("[Prompt Caching] No cache activity detected. " +
+                    "Prompt may be too small (<1024 tokens) or caching not configured properly.");
         }
     }
 
@@ -109,8 +174,8 @@ public class PromptCacheMetricsAdvisor implements CallAdvisor {
             // According to Anthropic: cache reads are 90% cheaper than regular input tokens
             // Reference: https://www.anthropic.com/news/prompt-caching
             double savingsPercentage = calculateSavings(cacheReadTokens, regularInputTokens);
-            log.info("[Prompt Caching] Cost savings: ~{,number,#.#}% (cache reads are 90% cheaper than regular input)",
-                    savingsPercentage);
+            log.info("[Prompt Caching] Cost savings: ~{}%",
+                    String.format("%.1f", savingsPercentage));
 
         } else if (isCacheMiss) {
             log.info("[Prompt Caching] Cache MISS - Created: {} tokens, Regular input: {} tokens, Output: {} tokens",
@@ -122,12 +187,46 @@ public class PromptCacheMetricsAdvisor implements CallAdvisor {
     /**
      * Calculates the approximate cost savings from cache hits.
      *
-     * <p>Formula: savings = (cached_tokens * 0.9) / (cached_tokens + regular_tokens) * 100</p>
-     * <p>This assumes cache reads are 90% cheaper than regular input tokens.</p>
+     * <h3>Background: Anthropic Prompt Caching</h3>
+     * <p>When a cached prompt is reused, Anthropic charges 90% less for those input tokens
+     * compared to a regular (uncached) prompt. So, cached reads cost only 10% of regular input tokens.</p>
+     *
+     * <h3>Cost Calculation Logic</h3>
+     * <p>Let's define:</p>
+     * <ul>
+     *   <li><b>C</b> = cacheReadTokens (number of tokens read from cache)</li>
+     *   <li><b>R</b> = regularInputTokens (regular tokens, not eligible for caching)</li>
+     *   <li><b>Total Input Tokens</b>: T = C + R</li>
+     *   <li><b>Regular cost per token</b>: Assume it's 1 unit of cost</li>
+     * </ul>
+     *
+     * <p><b>Step 1: Cost Without Caching</b></p>
+     * <p>If there were no caching, you'd pay full price for all input tokens:</p>
+     * <pre>costWithoutCaching = (C + R) × 1.0</pre>
+     *
+     * <p><b>Step 2: Cost With Caching</b></p>
+     * <p>Now, with Anthropic caching:</p>
+     * <ul>
+     *   <li>Cached tokens cost: C × 0.1 (since cache reads are 90% cheaper)</li>
+     *   <li>Regular tokens cost: R × 1.0</li>
+     * </ul>
+     * <pre>totalEffectiveCost = (C × 0.1) + (R × 1.0)</pre>
+     *
+     * <p><b>Step 3: Cost Savings Calculation</b></p>
+     * <p>The percentage saved compared to no caching:</p>
+     * <pre>savings = ((costWithoutCaching - totalEffectiveCost) / costWithoutCaching) × 100</pre>
+     *
+     * <p><b>Example:</b></p>
+     * <p>Suppose C = 1000 (cached) and R = 100 (regular):</p>
+     * <ul>
+     *   <li>Without caching: 1100 × 1.0 = 1100</li>
+     *   <li>With caching: (1000 × 0.1) + (100 × 1.0) = 100 + 100 = 200</li>
+     *   <li>Savings: (1100 - 200) / 1100 × 100 = 900 / 1100 × 100 ≈ 81.8%</li>
+     * </ul>
      *
      * @param cacheReadTokens    number of tokens read from cache
      * @param regularInputTokens number of regular input tokens
-     * @return percentage of cost savings
+     * @return percentage of cost savings due to prompt caching
      */
     private double calculateSavings(Integer cacheReadTokens, Integer regularInputTokens) {
         if (cacheReadTokens == null || cacheReadTokens == 0) {
@@ -159,7 +258,7 @@ public class PromptCacheMetricsAdvisor implements CallAdvisor {
 
     @Override
     public int getOrder() {
-        // Run last to ensure we capture the final response
-        return Integer.MAX_VALUE;
+        // Use same order as SimpleLoggerAdvisor (0) to ensure we're invoked
+        return 0;
     }
 }
