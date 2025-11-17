@@ -2,6 +2,8 @@ services:
   postgres:
     image: postgres:16-alpine
     container_name: ai-powered-search-postgres
+    networks:
+      - search
     environment:
       POSTGRES_DB: chatmemory
       POSTGRES_USER: postgres
@@ -17,7 +19,7 @@ services:
       retries: 5
 
   solr:
-    image: solr:9-slim
+    image: solr:9.10.0-slim
     container_name: ai-powered-search-solr
     ports:
       - "8983:8983"

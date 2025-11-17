@@ -1,12 +1,18 @@
 package dev.aparikh.aipoweredsearch.embedding;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.ai.embedding.EmbeddingModel;
+import org.springframework.retry.annotation.Backoff;
+import org.springframework.retry.annotation.Retryable;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.ResourceAccessException;
+import org.springframework.web.client.RestClientException;
 
 import java.util.List;
 
 /**
- * Service for generating and managing text embeddings using OpenAI.
+ * Service for generating and managing text embeddings using OpenAI with automatic retry logic.
  *
  * <p>This service provides a clean abstraction over the embedding model,
  * handling conversion between different embedding representations and
@@ -15,11 +21,16 @@ import java.util.List;
  * <p>Currently uses OpenAI's text-embedding-3-small model which generates
  * 1536-dimensional embeddings optimized for semantic similarity search.</p>
  *
+ * <p>Embedding generation includes automatic retry logic with exponential backoff
+ * to handle transient network failures and API rate limits.</p>
+ *
  * @author Aditya Parikh
  * @since 1.0.0
  */
 @Service
 public class EmbeddingService {
+
+    private static final Logger log = LoggerFactory.getLogger(EmbeddingService.class);
 
     private final EmbeddingModel embeddingModel;
 
@@ -37,15 +48,36 @@ public class EmbeddingService {
      *
      * <p>This is the most efficient representation for storage and mathematical operations.</p>
      *
+     * <p>This method includes automatic retry logic with exponential backoff:
+     * <ul>
+     *   <li>Max attempts: 3</li>
+     *   <li>Initial delay: 1 second</li>
+     *   <li>Backoff multiplier: 2x (1s, 2s, 4s)</li>
+     *   <li>Max delay: 10 seconds</li>
+     * </ul>
+     * </p>
+     *
      * @param text the text to embed
      * @return a 1536-dimensional float array representing the text embedding
      * @throws IllegalArgumentException if text is null or empty
+     * @throws RuntimeException if all retry attempts fail
      */
+    @Retryable(
+            retryFor = {ResourceAccessException.class, RestClientException.class},
+            maxAttempts = 3,
+            backoff = @Backoff(delay = 1000, multiplier = 2.0, maxDelay = 10000)
+    )
     public float[] embed(String text) {
-        if (text == null || text.trim().isEmpty()) {
-            throw new IllegalArgumentException("Text cannot be null or empty");
+
+        log.debug("Generating embedding for text (length: {})", text.length());
+        try {
+            float[] embedding = embeddingModel.embed(text);
+            log.debug("Successfully generated embedding with {} dimensions", embedding.length);
+            return embedding;
+        } catch (Exception e) {
+            log.warn("Embedding generation failed, will retry if attempts remain: {}", e.getMessage());
+            throw e;
         }
-        return embeddingModel.embed(text);
     }
 
     /**

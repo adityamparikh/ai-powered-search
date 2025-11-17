@@ -3,6 +3,7 @@ package dev.aparikh.aipoweredsearch.search;
 import dev.aparikh.aipoweredsearch.embedding.EmbeddingService;
 import dev.aparikh.aipoweredsearch.search.model.SearchResponse;
 import org.apache.solr.client.solrj.SolrClient;
+import org.apache.solr.client.solrj.SolrRequest;
 import org.apache.solr.client.solrj.response.QueryResponse;
 import org.apache.solr.common.SolrDocument;
 import org.apache.solr.common.SolrDocumentList;
@@ -22,6 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -71,7 +73,7 @@ class SearchRepositoryTest {
 
         when(queryResponse.getResults()).thenReturn(documentList);
         when(queryResponse.getFacetFields()).thenReturn(null);
-        when(solrClient.query(eq(collection), any(SolrParams.class))).thenReturn(queryResponse);
+        when(solrClient.query(eq(collection), any(SolrParams.class), eq(SolrRequest.METHOD.POST))).thenReturn(queryResponse);
 
         // When
         SearchResponse response = searchRepository.hybridSearch(collection, query, topK, null, null, null);
@@ -83,17 +85,22 @@ class SearchRepositoryTest {
         assertEquals("TensorFlow is a popular ML framework", response.documents().get(0).get("content"));
         assertEquals(0.95f, ((Number) response.documents().get(0).get("score")).floatValue());
 
-        // Verify Solr query structure
+        // Verify Solr query structure - should use reranking, not RRF (RRF not available in Solr 9.10.0)
         ArgumentCaptor<SolrParams> queryCaptor = ArgumentCaptor.forClass(SolrParams.class);
-        verify(solrClient).query(eq(collection), queryCaptor.capture());
+        verify(solrClient).query(eq(collection), queryCaptor.capture(), eq(SolrRequest.METHOD.POST));
 
         SolrParams capturedQuery = queryCaptor.getValue();
-        assertNotNull(capturedQuery.get("rrf"));
-        assertEquals("true", capturedQuery.get("rrf"));
-        assertEquals("q,vectorQ", capturedQuery.get("rrf.queryFields"));
+        // Verify keyword search component
         assertNotNull(capturedQuery.get("q"));
+        assertEquals(query, capturedQuery.get("q"));
+        assertEquals("edismax", capturedQuery.get("defType"));
+
+        // Verify reranking component (not RRF, as it's not available in Solr 9.10.0)
         assertNotNull(capturedQuery.get("rq"));
+        assertTrue(capturedQuery.get("rq").contains("rerank"), "Should use rerank query");
         assertNotNull(capturedQuery.get("vectorQ"));
+        assertTrue(capturedQuery.get("vectorQ").contains("knn"), "vectorQ should contain knn query");
+
         assertEquals(String.valueOf(topK), capturedQuery.get("rows"));
     }
 
@@ -109,16 +116,20 @@ class SearchRepositoryTest {
         when(embeddingService.embedAndFormatForSolr(query)).thenReturn(vectorString);
 
         SolrDocumentList documentList = new SolrDocumentList();
+        SolrDocument doc = new SolrDocument();
+        doc.setField("id", "test-1");
+        doc.setField("content", "Test document");
+        documentList.add(doc);
         when(queryResponse.getResults()).thenReturn(documentList);
         when(queryResponse.getFacetFields()).thenReturn(null);
-        when(solrClient.query(eq(collection), any(SolrParams.class))).thenReturn(queryResponse);
+        when(solrClient.query(eq(collection), any(SolrParams.class), eq(SolrRequest.METHOD.POST))).thenReturn(queryResponse);
 
         // When
         searchRepository.hybridSearch(collection, query, topK, filterExpression, null, null);
 
         // Then
         ArgumentCaptor<SolrParams> queryCaptor = ArgumentCaptor.forClass(SolrParams.class);
-        verify(solrClient).query(eq(collection), queryCaptor.capture());
+        verify(solrClient).query(eq(collection), queryCaptor.capture(), eq(SolrRequest.METHOD.POST));
 
         SolrParams capturedQuery = queryCaptor.getValue();
         String[] filterQueries = capturedQuery.getParams("fq");
@@ -139,16 +150,20 @@ class SearchRepositoryTest {
         when(embeddingService.embedAndFormatForSolr(query)).thenReturn(vectorString);
 
         SolrDocumentList documentList = new SolrDocumentList();
+        SolrDocument doc = new SolrDocument();
+        doc.setField("id", "test-1");
+        doc.setField("content", "Test document");
+        documentList.add(doc);
         when(queryResponse.getResults()).thenReturn(documentList);
         when(queryResponse.getFacetFields()).thenReturn(null);
-        when(solrClient.query(eq(collection), any(SolrParams.class))).thenReturn(queryResponse);
+        when(solrClient.query(eq(collection), any(SolrParams.class), eq(SolrRequest.METHOD.POST))).thenReturn(queryResponse);
 
         // When
         searchRepository.hybridSearch(collection, query, topK, null, fieldsCsv, null);
 
         // Then
         ArgumentCaptor<SolrParams> queryCaptor = ArgumentCaptor.forClass(SolrParams.class);
-        verify(solrClient).query(eq(collection), queryCaptor.capture());
+        verify(solrClient).query(eq(collection), queryCaptor.capture(), eq(SolrRequest.METHOD.POST));
 
         SolrParams capturedQuery = queryCaptor.getValue();
         String fields = capturedQuery.get("fl");
@@ -166,16 +181,20 @@ class SearchRepositoryTest {
         when(embeddingService.embedAndFormatForSolr(query)).thenReturn(vectorString);
 
         SolrDocumentList documentList = new SolrDocumentList();
+        SolrDocument doc = new SolrDocument();
+        doc.setField("id", "test-1");
+        doc.setField("content", "Test document");
+        documentList.add(doc);
         when(queryResponse.getResults()).thenReturn(documentList);
         when(queryResponse.getFacetFields()).thenReturn(null);
-        when(solrClient.query(eq(collection), any(SolrParams.class))).thenReturn(queryResponse);
+        when(solrClient.query(eq(collection), any(SolrParams.class), eq(SolrRequest.METHOD.POST))).thenReturn(queryResponse);
 
         // When
         searchRepository.hybridSearch(collection, query, topK, null, null, null);
 
         // Then
         ArgumentCaptor<SolrParams> queryCaptor = ArgumentCaptor.forClass(SolrParams.class);
-        verify(solrClient).query(eq(collection), queryCaptor.capture());
+        verify(solrClient).query(eq(collection), queryCaptor.capture(), eq(SolrRequest.METHOD.POST));
 
         SolrParams capturedQuery = queryCaptor.getValue();
         String fields = capturedQuery.get("fl");
@@ -216,7 +235,7 @@ class SearchRepositoryTest {
 
         when(queryResponse.getResults()).thenReturn(documentList);
         when(queryResponse.getFacetFields()).thenReturn(null);
-        when(solrClient.query(eq(collection), any(SolrParams.class))).thenReturn(queryResponse);
+        when(solrClient.query(eq(collection), any(SolrParams.class), eq(SolrRequest.METHOD.POST))).thenReturn(queryResponse);
 
         // When
         SearchResponse response = searchRepository.hybridSearch(collection, query, topK, null, null, minScore);
@@ -254,7 +273,7 @@ class SearchRepositoryTest {
 
         when(queryResponse.getResults()).thenReturn(documentList);
         when(queryResponse.getFacetFields()).thenReturn(null);
-        when(solrClient.query(eq(collection), any(SolrParams.class))).thenReturn(queryResponse);
+        when(solrClient.query(eq(collection), any(SolrParams.class), eq(SolrRequest.METHOD.POST))).thenReturn(queryResponse);
 
         // When
         SearchResponse response = searchRepository.hybridSearch(collection, query, topK, null, null, null);
@@ -278,10 +297,11 @@ class SearchRepositoryTest {
 
         when(embeddingService.embedAndFormatForSolr(query)).thenReturn(vectorString);
 
-        SolrDocumentList documentList = new SolrDocumentList();
-        when(queryResponse.getResults()).thenReturn(documentList);
+        // Return empty results for all queries (hybrid, keyword fallback, and vector fallback)
+        SolrDocumentList emptyList = new SolrDocumentList();
+        when(queryResponse.getResults()).thenReturn(emptyList);
         when(queryResponse.getFacetFields()).thenReturn(null);
-        when(solrClient.query(eq(collection), any(SolrParams.class))).thenReturn(queryResponse);
+        when(solrClient.query(eq(collection), any(SolrParams.class), eq(SolrRequest.METHOD.POST))).thenReturn(queryResponse);
 
         // When
         SearchResponse response = searchRepository.hybridSearch(collection, query, topK, null, null, null);
@@ -291,6 +311,9 @@ class SearchRepositoryTest {
         assertEquals(0, response.documents().size());
         assertNotNull(response.facetCounts());
         assertTrue(response.facetCounts().isEmpty());
+
+        // Verify fallback attempts were made (hybrid -> keyword -> vector = 3 calls)
+        verify(solrClient, times(3)).query(eq(collection), any(SolrParams.class), eq(SolrRequest.METHOD.POST));
     }
 
     @Test
@@ -304,16 +327,20 @@ class SearchRepositoryTest {
         when(embeddingService.embedAndFormatForSolr(query)).thenReturn(vectorString);
 
         SolrDocumentList documentList = new SolrDocumentList();
+        SolrDocument doc = new SolrDocument();
+        doc.setField("id", "test-1");
+        doc.setField("content", "Test document");
+        documentList.add(doc);
         when(queryResponse.getResults()).thenReturn(documentList);
         when(queryResponse.getFacetFields()).thenReturn(null);
-        when(solrClient.query(eq(collection), any(SolrParams.class))).thenReturn(queryResponse);
+        when(solrClient.query(eq(collection), any(SolrParams.class), eq(SolrRequest.METHOD.POST))).thenReturn(queryResponse);
 
         // When
         searchRepository.hybridSearch(collection, query, topK, null, null, null);
 
         // Then
         ArgumentCaptor<SolrParams> queryCaptor = ArgumentCaptor.forClass(SolrParams.class);
-        verify(solrClient).query(eq(collection), queryCaptor.capture());
+        verify(solrClient).query(eq(collection), queryCaptor.capture(), eq(SolrRequest.METHOD.POST));
 
         SolrParams capturedQuery = queryCaptor.getValue();
 
@@ -336,16 +363,20 @@ class SearchRepositoryTest {
         when(embeddingService.embedAndFormatForSolr(query)).thenReturn(vectorString);
 
         SolrDocumentList documentList = new SolrDocumentList();
+        SolrDocument doc = new SolrDocument();
+        doc.setField("id", "test-1");
+        doc.setField("content", "Test document");
+        documentList.add(doc);
         when(queryResponse.getResults()).thenReturn(documentList);
         when(queryResponse.getFacetFields()).thenReturn(null);
-        when(solrClient.query(eq(collection), any(SolrParams.class))).thenReturn(queryResponse);
+        when(solrClient.query(eq(collection), any(SolrParams.class), eq(SolrRequest.METHOD.POST))).thenReturn(queryResponse);
 
         // When
         searchRepository.hybridSearch(collection, query, topK, null, null, null);
 
         // Then
         ArgumentCaptor<SolrParams> queryCaptor = ArgumentCaptor.forClass(SolrParams.class);
-        verify(solrClient).query(eq(collection), queryCaptor.capture());
+        verify(solrClient).query(eq(collection), queryCaptor.capture(), eq(SolrRequest.METHOD.POST));
 
         SolrParams capturedQuery = queryCaptor.getValue();
 
@@ -357,7 +388,8 @@ class SearchRepositoryTest {
         assertNotNull(q);
         assertEquals(query, q, "q should contain the query text");
         assertEquals("edismax", defType, "defType should be edismax");
-        assertEquals("_text_", qf, "qf should query _text_ field");
+        assertTrue(qf.contains("_text_"), "qf should include _text_ field: " + qf);
+        assertTrue(qf.contains("content"), "qf should include content field: " + qf);
     }
 
     @Test
@@ -371,16 +403,20 @@ class SearchRepositoryTest {
         when(embeddingService.embedAndFormatForSolr(query)).thenReturn(vectorString);
 
         SolrDocumentList documentList = new SolrDocumentList();
+        SolrDocument doc = new SolrDocument();
+        doc.setField("id", "test-1");
+        doc.setField("content", "Test document");
+        documentList.add(doc);
         when(queryResponse.getResults()).thenReturn(documentList);
         when(queryResponse.getFacetFields()).thenReturn(null);
-        when(solrClient.query(eq(collection), any(SolrParams.class))).thenReturn(queryResponse);
+        when(solrClient.query(eq(collection), any(SolrParams.class), eq(SolrRequest.METHOD.POST))).thenReturn(queryResponse);
 
         // When
         searchRepository.hybridSearch(collection, query, topK, null, null, null);
 
         // Then - should not throw exception
         ArgumentCaptor<SolrParams> queryCaptor = ArgumentCaptor.forClass(SolrParams.class);
-        verify(solrClient).query(eq(collection), queryCaptor.capture());
+        verify(solrClient).query(eq(collection), queryCaptor.capture(), eq(SolrRequest.METHOD.POST));
 
         SolrParams capturedQuery = queryCaptor.getValue();
         String[] filterQueries = capturedQuery.getParams("fq");
@@ -399,16 +435,20 @@ class SearchRepositoryTest {
         when(embeddingService.embedAndFormatForSolr(query)).thenReturn(vectorString);
 
         SolrDocumentList documentList = new SolrDocumentList();
+        SolrDocument doc = new SolrDocument();
+        doc.setField("id", "test-1");
+        doc.setField("content", "Test document");
+        documentList.add(doc);
         when(queryResponse.getResults()).thenReturn(documentList);
         when(queryResponse.getFacetFields()).thenReturn(null);
-        when(solrClient.query(eq(collection), any(SolrParams.class))).thenReturn(queryResponse);
+        when(solrClient.query(eq(collection), any(SolrParams.class), eq(SolrRequest.METHOD.POST))).thenReturn(queryResponse);
 
         // When
         searchRepository.hybridSearch(collection, query, topK, filterExpression, null, null);
 
         // Then - should not add filter query
         ArgumentCaptor<SolrParams> queryCaptor = ArgumentCaptor.forClass(SolrParams.class);
-        verify(solrClient).query(eq(collection), queryCaptor.capture());
+        verify(solrClient).query(eq(collection), queryCaptor.capture(), eq(SolrRequest.METHOD.POST));
 
         SolrParams capturedQuery = queryCaptor.getValue();
         String[] filterQueries = capturedQuery.getParams("fq");

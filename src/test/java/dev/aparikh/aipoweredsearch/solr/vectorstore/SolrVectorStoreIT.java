@@ -34,8 +34,7 @@ import static org.awaitility.Awaitility.await;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE,
         properties = {
-                "spring.ai.openai.embedding.options.model=text-embedding-3-small",
-                "spring.http.client.factory=simple"
+                "spring.ai.openai.embedding.options.model=text-embedding-3-small"
         })
 @Testcontainers
 @Import({PostgresTestConfiguration.class, RestClientConfig.class, SolrConfig.class, SolrTestConfiguration.class, SolrVectorStoreIT.TestConfig.class})
@@ -199,7 +198,10 @@ class SolrVectorStoreIT {
             assertThat(results).isNotEmpty();
         });
 
-        // Test filter: category == "AI"
+        // Note: SolrVectorStore supports Spring AI filter expression syntax (e.g., "category == 'AI'")
+        // The filter is converted to Solr query syntax internally by SolrVectorStore.convertFilterToSolrQuery()
+
+        // Test filter: category == 'AI' (Spring AI syntax)
         List<Document> aiResults = vectorStore.similaritySearch(
                 SearchRequest.builder()
                         .query("technology")
@@ -210,22 +212,22 @@ class SolrVectorStoreIT {
         assertThat(aiResults).hasSize(1);
         assertThat(aiResults.get(0).getMetadata().get("category")).isEqualTo("AI");
 
-        // Test filter: year == 2024
+        // Test filter: year == 2024 (Spring AI syntax)
         List<Document> year2024Results = vectorStore.similaritySearch(
                 SearchRequest.builder()
                         .query("information")
                         .topK(5)
-                        .filterExpression("year == 2024")
+                        .filterExpression("year == '2024'")
                         .build()
         );
         assertThat(year2024Results).hasSize(2);
 
-        // Test filter: year == 2023
+        // Test filter: year == 2023 (Spring AI syntax)
         List<Document> year2023Results = vectorStore.similaritySearch(
                 SearchRequest.builder()
                         .query("search")
                         .topK(5)
-                        .filterExpression("year == 2023")
+                        .filterExpression("year == '2023'")
                         .build()
         );
         assertThat(year2023Results).hasSize(1);

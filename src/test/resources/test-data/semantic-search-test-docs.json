@@ -1,0 +1,142 @@
+[
+  {
+    "id": "horror-1",
+    "title": "The Shining",
+    "content": "A terrifying psychological horror story about a haunted hotel in the mountains. Jack Torrance descends into madness while isolated with his family during winter.",
+    "genre": "horror",
+    "year": 1977,
+    "author": "Stephen King",
+    "tags": [
+      "scary",
+      "psychological",
+      "supernatural",
+      "isolation"
+    ]
+  },
+  {
+    "id": "horror-2",
+    "title": "It",
+    "content": "A frightening tale of a shape-shifting evil entity that terrorizes children in a small town. Pennywise the clown haunts the sewers of Derry.",
+    "genre": "horror",
+    "year": 1986,
+    "author": "Stephen King",
+    "tags": [
+      "scary",
+      "clown",
+      "supernatural",
+      "children"
+    ]
+  },
+  {
+    "id": "horror-3",
+    "title": "The Exorcist",
+    "content": "A spine-chilling story of demonic possession. A young girl becomes possessed by a malevolent demon, and priests must perform an exorcism.",
+    "genre": "horror",
+    "year": 1971,
+    "author": "William Peter Blatty",
+    "tags": [
+      "scary",
+      "demon",
+      "possession",
+      "religious"
+    ]
+  },
+  {
+    "id": "thriller-1",
+    "title": "Gone Girl",
+    "content": "A gripping psychological thriller about a wife who disappears on her anniversary. Dark secrets and twisted minds make this a suspenseful page-turner.",
+    "genre": "thriller",
+    "year": 2012,
+    "author": "Gillian Flynn",
+    "tags": [
+      "suspense",
+      "mystery",
+      "psychological",
+      "marriage"
+    ]
+  },
+  {
+    "id": "romance-1",
+    "title": "Pride and Prejudice",
+    "content": "A beloved romantic novel about Elizabeth Bennet and Mr. Darcy. Their love story overcomes pride, prejudice, and social class differences in Regency England.",
+    "genre": "romance",
+    "year": 1813,
+    "author": "Jane Austen",
+    "tags": [
+      "love",
+      "classic",
+      "period",
+      "happy"
+    ]
+  },
+  {
+    "id": "scifi-1",
+    "title": "Dune",
+    "content": "An epic science fiction masterpiece set on the desert planet Arrakis. Political intrigue, giant sandworms, and spice melange shape the universe.",
+    "genre": "science fiction",
+    "year": 1965,
+    "author": "Frank Herbert",
+    "tags": [
+      "space",
+      "desert",
+      "politics",
+      "adventure"
+    ]
+  },
+  {
+    "id": "scifi-2",
+    "title": "The Martian",
+    "content": "A survival story about an astronaut stranded alone on Mars. Using science and ingenuity, Mark Watney must find a way to survive and signal Earth.",
+    "genre": "science fiction",
+    "year": 2011,
+    "author": "Andy Weir",
+    "tags": [
+      "space",
+      "survival",
+      "science",
+      "adventure"
+    ]
+  },
+  {
+    "id": "fantasy-1",
+    "title": "The Hobbit",
+    "content": "A magical adventure story about Bilbo Baggins who joins dwarves on a quest to reclaim their homeland from a dragon. Trolls, elves, and goblins await.",
+    "genre": "fantasy",
+    "year": 1937,
+    "author": "J.R.R. Tolkien",
+    "tags": [
+      "adventure",
+      "dragon",
+      "quest",
+      "magic"
+    ]
+  },
+  {
+    "id": "mystery-1",
+    "title": "The Da Vinci Code",
+    "content": "A mystery thriller involving secret societies, religious symbology, and a quest to uncover ancient secrets hidden in Leonardo da Vinci's works.",
+    "genre": "mystery",
+    "year": 2003,
+    "author": "Dan Brown",
+    "tags": [
+      "mystery",
+      "conspiracy",
+      "art",
+      "religion"
+    ]
+  },
+  {
+    "id": "horror-4",
+    "title": "Dracula",
+    "content": "The classic vampire horror novel. Count Dracula travels from Transylvania to England, spreading terror and creating an undead army.",
+    "genre": "horror",
+    "year": 1897,
+    "author": "Bram Stoker",
+    "tags": [
+      "scary",
+      "vampire",
+      "supernatural",
+      "gothic"
+    ]
+  }
+]

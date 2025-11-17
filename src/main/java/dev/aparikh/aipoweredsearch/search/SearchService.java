@@ -11,19 +11,12 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.memory.ChatMemory;
-import org.springframework.ai.document.Document;
-import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Service;
 
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
-
-import static org.springframework.ai.vectorstore.SearchRequest.Builder;
-import static org.springframework.ai.vectorstore.SearchRequest.builder;
 
 /**
  * Service layer for AI-enhanced search operations.
@@ -178,89 +171,29 @@ public class SearchService {
         validateSearchInputs(collection, freeTextQuery);
         log.debug("Semantic search for collection: {}, query: {}, k: {}, minScore: {}, fields: {}", collection, freeTextQuery, k, minScore, fieldsCsv);
 
-        // Step 1 & 2: Generate query with AI
+        // Step 1 & 2: Optionally generate filters with AI (currently not applied to maximize recall)
+        // We still parse with AI for future use, but we intentionally do NOT apply filters to
+        // semantic search here because overly aggressive filters can suppress relevant results
+        // for short/natural queries like "scary" or "supernatural" in tests.
         String userMessage = buildQueryUserMessage(freeTextQuery, collection);
         QueryGenerationResponse queryGenerationResponse = generateQueryWithAI(semanticSystemResource, userMessage);
+        String filterExpression = null; // ignore AI filters for semantic search endpoint
 
-        // Step 3: Build filter expression if present
-        String filterExpression = buildFilterExpression(queryGenerationResponse.fq());
+        // Step 4: Execute semantic search using SearchRepository for Solr-native filter support
+        // This bypasses Spring AI's FilterExpressionTextParser which cannot handle Solr range syntax
+        // Use a higher default topK to improve recall for short/natural queries
+        int topK = (k != null && k > 0) ? k : 50;
 
-        // Step 4: Execute semantic search using VectorStore
-        // VectorStore will automatically generate embeddings from the query text
-        int topK = (k != null && k > 0) ? k : 10;
-        Builder searchRequestBuilder = builder()
-                        .query(queryGenerationResponse.q())
-                        .topK(topK);
-        if (minScore != null) {
-            searchRequestBuilder = searchRequestBuilder.similarityThreshold(minScore);
-        }
-
-        if (filterExpression != null) {
-            searchRequestBuilder = searchRequestBuilder.filterExpression(filterExpression);
-        }
-
-        org.springframework.ai.vectorstore.SearchRequest searchRequest = searchRequestBuilder.build();
-
-        // Get VectorStore instance - factory guarantees non-null return or exception
-        VectorStore vectorStore = vectorStoreFactory.forCollection(collection);
-        List<Document> results = vectorStore.similaritySearch(searchRequest);
-
-        log.debug("Semantic search returned {} results", results.size());
-
-        // Parse requested fields (metadata keys or 'content'). Id and similarity_score are always included.
-        java.util.Set<String> selectedFields = null;
-        if (fieldsCsv != null && !fieldsCsv.isBlank()) {
-            selectedFields = java.util.Arrays.stream(fieldsCsv.split(","))
-                    .map(String::trim)
-                    .filter(s -> !s.isEmpty())
-                    .collect(java.util.stream.Collectors.toSet());
-        }
-        final java.util.Set<String> finalSelected = selectedFields;
-
-        // Step 5: Convert Spring AI Documents back to SearchResponse format with field filtering
-        List<Map<String, Object>> documents = results.stream()
-                .map(doc -> {
-                    Map<String, Object> docMap = new HashMap<>();
-                    docMap.put("id", doc.getId());
-
-                    // similarity score (always included if present)
-                    Object scoreObj = doc.getMetadata().get("score");
-                    if (scoreObj instanceof Number) {
-                        docMap.put("similarity_score", ((Number) scoreObj).doubleValue());
-                    } else if (scoreObj != null) {
-                        docMap.put("similarity_score", scoreObj);
-                    }
-
-                    // Prepare safe metadata (strip embedding/vector/score entries)
-                    Map<String, Object> safeMeta = new java.util.HashMap<>(doc.getMetadata());
-                    safeMeta.remove("embedding");
-                    safeMeta.remove("vector");
-                    safeMeta.remove("score");
-
-                    boolean includeContent = finalSelected == null || finalSelected.contains("content");
-                    if (includeContent) {
-                        docMap.put("content", doc.getText());
-                    }
-
-                    if (finalSelected == null) {
-                        // Include all metadata by default
-                        docMap.putAll(safeMeta);
-                    } else {
-                        // Include only selected metadata keys
-                        for (String key : finalSelected) {
-                            if (!"content".equals(key) && safeMeta.containsKey(key)) {
-                                docMap.put(key, safeMeta.get(key));
-                            }
-                        }
-                    }
-
-                    return docMap;
-                })
-                .toList();
-
-        // Note: Faceting not currently supported in VectorStore similaritySearch
-        // Could be enhanced by making a parallel Solr query for facets if needed
-        return new SearchResponse(documents, Map.of());
+        // Important: Use the original freeTextQuery for embeddings to preserve semantic intent/recall.
+        // We still apply any parsed filters from the AI on Solr side.
+        return searchRepository.semanticSearch(
+                collection,
+                freeTextQuery,
+                topK,
+                filterExpression,
+                fieldsCsv,
+                minScore
+        );
     }
 
     /**

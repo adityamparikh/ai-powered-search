@@ -38,8 +38,7 @@ import static org.awaitility.Awaitility.await;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE,
         properties = {
-                "spring.ai.openai.embedding.options.model=text-embedding-3-small",
-                "spring.http.client.factory=simple"
+                "spring.ai.openai.embedding.options.model=text-embedding-3-small"
         })
 @Testcontainers
 @Import({PostgresTestConfiguration.class, RestClientConfig.class, SolrConfig.class, SolrTestConfiguration.class, SolrVectorStoreObservationIT.TestConfig.class})

@@ -16,6 +16,8 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import static org.springframework.web.client.RestClient.Builder;
+
 /**
  * Spring AI configuration for multiple LLM providers.
  *
@@ -64,7 +66,7 @@ public class AiConfig {
     @Bean
     @ConditionalOnMissingBean(EmbeddingModel.class)
     public EmbeddingModel embeddingModel(@Value("${spring.ai.openai.api-key:${OPENAI_API_KEY:}}") String apiKey,
-                                         org.springframework.web.client.RestClient.Builder restClientBuilder) {
+                                         Builder restClientBuilder) {
         OpenAiApi openAiApi = OpenAiApi.builder()
                 .apiKey(apiKey)
                 // Ensure Spring AI uses JDK HttpClient-based RestClient (not Jetty)

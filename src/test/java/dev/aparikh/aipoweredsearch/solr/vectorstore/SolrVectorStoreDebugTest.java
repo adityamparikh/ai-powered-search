@@ -16,6 +16,7 @@ import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.web.client.RestClient;
 import org.testcontainers.containers.SolrContainer;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
@@ -30,8 +31,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE,
         properties = {
-                "spring.ai.openai.embedding.options.model=text-embedding-3-small",
-                "spring.http.client.factory=simple"
+                "spring.ai.openai.embedding.options.model=text-embedding-3-small"
         })
 @Testcontainers
 @Import({RestClientConfig.class, PostgresTestConfiguration.class, SolrConfig.class, SolrTestConfiguration.class})
@@ -43,6 +43,9 @@ class SolrVectorStoreDebugTest {
 
     @Autowired
     SolrClient solrClient;
+
+    @Autowired
+    RestClient.Builder restClientBuilder;
 
     private static final String COLLECTION_NAME = "test_collection";
 
@@ -130,8 +133,10 @@ class SolrVectorStoreDebugTest {
 
     private void testWithRealEmbeddings(String apiKey) {
         try {
+            // Use RestClient.Builder to ensure JDK HttpClient is used instead of Jetty
             OpenAiApi openAiApi = OpenAiApi.builder()
                     .apiKey(apiKey)
+                    .restClientBuilder(restClientBuilder)
                     .build();
             EmbeddingModel embeddingModel = new OpenAiEmbeddingModel(openAiApi);
 

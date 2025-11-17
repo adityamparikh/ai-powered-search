@@ -35,7 +35,7 @@ dependencies {
     implementation("org.springframework.ai:spring-ai-advisors-vector-store")
     implementation("org.postgresql:postgresql")
     // Apache Solr client with HTTP/2 support
-    implementation("org.apache.solr:solr-solrj:9.9.0")
+    implementation("org.apache.solr:solr-solrj:9.10.0")
     // Jetty HTTP/2 client dependencies required for Http2SolrClient (Jetty 11)
     implementation("org.eclipse.jetty:jetty-client")
     implementation("org.eclipse.jetty.http2:http2-client")
@@ -50,6 +50,10 @@ dependencies {
     // Additional Solr dependencies
     implementation("commons-io:commons-io:2.15.1")
     implementation("org.apache.commons:commons-lang3:3.18.0")
+
+    // Spring Retry for resilient API calls
+    implementation("org.springframework.retry:spring-retry")
+    implementation("org.springframework:spring-aspects")
 
 
     testImplementation("org.springframework.boot:spring-boot-starter-test")

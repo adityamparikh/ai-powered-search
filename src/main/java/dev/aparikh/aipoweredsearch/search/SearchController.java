@@ -52,7 +52,7 @@ class SearchController {
      *
      * @param searchService the service responsible for executing search operations
      */
-    SearchController(SearchService searchService) {
+    public SearchController(SearchService searchService) {
         this.searchService = searchService;
     }
 

@@ -18,6 +18,8 @@ public class PostgresTestConfiguration {
                 .withDatabaseName("chatmemory")
                 .withUsername("postgres")
                 .withPassword("postgres")
+                // Increase max_connections to handle multiple test contexts
+                .withCommand("postgres", "-c", "max_connections=200")
                 .withReuse(true);
     }
 }

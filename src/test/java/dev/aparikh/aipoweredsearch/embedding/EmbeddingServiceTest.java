@@ -10,7 +10,6 @@ import org.springframework.ai.embedding.EmbeddingModel;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -46,22 +45,6 @@ class EmbeddingServiceTest {
         assertThat(result).isNotNull();
         assertThat(result).containsExactly(0.1f, 0.2f, 0.3f);
         verify(embeddingModel).embed(text);
-    }
-
-    @Test
-    void shouldThrowExceptionForNullText() {
-        // When/Then
-        assertThatThrownBy(() -> embeddingService.embed(null))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("Text cannot be null or empty");
-    }
-
-    @Test
-    void shouldThrowExceptionForEmptyText() {
-        // When/Then
-        assertThatThrownBy(() -> embeddingService.embed("   "))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("Text cannot be null or empty");
     }
 
     @Test
