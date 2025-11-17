@@ -42,6 +42,82 @@ The application follows a **package-by-feature** structure organized around two 
 - **Testcontainers** for integration testing with Solr and PostgreSQL
 - **SpringDoc OpenAPI** for API documentation
 
+## Anthropic Prompt Caching
+
+The application implements Anthropic's prompt caching feature to reduce costs by up to 90% and improve response times by
+up to 85% for subsequent requests with identical prompts.
+
+### Configuration
+
+Prompt caching is configured via application properties and can be controlled with environment variables:
+
+```properties
+# Enable/disable prompt caching (default: true)
+spring.ai.anthropic.prompt-caching.enabled=${ANTHROPIC_PROMPT_CACHING_ENABLED:true}
+# Cache strategy (default: SYSTEM_AND_TOOLS)
+spring.ai.anthropic.prompt-caching.strategy=${ANTHROPIC_PROMPT_CACHING_STRATEGY:SYSTEM_AND_TOOLS}
+```
+
+### Available Cache Strategies
+
+| Strategy                 | Description                        | Best For                                                   |
+|--------------------------|------------------------------------|------------------------------------------------------------|
+| **NONE**                 | Disables caching                   | One-off requests with no repeated content                  |
+| **SYSTEM_ONLY**          | Caches system prompts only         | Stable system prompts with <20 tools                       |
+| **TOOLS_ONLY**           | Caches tool definitions only       | Large tool sets (5000+ tokens) with dynamic system prompts |
+| **SYSTEM_AND_TOOLS**     | Caches both independently          | Applications with 20+ tools (default)                      |
+| **CONVERSATION_HISTORY** | Caches entire conversation history | Multi-turn conversations with ChatClient memory            |
+
+### Cache Metrics Logging
+
+When caching is enabled, the `PromptCacheMetricsAdvisor` automatically logs cache performance metrics:
+
+```log
+[Prompt Caching] Cache HIT - Read: 2048 tokens, Regular input: 256 tokens, Output: 150 tokens
+[Prompt Caching] Cost savings: ~80% (cache reads are 90% cheaper than regular input)
+```
+
+Or on cache miss (first request):
+
+```log
+[Prompt Caching] Cache MISS - Created: 2048 tokens, Regular input: 256 tokens, Output: 150 tokens
+[Prompt Caching] Cache created. Subsequent requests with identical prompts will benefit from ~90% cost reduction
+```
+
+### Implementation Details
+
+- **Location**: `src/main/java/dev/aparikh/aipoweredsearch/config/`
+    - `AiConfig.java`: Configures AnthropicChatOptions with caching
+    - `PromptCacheMetricsAdvisor.java`: Logs cache metrics as a CallAdvisor
+
+- **How it works**:
+    - Cache options are configured when creating ChatClient beans
+    - The advisor intercepts all chat responses and extracts cache metrics from Anthropic API usage data
+    - Metrics include: cache creation tokens, cache read tokens, regular input tokens, and output tokens
+    - Cost savings are calculated based on Anthropic's pricing (cache reads are 90% cheaper)
+
+- **Supported models**: Claude Opus 4, Claude Sonnet 4, Claude Sonnet 3.7, Claude Sonnet 3.5, Claude Haiku 3.5, Claude
+  Haiku 3
+
+- **Token requirements**:
+    - Claude Sonnet 4: 1024+ tokens minimum for caching
+    - Claude Haiku models: 2048+ tokens minimum
+    - Other models: 1024+ tokens minimum
+
+### Disabling Prompt Caching
+
+To disable prompt caching:
+
+```bash
+# Via environment variable
+export ANTHROPIC_PROMPT_CACHING_ENABLED=false
+
+# Or in application.properties
+spring.ai.anthropic.prompt-caching.enabled=false
+```
+
+When disabled, no cache options are set and the advisor will not log cache metrics.
+
 ## Development Commands
 
 ### Build and Run
@@ -88,10 +164,28 @@ export OPENAI_API_KEY="your-actual-api-key"
 
 A helper script is provided: `./run-vector-tests.sh`
 
+### Running Prompt Cache Tests
+
+Prompt caching integration tests require a valid Anthropic API key:
+
+```bash
+export ANTHROPIC_API_KEY="your-actual-api-key"
+./gradlew test --tests "PromptCacheMetricsAdvisorIT" --info
+```
+
+The test validates:
+
+- Cache MISS on first request (cache creation)
+- Cache HIT on subsequent identical requests
+- Correct cache metrics logging
+- Cost savings calculations
+
 ## Configuration Requirements
 
 ### Environment Variables
 - `ANTHROPIC_API_KEY`: Required for Claude AI integration (query generation and chat)
+- `ANTHROPIC_PROMPT_CACHING_ENABLED`: Enable Anthropic prompt caching (defaults to 'true')
+- `ANTHROPIC_PROMPT_CACHING_STRATEGY`: Cache strategy (defaults to 'SYSTEM_AND_TOOLS')
 - `OPENAI_API_KEY`: Required for OpenAI embeddings (vector search and indexing)
 - `POSTGRES_USER`: PostgreSQL username (defaults to 'postgres')
 - `POSTGRES_PASSWORD`: PostgreSQL password (defaults to 'postgres')
