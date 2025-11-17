@@ -372,38 +372,67 @@ public class SearchRepository {
         List<FieldInfo> fieldInfos = new ArrayList<>();
 
         try {
-            // Get all fields from schema
-            SchemaRequest.Fields fieldsRequest = new SchemaRequest.Fields();
-            SchemaResponse.FieldsResponse fieldsResponse = fieldsRequest.process(solrClient, collection);
-            List<Map<String, Object>> fields = fieldsResponse.getFields();
+            // 1) Fetch explicit fields
+            SchemaResponse.FieldsResponse fieldsResponse = new SchemaRequest.Fields()
+                    .process(solrClient, collection);
+            List<Map<String, Object>> explicitFields = fieldsResponse.getFields();
 
-            // Get actually used fields from documents
+            // Build a quick lookup for explicit fields by name
+            Map<String, Map<String, Object>> explicitByName = explicitFields.stream()
+                    .collect(Collectors.toMap(f -> (String) f.get("name"), f -> f));
+
+            // 2) Fetch dynamic field definitions (e.g., metadata_*, *_i, *_txt, etc.)
+            SchemaResponse.DynamicFieldsResponse dynamicFieldsResponse = new SchemaRequest.DynamicFields()
+                    .process(solrClient, collection);
+            List<Map<String, Object>> dynamicFields = dynamicFieldsResponse.getDynamicFields();
+
+            // 3) Determine actually used field names from documents
             Set<String> usedFields = getActuallyUsedFields(collection);
 
-            // Filter to only include fields that are actually used in documents
-            for (Map<String, Object> field : fields) {
-                String name = (String) field.get("name");
-
-                // Skip internal Solr fields
-                if (name.startsWith("_")) {
+            // 4) For each used field, resolve attributes from explicit schema or best matching dynamic field
+            for (String fieldName : usedFields) {
+                if (fieldName == null || fieldName.isEmpty() || fieldName.startsWith("_")) {
+                    // Skip internal or invalid fields
                     continue;
                 }
 
-                // Only include fields that are actually used in documents
-                if (!usedFields.contains(name)) {
+                Map<String, Object> schemaField = explicitByName.get(fieldName);
+                if (schemaField != null) {
+                    String type = (String) schemaField.get("type");
+                    boolean multiValued = Boolean.TRUE.equals(schemaField.get("multiValued"));
+                    boolean stored = !Boolean.FALSE.equals(schemaField.get("stored")); // default true
+                    boolean docValues = Boolean.TRUE.equals(schemaField.get("docValues"));
+                    boolean indexed = !Boolean.FALSE.equals(schemaField.get("indexed")); // default true
+                    fieldInfos.add(new FieldInfo(fieldName, type, multiValued, stored, docValues, indexed));
                     continue;
                 }
 
-                String type = (String) field.get("type");
-                boolean multiValued = Boolean.TRUE.equals(field.get("multiValued"));
-                boolean stored = !Boolean.FALSE.equals(field.get("stored")); // default is true
-                boolean docValues = Boolean.TRUE.equals(field.get("docValues"));
-                boolean indexed = !Boolean.FALSE.equals(field.get("indexed")); // default is true
+                // Try to match a dynamic field pattern
+                Map<String, Object> bestMatch = null;
+                int bestScore = -1; // higher is better
+                for (Map<String, Object> df : dynamicFields) {
+                    String pattern = (String) df.get("name");
+                    if (pattern == null) continue;
 
-                fieldInfos.add(new FieldInfo(name, type, multiValued, stored, docValues, indexed));
+                    int score = dynamicMatchScore(fieldName, pattern);
+                    if (score >= 0 && score > bestScore) {
+                        bestScore = score;
+                        bestMatch = df;
+                    }
+                }
+
+                if (bestMatch != null) {
+                    String type = (String) bestMatch.get("type");
+                    boolean multiValued = Boolean.TRUE.equals(bestMatch.get("multiValued"));
+                    boolean stored = !Boolean.FALSE.equals(bestMatch.get("stored")); // default true
+                    boolean docValues = Boolean.TRUE.equals(bestMatch.get("docValues"));
+                    boolean indexed = !Boolean.FALSE.equals(bestMatch.get("indexed")); // default true
+                    fieldInfos.add(new FieldInfo(fieldName, type, multiValued, stored, docValues, indexed));
+                }
+                // If no dynamic match, we skip this field to avoid returning unknowns when schema is available
             }
 
-            log.debug("Retrieved {} fields with schema information from collection {}", fieldInfos.size(), collection);
+            log.debug("Resolved {} used fields with schema (including dynamic fields) from collection {}", fieldInfos.size(), collection);
 
         } catch (Exception e) {
             log.error("Error fetching field schema from Solr", e);
@@ -417,6 +446,27 @@ public class SearchRepository {
         }
 
         return fieldInfos;
+    }
+
+    // Returns a non-negative score if fieldName matches the dynamic pattern; -1 otherwise.
+    // Score represents the length of the fixed part of the pattern (longer = more specific match).
+    // Solr dynamic fields support a single wildcard either at the start or the end.
+    private int dynamicMatchScore(String fieldName, String pattern) {
+        if (pattern == null || fieldName == null) return -1;
+        if (pattern.equals(fieldName)) return pattern.length();
+
+        if (pattern.endsWith("*")) {
+            String prefix = pattern.substring(0, pattern.length() - 1);
+            return fieldName.startsWith(prefix) ? prefix.length() : -1;
+        }
+
+        if (pattern.startsWith("*")) {
+            String suffix = pattern.substring(1);
+            return fieldName.endsWith(suffix) ? suffix.length() : -1;
+        }
+
+        // No wildcard and not equal => does not match
+        return -1;
     }
 
     /**
