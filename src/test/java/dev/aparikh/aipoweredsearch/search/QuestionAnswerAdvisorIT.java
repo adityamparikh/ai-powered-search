@@ -1,19 +1,18 @@
 package dev.aparikh.aipoweredsearch.search;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import dev.aparikh.aipoweredsearch.config.AiConfig;
 import dev.aparikh.aipoweredsearch.config.PostgresTestConfiguration;
+import dev.aparikh.aipoweredsearch.config.RestClientConfig;
 import dev.aparikh.aipoweredsearch.config.SolrTestConfiguration;
 import org.apache.solr.client.solrj.SolrClient;
 import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariables;
 import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.document.Document;
-import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -22,12 +21,11 @@ import org.springframework.context.annotation.Import;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.SolrContainer;
-import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.utility.DockerImageName;
 
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -56,7 +54,10 @@ import static org.assertj.core.api.Assertions.assertThat;
         }
 )
 @Testcontainers
-@Import({PostgresTestConfiguration.class, SolrTestConfiguration.class})
+@Import({RestClientConfig.class,
+        AiConfig.class,
+        PostgresTestConfiguration.class,
+        SolrTestConfiguration.class})
 @EnabledIfEnvironmentVariables({
         @EnabledIfEnvironmentVariable(named = "ANTHROPIC_API_KEY", matches = ".*"),
         @EnabledIfEnvironmentVariable(named = "OPENAI_API_KEY", matches = ".*")
@@ -95,24 +96,41 @@ class QuestionAnswerAdvisorIT {
 
         // Add vector field type and field to schema
         try {
+            // Prepare JSON using text blocks for readability
+            String addFieldTypeJson = """
+                    {
+                      "add-field-type": {
+                        "name": "knn_vector_1536",
+                        "class": "solr.DenseVectorField",
+                        "vectorDimension": "1536",
+                        "similarityFunction": "cosine",
+                        "knnAlgorithm": "hnsw"
+                      }
+                    }
+                    """;
+
+            String addFieldJson = """
+                    {
+                      "add-field": {
+                        "name": "vector",
+                        "type": "knn_vector_1536",
+                        "indexed": "true",
+                        "stored": "true"
+                      }
+                    }
+                    """;
+
             // Add vector field type
             solrContainer.execInContainer("curl", "-X", "POST",
                     "http://localhost:8983/solr/" + COLLECTION + "/schema",
                     "-H", "Content-Type: application/json",
-                    "-d", "{\"add-field-type\":{\"name\":\"knn_vector_1536\"," +
-                          "\"class\":\"solr.DenseVectorField\"," +
-                          "\"vectorDimension\":\"1536\"," +
-                          "\"similarityFunction\":\"cosine\"," +
-                          "\"knnAlgorithm\":\"hnsw\"}}");
+                    "-d", addFieldTypeJson);
 
             // Add vector field
             solrContainer.execInContainer("curl", "-X", "POST",
                     "http://localhost:8983/solr/" + COLLECTION + "/schema",
                     "-H", "Content-Type: application/json",
-                    "-d", "{\"add-field\":{\"name\":\"vector\"," +
-                          "\"type\":\"knn_vector_1536\"," +
-                          "\"indexed\":\"true\"," +
-                          "\"stored\":\"true\"}}");
+                    "-d", addFieldJson);
 
             Thread.sleep(1000); // Wait for schema changes to apply
         } catch (Exception e) {
@@ -319,14 +337,18 @@ class QuestionAnswerAdvisorIT {
     @Test
     void shouldMaintainConversationContext() {
         // When - First question
+        String conversationId = UUID.randomUUID().toString();
+
         String answer1 = ragChatClient.prompt()
                 .user("Who wrote Building Microservices?")
+                .advisors(a -> a.param(org.springframework.ai.chat.memory.ChatMemory.CONVERSATION_ID, conversationId))
                 .call()
                 .content();
 
         // When - Follow-up question (in same client instance)
         String answer2 = ragChatClient.prompt()
                 .user("What publisher released that book?")
+                .advisors(a -> a.param(org.springframework.ai.chat.memory.ChatMemory.CONVERSATION_ID, conversationId))
                 .call()
                 .content();
 

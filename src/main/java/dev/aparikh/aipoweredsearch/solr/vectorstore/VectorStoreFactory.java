@@ -99,4 +99,14 @@ public class VectorStoreFactory {
     public VectorStore evict(String collection) {
         return cache.remove(collection);
     }
+
+    /**
+     * Returns the embedding model used by this factory.
+     * Useful when you need to generate embeddings directly.
+     *
+     * @return the embedding model
+     */
+    public EmbeddingModel getEmbeddingModel() {
+        return embeddingModel;
+    }
 }

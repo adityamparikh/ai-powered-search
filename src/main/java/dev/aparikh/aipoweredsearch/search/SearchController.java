@@ -25,6 +25,7 @@ import org.springframework.web.bind.annotation.RestController;
  * <ul>
  *   <li>Traditional keyword search with AI-powered query generation</li>
  *   <li>Semantic search using vector embeddings and similarity matching</li>
+ *   <li>Hybrid search combining lexical and semantic search using RRF (Reciprocal Rank Fusion)</li>
  *   <li>Conversational question-answering using RAG (Retrieval-Augmented Generation)</li>
  * </ul>
  *
@@ -51,7 +52,7 @@ class SearchController {
      *
      * @param searchService the service responsible for executing search operations
      */
-    SearchController(SearchService searchService) {
+    public SearchController(SearchService searchService) {
         this.searchService = searchService;
     }
 
@@ -139,6 +140,72 @@ class SearchController {
             @Parameter(description = "Comma-separated list of fields to include in the response (e.g., 'content,author,year'). Id is always included.", required = false)
             @RequestParam(name = "fields", required = false) String fields) {
         return searchService.semanticSearch(collection, query, k, minScore, fields);
+    }
+
+    /**
+     * Performs hybrid search combining traditional keyword search with semantic vector search using RRF.
+     *
+     * <p>This method uses Reciprocal Rank Fusion (RRF) to combine results from two complementary
+     * search strategies for improved search quality:</p>
+     * <ul>
+     *   <li><strong>Lexical Search:</strong> Traditional keyword-based search using Solr's edismax parser</li>
+     *   <li><strong>Semantic Search:</strong> Vector similarity search using KNN with OpenAI embeddings</li>
+     * </ul>
+     *
+     * <p>RRF works by running both searches independently, then combining their rankings using
+     * the formula: <code>score = sum(1 / (k + rank))</code>, where k is a constant (typically 60).
+     * This approach leverages the strengths of both search methods:
+     * <ul>
+     *   <li>Lexical search excels at exact matches and specific terminology</li>
+     *   <li>Semantic search excels at conceptual similarity and understanding intent</li>
+     * </ul>
+     *
+     * <p>Example queries that benefit from hybrid search:
+     * <ul>
+     *   <li>"python machine learning tutorials" - combines keyword matching with semantic understanding</li>
+     *   <li>"comfortable athletic footwear" - finds both exact product names and semantically similar items</li>
+     *   <li>"spring boot authentication" - captures both framework-specific terms and general security concepts</li>
+     * </ul>
+     *
+     * @param collection the name of the Solr collection to search
+     * @param query      the natural language search query
+     * @param k          optional topK results for vector search (defaults to 100)
+     * @param minScore   optional minimum similarity score threshold [0..1]
+     * @param fields     optional comma-separated list of fields to include in the response
+     * @return a {@link SearchResponse} containing RRF-ranked documents combining both search strategies
+     * @throws IllegalArgumentException if collection or query is null or empty
+     */
+    @Operation(
+            summary = "Hybrid search using RRF (Reciprocal Rank Fusion)",
+            description = "Performs hybrid search combining traditional keyword search with semantic vector search using RRF. " +
+                    "This approach leverages both lexical matching (edismax) and semantic similarity (KNN) " +
+                    "to provide superior search results. RRF combines rankings from both methods using " +
+                    "the formula: score = sum(1 / (k + rank)). Natural language filters are parsed by Claude AI."
+    )
+    @ApiResponses(value = {
+            @ApiResponse(
+                    responseCode = "200",
+                    description = "Hybrid search completed successfully",
+                    content = @Content(mediaType = "application/json", schema = @Schema(implementation = SearchResponse.class))
+            ),
+            @ApiResponse(responseCode = "400", description = "Invalid collection or query parameters"),
+            @ApiResponse(responseCode = "404", description = "Collection not found"),
+            @ApiResponse(responseCode = "500", description = "Internal server error")
+    })
+    @GetMapping("/{collection}/hybrid")
+    public SearchResponse hybridSearch(
+            @Parameter(description = "Collection name to search in", required = true, example = "products")
+            @PathVariable String collection,
+            @Parameter(description = "Natural language search query", required = true,
+                    example = "comfortable running shoes")
+            @RequestParam(name = "query") String query,
+            @Parameter(description = "Number of results to return from vector search (topK)", required = false, example = "100")
+            @RequestParam(name = "k", required = false) Integer k,
+            @Parameter(description = "Minimum similarity score threshold [0..1]", required = false, example = "0.5")
+            @RequestParam(name = "minScore", required = false) Double minScore,
+            @Parameter(description = "Comma-separated list of fields to include in the response (e.g., 'content,author,year'). Id and score are always included.", required = false)
+            @RequestParam(name = "fields", required = false) String fields) {
+        return searchService.hybridSearch(collection, query, k, minScore, fields);
     }
 
     /**

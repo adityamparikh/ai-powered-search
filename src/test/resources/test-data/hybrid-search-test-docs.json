@@ -1,0 +1,122 @@
+[
+  {
+    "id": "tech-1",
+    "title": "Introduction to Machine Learning",
+    "content": "Machine learning is a subset of artificial intelligence that enables computers to learn from data without being explicitly programmed. Neural networks and deep learning are powerful techniques.",
+    "category": "technology",
+    "difficulty": "intermediate",
+    "year": 2023
+  },
+  {
+    "id": "tech-2",
+    "title": "Deep Learning with Neural Networks",
+    "content": "Deep learning uses artificial neural networks with multiple layers to process complex patterns. Convolutional neural networks excel at image recognition tasks.",
+    "category": "technology",
+    "difficulty": "advanced",
+    "year": 2023
+  },
+  {
+    "id": "tech-3",
+    "title": "Natural Language Processing Basics",
+    "content": "NLP allows computers to understand and generate human language. Transformers and large language models have revolutionized text processing and generation.",
+    "category": "technology",
+    "difficulty": "intermediate",
+    "year": 2023
+  },
+  {
+    "id": "tech-4",
+    "title": "Computer Vision Applications",
+    "content": "Computer vision enables machines to interpret visual information from the world. Object detection, facial recognition, and image segmentation are common applications.",
+    "category": "technology",
+    "difficulty": "intermediate",
+    "year": 2023
+  },
+  {
+    "id": "prog-1",
+    "title": "Java Programming Fundamentals",
+    "content": "Java is a popular object-oriented programming language. Learn about classes, objects, inheritance, polymorphism, and the JVM.",
+    "category": "programming",
+    "difficulty": "beginner",
+    "year": 2022
+  },
+  {
+    "id": "prog-2",
+    "title": "Python for Data Science",
+    "content": "Python is the go-to language for data science and machine learning. Libraries like NumPy, Pandas, and Scikit-learn make data analysis easy.",
+    "category": "programming",
+    "difficulty": "intermediate",
+    "year": 2023
+  },
+  {
+    "id": "prog-3",
+    "title": "JavaScript Modern Development",
+    "content": "Modern JavaScript development with ES6+, React, and Node.js. Build full-stack web applications with asynchronous programming and REST APIs.",
+    "category": "programming",
+    "difficulty": "intermediate",
+    "year": 2023
+  },
+  {
+    "id": "data-1",
+    "title": "SQL Database Design",
+    "content": "Learn relational database design principles, normalization, indexing, and query optimization. Master SQL joins, aggregations, and transactions.",
+    "category": "database",
+    "difficulty": "intermediate",
+    "year": 2022
+  },
+  {
+    "id": "data-2",
+    "title": "NoSQL and MongoDB",
+    "content": "NoSQL databases offer flexible schema and horizontal scalability. MongoDB stores documents in JSON-like format, perfect for modern applications.",
+    "category": "database",
+    "difficulty": "intermediate",
+    "year": 2023
+  },
+  {
+    "id": "data-3",
+    "title": "Apache Solr Search Engine",
+    "content": "Solr is a powerful open-source search platform built on Apache Lucene. It provides full-text search, faceting, and now supports vector search for semantic similarity.",
+    "category": "database",
+    "difficulty": "advanced",
+    "year": 2023
+  },
+  {
+    "id": "cloud-1",
+    "title": "AWS Cloud Computing",
+    "content": "Amazon Web Services provides scalable cloud infrastructure. Learn about EC2, S3, Lambda, and building serverless applications on AWS.",
+    "category": "cloud",
+    "difficulty": "intermediate",
+    "year": 2023
+  },
+  {
+    "id": "cloud-2",
+    "title": "Docker and Kubernetes",
+    "content": "Containerization with Docker and orchestration with Kubernetes. Deploy and scale microservices applications in cloud environments.",
+    "category": "cloud",
+    "difficulty": "advanced",
+    "year": 2023
+  },
+  {
+    "id": "ai-1",
+    "title": "Introduction to Artificial Intelligence",
+    "content": "Artificial intelligence encompasses machine learning, computer vision, natural language processing, and robotics. AI systems can perceive, reason, and take actions.",
+    "category": "technology",
+    "difficulty": "beginner",
+    "year": 2023
+  },
+  {
+    "id": "ai-2",
+    "title": "Large Language Models and ChatGPT",
+    "content": "GPT and other large language models are trained on vast amounts of text data. They can generate coherent text, answer questions, and assist with various tasks.",
+    "category": "technology",
+    "difficulty": "intermediate",
+    "year": 2023
+  },
+  {
+    "id": "ai-3",
+    "title": "AI Ethics and Responsible AI",
+    "content": "Ethical considerations in artificial intelligence development. Bias, fairness, transparency, privacy, and the societal impact of AI systems.",
+    "category": "technology",
+    "difficulty": "advanced",
+    "year": 2023
+  }
+]

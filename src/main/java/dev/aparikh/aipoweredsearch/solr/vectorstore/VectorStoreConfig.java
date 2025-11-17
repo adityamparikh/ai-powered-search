@@ -1,5 +1,6 @@
 package dev.aparikh.aipoweredsearch.solr.vectorstore;
 
+import io.micrometer.observation.ObservationRegistry;
 import org.apache.solr.client.solrj.SolrClient;
 import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.vectorstore.VectorStore;
@@ -28,8 +29,10 @@ public class VectorStoreConfig {
     public VectorStore solrVectorStore(
             SolrClient solrClient,
             EmbeddingModel embeddingModel,
-            @Value("${solr.default.collection:books}") String collectionName) {
+            @Value("${solr.default.collection:books}") String collectionName,
+            ObservationRegistry observationRegistry) {
         return SolrVectorStore.builder(solrClient, collectionName, embeddingModel)
+                .observationRegistry(observationRegistry)
                 .build();
     }
 }

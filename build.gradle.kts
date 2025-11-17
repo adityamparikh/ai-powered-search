@@ -19,7 +19,7 @@ repositories {
     mavenCentral()
 }
 
-extra["springAiVersion"] = "1.1.0-M4"
+extra["springAiVersion"] = "1.1.0"
 
 dependencies {
     implementation("org.springframework.boot:spring-boot-starter-actuator")
@@ -35,7 +35,7 @@ dependencies {
     implementation("org.springframework.ai:spring-ai-advisors-vector-store")
     implementation("org.postgresql:postgresql")
     // Apache Solr client with HTTP/2 support
-    implementation("org.apache.solr:solr-solrj:9.9.0")
+    implementation("org.apache.solr:solr-solrj:9.10.0")
     // Jetty HTTP/2 client dependencies required for Http2SolrClient (Jetty 11)
     implementation("org.eclipse.jetty:jetty-client")
     implementation("org.eclipse.jetty.http2:http2-client")
@@ -51,15 +51,22 @@ dependencies {
     implementation("commons-io:commons-io:2.15.1")
     implementation("org.apache.commons:commons-lang3:3.18.0")
 
+    // Spring Retry for resilient API calls
+    implementation("org.springframework.retry:spring-retry")
+    implementation("org.springframework:spring-aspects")
+
 
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("org.springframework.boot:spring-boot-testcontainers")
     testImplementation("org.springframework.ai:spring-ai-spring-boot-testcontainers")
+    testImplementation("org.springframework.ai:spring-ai-ollama")
     testImplementation("org.testcontainers:junit-jupiter")
     testImplementation("org.testcontainers:solr")
     testImplementation("org.testcontainers:postgresql")
+    testImplementation("org.testcontainers:ollama")
     testImplementation("org.awaitility:awaitility:4.2.0")
     testImplementation("io.micrometer:micrometer-observation-test")
+    testImplementation("org.springframework.boot:spring-boot-devtools")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 

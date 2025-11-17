@@ -6,7 +6,11 @@ import dev.aparikh.aipoweredsearch.indexing.model.IndexResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
 
 /**
  * REST controller for document indexing with vector embeddings.
@@ -47,7 +51,7 @@ class IndexController {
      *
      * @param indexService the service responsible for document indexing operations
      */
-    IndexController(IndexService indexService) {
+    public IndexController(IndexService indexService) {
         this.indexService = indexService;
     }
 
