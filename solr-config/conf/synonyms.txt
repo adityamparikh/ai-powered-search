@@ -27,3 +27,49 @@ Television, Televisions, TV, TVs
 # Synonym mappings can be used for spelling correction too
 pixima => pixma
 
+# AI and Machine Learning synonyms
+ai,artificial intelligence,machine learning,ml
+llm,large language model,language model
+nlp,natural language processing
+neural network,neural net,deep learning,dl
+gpt,generative pre-trained transformer
+embedding,embeddings,vector,vectors
+rag,retrieval augmented generation,retrieval-augmented generation
+
+# Programming language synonyms
+java,jdk,openjdk
+javascript,js,ecmascript
+typescript,ts
+python,py
+c#,csharp,dotnet
+
+# Framework and library synonyms
+spring,spring boot,springboot
+react,reactjs
+angular,angularjs
+vue,vuejs
+
+# Search technology synonyms
+solr,apache solr
+elasticsearch,elastic,es
+lucene,apache lucene
+vector search,semantic search,similarity search
+
+# Database synonyms
+postgres,postgresql,pg
+mysql,mariadb
+mongo,mongodb
+redis,cache
+
+# Cloud provider synonyms
+aws,amazon web services
+gcp,google cloud platform,google cloud
+azure,microsoft azure
+
+# Common technical synonyms
+api,application programming interface
+rest,restful,rest api
+http,https,hypertext transfer protocol
+json,javascript object notation
+xml,extensible markup language
+

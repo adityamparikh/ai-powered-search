@@ -42,6 +42,19 @@ The application follows a **package-by-feature** structure organized around two 
 - **Testcontainers** for integration testing with Solr and PostgreSQL
 - **SpringDoc OpenAPI** for API documentation
 
+### Advanced Solr Features
+
+The application leverages advanced Apache Solr features for enhanced search quality and user experience:
+
+- **Native RRF (Reciprocal Rank Fusion)**: Balanced fusion of keyword and vector search (Solr 9.8+)
+- **Highlighting**: Shows users why results matched their query
+- **Faceting**: Filter and aggregate results by category, year, etc.
+- **Spell Checking**: "Did you mean...?" suggestions for misspelled queries
+- **Enhanced Field Boosting**: Title^5, Tags^3, Content^2 with phrase boosting
+- **Synonym Expansion**: Domain-specific synonyms for AI, programming, frameworks, databases, cloud
+
+**See [SOLR_ENHANCEMENTS.md](SOLR_ENHANCEMENTS.md) for detailed documentation.**
+
 ## Anthropic Prompt Caching
 
 The application implements Anthropic's prompt caching feature to reduce costs by up to 90% and improve response times by
