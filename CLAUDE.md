@@ -8,14 +8,15 @@ This is an AI-powered search application built with Spring Boot 3.5.7 and Java 2
 
 ### Core Architecture
 
-The application follows a **package-by-feature** structure organized around two main domains:
+The application follows a **package-by-feature** structure organized around main domains:
 
 - **Search Domain** (`dev.aparikh.aipoweredsearch.search`):
   - `SearchController`: REST endpoints for search operations
-  - `SearchService`: Orchestrates traditional and semantic search with AI query generation
+  - `SearchService`: Orchestrates traditional, semantic, and hybrid search with AI query generation
   - `SearchRepository`: Low-level Solr query execution and field introspection
   - Traditional search: Converts free-text queries into structured Solr queries using Claude AI
   - Semantic search: Uses vector embeddings (OpenAI) for similarity-based retrieval
+  - Hybrid search: Native RRF (Reciprocal Rank Fusion) combining keyword and vector signals
 
 - **Indexing Domain** (`dev.aparikh.aipoweredsearch.indexing`):
   - `IndexController`: REST endpoints for document indexing
@@ -24,23 +25,40 @@ The application follows a **package-by-feature** structure organized around two 
 
 - **Vector Store** (`dev.aparikh.aipoweredsearch.solr.vectorstore`):
   - `SolrVectorStore`: Custom Spring AI VectorStore implementation for Solr 9.x+
+  - `VectorStoreFactory`: Factory for creating VectorStore instances
   - Implements dense vector support with HNSW (Hierarchical Navigable Small World) algorithm
   - Handles automatic embedding generation and vector similarity search
 
 - **Configuration** (`dev.aparikh.aipoweredsearch.config`):
-  - `SpringAiConfig`: Multi-LLM configuration for Anthropic (chat) and OpenAI (embeddings)
+    - `AiConfig`: Multi-LLM configuration for Anthropic (chat) and OpenAI (embeddings)
   - `SolrConfig`: Solr client configuration with Http2SolrClient
+    - `PromptCacheMetricsAdvisor`: Logs Anthropic prompt caching metrics
   - Chat Memory: PostgreSQL-backed conversational context with conversation ID "007"
 
 ### Key Dependencies
 
-- **Spring Boot 3.5.7** with Spring AI 1.1.0-M4
+- **Spring Boot 3.5.7** with Spring AI 1.1.0
 - **Anthropic Claude AI** (claude-sonnet-4-5) for query generation and chat
 - **OpenAI** (text-embedding-3-small) for vector embeddings (1536 dimensions)
-- **Apache Solr 9.9.0** for search and vector storage with dense vector support
-- **PostgreSQL** for chat memory persistence
-- **Testcontainers** for integration testing with Solr and PostgreSQL
+- **Apache Solr 9.10.0** for search and vector storage with dense vector support
+- **ZooKeeper 3.9** for SolrCloud coordination
+- **PostgreSQL 16** for chat memory persistence
+- **Testcontainers** for integration testing with Solr, PostgreSQL, and Ollama
 - **SpringDoc OpenAPI** for API documentation
+
+### Schema-Agnostic Design
+
+The hybrid RRF search implementation is **schema-agnostic**, meaning it works with any Solr collection without requiring
+specific field names:
+
+- **Uses `_text_` catch-all field**: Solr's built-in field that aggregates all text content from all text fields
+- **No field assumptions**: Doesn't require specific fields like `title`, `content`, or `category`
+- **Graceful degradation**: Works even if your schema has custom field names
+- **Easy integration**: Drop-in search for any existing Solr collection
+- **Dynamic metadata**: Uses `metadata_*` dynamic fields pattern for flexible document attributes
+
+This makes the search functionality portable across different schemas and use cases. The application discovers available
+fields at runtime and adapts accordingly.
 
 ### Advanced Solr Features
 
@@ -166,32 +184,60 @@ When disabled, no cache options are set and the advisor will not log cache metri
 # Vector store tests (require OPENAI_API_KEY)
 ./gradlew test --tests "SolrVectorStoreIT" --info
 ./gradlew test --tests "SolrVectorStoreObservationIT" --info
+
+# Specific search types
+./gradlew test --tests "SemanticAndHybridSearchIntegrationTest"
+./gradlew test --tests "SearchRepositoryIT"
 ```
 
-### Running Vector Store Tests
-Vector store integration tests require a valid OpenAI API key:
-```bash
-export OPENAI_API_KEY="your-actual-api-key"
-./gradlew test --tests "dev.aparikh.aipoweredsearch.config.SolrVectorStore*"
-```
-
-A helper script is provided: `./run-vector-tests.sh`
-
-### Running Prompt Cache Tests
-
-Prompt caching integration tests require a valid Anthropic API key:
+### Code Quality and Coverage
 
 ```bash
-export ANTHROPIC_API_KEY="your-actual-api-key"
-./gradlew test --tests "PromptCacheMetricsAdvisorIT" --info
+# Generate code coverage report
+./gradlew test jacocoTestReport
+open build/reports/jacoco/test/html/index.html
+
+# Run SonarQube analysis (requires running SonarQube server)
+./gradlew sonarqube \
+  -Dsonar.host.url=http://localhost:9000 \
+  -Dsonar.token=your-token
+
+# Generate Javadoc
+./gradlew javadoc
+open build/docs/javadoc/index.html
 ```
 
-The test validates:
+**Quality Metrics Tracked:**
 
-- Cache MISS on first request (cache creation)
-- Cache HIT on subsequent identical requests
-- Correct cache metrics logging
-- Cost savings calculations
+- Code coverage via JaCoCo (XML and HTML reports)
+- Code smells and technical debt
+- Security vulnerabilities (OWASP Top 10)
+- Maintainability and reliability ratings
+- Exclusions: Application classes, Config classes, model/dto packages
+
+### Helper Scripts
+
+The repository includes several helper scripts for common tasks:
+
+**`run-vector-tests.sh`**: Run vector store tests with proper environment setup
+```bash
+./run-vector-tests.sh
+```
+
+- Checks if OPENAI_API_KEY is set
+- Runs SolrVectorStoreIT and SolrVectorStoreObservationIT
+- Displays test results summary
+- Provides HTML report location
+
+**`init-solr.sh`**: Initialize Solr with custom schema (runs via Docker Compose)
+
+- Starts Solr in SolrCloud mode with ZooKeeper
+- Uploads custom configset to ZooKeeper
+- Creates "books" collection with vector field configuration
+- Configures 1536-dimensional vector field with HNSW and cosine similarity
+- Auto-runs when starting docker-compose
+
+**`fix-evaluation-tests.sh`**: Fix evaluation tests (development utility)
 
 ## Configuration Requirements
 
@@ -207,16 +253,35 @@ The test validates:
 - **Solr**: Expected at `http://localhost:8983/solr`
   - Must support dense vector fields (Solr 9.0+)
   - Collections must include vector field with DenseVectorField type
+  - Managed via SolrCloud with ZooKeeper coordination
   - See Solr Schema Requirements section below
+- **ZooKeeper**: Expected at `localhost:2181` (internal, managed by Docker)
+    - Coordinates SolrCloud cluster
+    - Stores collection configurations
 - **PostgreSQL**: Expected at `jdbc:postgresql://localhost:5432/chatmemory`
   - Used for chat memory persistence
 - **Docker**: Required for running external services and Testcontainers tests
 
 ### Running with Docker Compose
 ```bash
-docker-compose up -d  # Start Solr and PostgreSQL
+docker-compose up -d  # Start Solr, ZooKeeper, and PostgreSQL
 docker-compose down   # Stop services
+docker-compose ps     # Check service status
+docker-compose logs solr  # View Solr logs
 ```
+
+**Services started:**
+
+- Solr 9.10.0 on port 8983 (with ZooKeeper coordination)
+- ZooKeeper 3.9 on port 2181
+- PostgreSQL 16 on port 5432
+
+**Volumes:**
+
+- `solr_data`: Persistent Solr data
+- `postgres_data`: Persistent PostgreSQL data
+- `./solr-config`: Custom Solr schema configuration
+- `./mydata`: Sample data for indexing
 
 ### API Documentation
 - **Swagger UI**: http://localhost:8080/swagger-ui.html
@@ -228,7 +293,8 @@ docker-compose down   # Stop services
 ### Vector Store Implementation
 
 The `SolrVectorStore` is a custom implementation that:
-- Extends `AbstractObservationVectorStore` from Spring AI 1.1.0-M4
+
+- Extends `AbstractObservationVectorStore` from Spring AI 1.1.0
 - Implements the `VectorStore` interface for document storage and similarity search
 - Uses Solr's `DenseVectorField` type for KNN (K-Nearest Neighbors) search with HNSW algorithm
 - Supports cosine similarity metric for vector comparison
@@ -319,17 +385,31 @@ Documents can be indexed with automatic embedding generation via REST endpoints:
 - Combines AI-powered filter parsing with vector similarity
 - Example: "comfortable running shoes under $100"
 
+**Hybrid Search (RRF)**: `GET /api/v1/search/{collection}/hybrid?query={text}`
+
+- Uses Solr's native RRF (Reciprocal Rank Fusion) to combine keyword and vector signals
+- Best for balanced search that leverages both exact matches and semantic understanding
+- Schema-agnostic: works with any Solr collection using `_text_` catch-all field
+- Intelligent fallback: keyword-only → vector-only if no results
+- Example: "machine learning frameworks" (finds both exact term matches and semantically similar content)
+
 **Search Flow**:
 1. Claude AI parses natural language filters and search intent
-2. For semantic search: generates query embedding using OpenAI
-3. Executes KNN similarity search in Solr (topK=10 by default)
-4. Returns documents with similarity scores in metadata
+2. For semantic/hybrid search: generates query embedding using OpenAI
+3. Executes search in Solr:
+    - Traditional: BM25 keyword search
+    - Semantic: KNN similarity search (topK=10 by default)
+    - Hybrid: Native RRF combining both signals
+4. Returns documents with scores and enhanced features (highlighting, facets, spell check)
 
-**Implementation**: `SearchService` in `src/main/java/dev/aparikh/aipoweredsearch/search/`
+**Implementation**:
+
+- `SearchService` in `src/main/java/dev/aparikh/aipoweredsearch/search/`
+- `SearchRepository.executeHybridRerankSearch()` for RRF implementation (line 167-259)
 
 ## Testing Architecture
 
-The project has comprehensive test coverage across three levels:
+The project has comprehensive test coverage across four levels:
 
 ### Test Levels
 
@@ -341,7 +421,7 @@ The project has comprehensive test coverage across three levels:
 
 2. **Integration Tests** (`@SpringBootTest` with Testcontainers)
    - Full application context tests: `SearchIntegrationTest`, `IndexIntegrationTest`
-   - Uses Testcontainers for Solr and PostgreSQL
+   - Uses Testcontainers for Solr, ZooKeeper, and PostgreSQL
    - Tests complete request/response cycles
    - Verifies actual database interactions
 
@@ -351,9 +431,17 @@ The project has comprehensive test coverage across three levels:
    - Uses real embeddings (not mocked) when `OPENAI_API_KEY` is set
    - Tests skip gracefully if API key is not available
 
+4. **Evaluation Tests** (LLM-based testing)
+    - `EvaluationTestBase`: Base class for LLM evaluation tests
+    - Tests RAG quality, question answering accuracy
+    - Uses Ollama (via Testcontainers) for local LLM testing
+    - Configuration in `EvaluationModelsTestConfiguration.java`
+
 ### Test Configuration
 - Separate test configuration: `src/test/resources/application-test.properties`
 - PostgreSQL test config: `PostgresTestConfiguration.java`
+- Solr test config: `SolrTestConfiguration.java`
+- Evaluation models config: `EvaluationModelsTestConfiguration.java`
 - Mock embeddings for integration tests (1536-dimensional float arrays)
 - Awaitility for async operation verification in Solr
 
@@ -372,16 +460,49 @@ The project has comprehensive test coverage across three levels:
 
 # Run with detailed output
 ./gradlew test --tests "SolrVectorStoreIT" --info
+
+# Run vector store tests with helper script
+./run-vector-tests.sh
 ```
+
+### Running Vector Store Tests
+
+Vector store integration tests require a valid OpenAI API key:
+
+```bash
+export OPENAI_API_KEY="your-actual-api-key"
+./gradlew test --tests "dev.aparikh.aipoweredsearch.solr.vectorstore.*"
+```
+
+A helper script is provided: `./run-vector-tests.sh`
+
+### Running Prompt Cache Tests
+
+Prompt caching integration tests require a valid Anthropic API key:
+
+```bash
+export ANTHROPIC_API_KEY="your-actual-api-key"
+./gradlew test --tests "PromptCacheMetricsAdvisorIT" --info
+```
+
+The test validates:
+
+- Cache MISS on first request (cache creation)
+- Cache HIT on subsequent identical requests
+- Correct cache metrics logging
+- Cost savings calculations
 
 ## Key Implementation Patterns
 
 ### Multi-LLM Configuration
-When using both Anthropic and OpenAI, Spring AI cannot auto-configure `ChatClient`. Explicit configuration is required in `SpringAiConfig`:
+
+When using both Anthropic and OpenAI, Spring AI cannot auto-configure `ChatClient`. Explicit configuration is required
+in `AiConfig`:
 ```java
 @Bean
+@Qualifier("searchChatClient")
 public ChatClient chatClient(
-    @Qualifier("anthropicChatModel") ChatModel chatModel,
+        ChatModel chatModel,
     ChatMemory chatMemory
 ) {
     return ChatClient.builder(chatModel)
@@ -389,6 +510,8 @@ public ChatClient chatClient(
         .build();
 }
 ```
+
+**Note**: The configuration class is `AiConfig.java`, not `SpringAiConfig`.
 
 ### Vector Store Builder Pattern
 `SolrVectorStore` uses the builder pattern extending `AbstractVectorStoreBuilder`:
@@ -436,8 +559,15 @@ dev.aparikh.aipoweredsearch/
 │   └── model/         # Indexing-specific models
 ├── solr/vectorstore/  # Vector store implementation
 │   ├── SolrVectorStore
+│   ├── VectorStoreFactory
 │   └── SolrVectorStoreOptions
+├── embedding/         # Embedding utilities
+│   ├── EmbeddingService
+│   └── VectorFormatUtils
 └── config/            # Cross-cutting configuration
+    ├── AiConfig
+    ├── SolrConfig
+    └── PromptCacheMetricsAdvisor
 ```
 
 ## Important Implementation Details
@@ -445,8 +575,31 @@ dev.aparikh.aipoweredsearch/
 ### Solr Client Configuration
 The project uses `Http2SolrClient` for improved performance with HTTP/2 features including multiplexing, header compression, and better connection management. The client is configured with appropriate timeouts for production use.
 
+**Important**: Jetty is pinned to version 11.x to ensure compatibility with SolrJ's Http2SolrClient and avoid conflicts
+with Jetty 12.x.
+
 ### Vector Search POST Method
 Vector searches use POST method to avoid "URI too long" errors when sending large embedding arrays (1536 dimensions).
+
+### Hybrid Search with RRF
+
+The `executeHybridRerankSearch()` method in `SearchRepository` implements native RRF:
+
+```java
+// Native RRF combines keyword and vector search
+String keywordQuery = String.format("{!edismax qf='_text_'}%s", query);
+String vectorQuery = SolrQueryUtils.buildKnnQuery("vector", topK * 2, vectorString);
+params.
+
+set("q",String.format("{!rrf}(%s)(%s)", keywordQuery, vectorQuery));
+```
+
+**Key features**:
+
+- Uses Solr's `{!rrf}` query parser (Solr 9.8+)
+- Fetches `topK * 2` results for better fusion
+- Schema-agnostic using `_text_` catch-all field
+- Intelligent fallback: hybrid → keyword → vector if no results
 
 ### Observation and Metrics
 The `SolrVectorStore` extends `AbstractObservationVectorStore` for integration with Micrometer:
@@ -500,6 +653,7 @@ If you see "HTTP protocol violation: Authentication challenge without WWW-Authen
 - This is a known Jetty 12.x issue with invalid API keys
 - Verify your OpenAI API key is valid
 - The error occurs when Jetty's HTTP/2 client encounters invalid auth
+- The project pins Jetty to 11.x to avoid this issue
 
 ### Filter Expression Handling
 
