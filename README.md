@@ -4,12 +4,13 @@ Apache Solr search with AI-driven query generation and semantic vector search. B
 
 ## 🚀 Features
 
-- **Keyword Search**: Claude AI converts natural language to Solr queries
-- **Semantic Search**: OpenAI embeddings (1536-dim) for vector similarity
+- **Keyword Search**: Claude AI converts natural language to Solr queries with enhanced field boosting
+- **Semantic Search**: OpenAI embeddings (1536-dim) for vector similarity search
+- **Hybrid Search (RRF)**: Native Reciprocal Rank Fusion combining keyword and vector signals
 - **RAG Q&A**: Retrieval-augmented generation for conversational answers
-- **Hybrid Search**: Combine vector similarity with Solr filters
 - **Auto-Indexing**: Automatic embedding generation during document storage
-- **Type-Safe Schema**: Typed metadata fields in Solr
+- **Schema-Agnostic**: Works with any Solr schema using `_text_` catch-all field
+- **Prompt Caching**: Anthropic prompt caching for up to 90% cost reduction
 - **SolrCloud**: Distributed search with ZooKeeper
 
 ## 🏗️ Architecture
@@ -100,6 +101,10 @@ export OPENAI_API_KEY="sk-your-key-here"
 # Optional (defaults provided)
 export POSTGRES_USER="postgres"
 export POSTGRES_PASSWORD="postgres"
+
+# Optional: Anthropic Prompt Caching (enabled by default)
+export ANTHROPIC_PROMPT_CACHING_ENABLED=true
+export ANTHROPIC_PROMPT_CACHING_STRATEGY=SYSTEM_AND_TOOLS
 ```
 
 ### 3. Start External Services
@@ -233,6 +238,47 @@ curl "http://localhost:8080/api/v1/search/books/semantic?query=frameworks%20for%
 }
 ```
 
+#### Hybrid Search with RRF
+
+**GET** `/api/v1/search/{collection}/hybrid`
+
+Performs hybrid search using Native Reciprocal Rank Fusion (RRF) to combine keyword and vector signals.
+
+```bash
+curl "http://localhost:8080/api/v1/search/books/hybrid?query=machine%20learning%20frameworks&topK=10"
+```
+
+**Parameters:**
+
+- `query`: Natural language search query (required)
+- `topK`: Number of results to return (default: 100)
+- `filter`: Solr filter query (optional)
+
+**How it works:**
+
+- Uses Solr's native `{!rrf}` query parser (Solr 9.8+)
+- Combines edismax keyword search on `_text_` field with KNN vector search
+- RRF formula: `score = sum(1 / (k + rank))` balances both signals
+- Schema-agnostic: works with any Solr collection
+
+**Response:**
+
+```json
+{
+  "documents": [
+    {
+      "id": "doc-789",
+      "content": "TensorFlow is a popular ML framework",
+      "metadata": {"category": "ml"},
+      "score": 0.92
+    }
+  ],
+  "facetCounts": {},
+  "highlighting": {},
+  "spellCheckSuggestion": null
+}
+```
+
 #### Keyword Search (AI-Enhanced)
 
 **GET** `/api/v1/search/{collection}`
@@ -324,6 +370,18 @@ curl "http://localhost:8080/api/v1/search/books/semantic?query=optimizing%20neur
 - Hyperparameter tuning
 - Model optimization
 - Performance improvements
+
+### Schema-Agnostic Design
+
+The hybrid RRF search implementation is **schema-agnostic**, meaning it works with any Solr collection without requiring
+specific field names:
+
+- **Uses `_text_` catch-all field**: Solr's built-in field that aggregates all text content
+- **No field assumptions**: Doesn't require specific fields like `title`, `content`, or `category`
+- **Graceful degradation**: Works even if your schema has custom field names
+- **Easy integration**: Drop-in search for any existing Solr collection
+
+This makes the search functionality portable across different schemas and use cases.
 
 ### Keyword Search Examples
 
@@ -510,7 +568,9 @@ spring.ai.vectorstore.solr.host=http://localhost:8983/solr
 # Anthropic Claude Configuration
 spring.ai.anthropic.api-key=${ANTHROPIC_API_KEY}
 spring.ai.anthropic.chat.options.model=claude-sonnet-4-5
-
+# Anthropic Prompt Caching (90% cost reduction on cache hits)
+spring.ai.anthropic.prompt-caching.enabled=${ANTHROPIC_PROMPT_CACHING_ENABLED:true}
+spring.ai.anthropic.prompt-caching.strategy=${ANTHROPIC_PROMPT_CACHING_STRATEGY:SYSTEM_AND_TOOLS}
 # OpenAI Embeddings Configuration
 spring.ai.openai.api-key=${OPENAI_API_KEY}
 spring.ai.openai.embedding.options.model=text-embedding-3-small
@@ -553,37 +613,39 @@ The schema supports typed metadata fields matching `IndexRequest.java`:
 
 Comprehensive documentation is available:
 
+- **[CLAUDE.md](CLAUDE.md)**: Instructions for AI assistants working with this codebase (start here!)
+- **[SOLR_ENHANCEMENTS.md](SOLR_ENHANCEMENTS.md)**: Native RRF, schema-agnostic design, and Solr features
 - **[TECHNICAL_DETAILS.md](TECHNICAL_DETAILS.md)**: In-depth technical implementation details
 - **[VECTOR_SEARCH_GUIDE.md](VECTOR_SEARCH_GUIDE.md)**: Complete guide to vector search, indexing, and semantic search
 - **[QUICK_REFERENCE.md](QUICK_REFERENCE.md)**: Quick lookup guide for developers
 - **[SOLR-SETUP.md](SOLR-SETUP.md)**: Solr schema configuration and setup
-- **[CLAUDE.md](CLAUDE.md)**: Instructions for AI assistants working with this codebase
 
 ## 🔍 Search Approaches
 
-| Feature | Traditional Keyword | Semantic Vector | RAG Q&A |
-|---------|-------------------|-----------------|---------|
-| **Method** | `search()` | `semanticSearch()` | `ask()` |
-| **When AI is Used** | Query time: Claude converts NL to Solr syntax | Query time: Claude parses filters, OpenAI generates embedding | Query time: OpenAI retrieves docs, Claude generates answer |
-| **Search Mechanism** | Solr BM25 ranking on keywords | Solr KNN with cosine similarity on vectors | Vector retrieval + LLM generation |
-| **Response** | Document list with metadata | Document list with similarity scores | Generated natural language answer |
-| **Speed** | ~100ms | ~500ms (embedding generation) | ~2s (retrieval + generation) |
-| **Cost** | $0.001 (Claude API only) | $0.01 (Claude + OpenAI embedding) | $0.05 (OpenAI + Claude generation) |
-| **Result Predictability** | High: Same query → same Solr results | Medium: Embedding models can vary | Low: LLM generation is non-deterministic |
-| **Faceting** | ✅ Native Solr faceting | ❌ Not implemented in VectorStore | ❌ No aggregation in RAG |
-| **Filtering** | ✅ Native Solr fq parameter | ✅ Converted to Solr filters | ⚠️ Only via initial retrieval |
-| **Memory/Context** | Conversation ID for query refinement | Conversation ID for filter refinement | Full conversation history for follow-ups |
+| Feature                 | Traditional Keyword        | Hybrid RRF                          | Semantic Vector                          | RAG Q&A                              |
+|-------------------------|----------------------------|-------------------------------------|------------------------------------------|--------------------------------------|
+| **Method**              | `search()`                 | `executeHybridRerankSearch()`       | `semanticSearch()`                       | `ask()`                              |
+| **When AI is Used**     | Claude converts NL to Solr | OpenAI generates embedding          | Claude parses filters + OpenAI embedding | OpenAI retrieval + Claude generation |
+| **Search Mechanism**    | Solr BM25 on keywords      | Native RRF: keyword + vector fusion | Solr KNN cosine similarity               | Vector retrieval + LLM               |
+| **Response**            | Documents with metadata    | Documents ranked by RRF score       | Documents with similarity scores         | Natural language answer              |
+| **Speed**               | ~100ms                     | ~600ms (RRF fusion)                 | ~500ms (embedding)                       | ~2s (retrieval + gen)                |
+| **Cost**                | $0.001 (Claude only)       | $0.015 (OpenAI embedding)           | $0.01 (Claude + OpenAI)                  | $0.05 (OpenAI + Claude)              |
+| **Predictability**      | High: deterministic        | Medium-High: stable RRF             | Medium: embeddings vary                  | Low: non-deterministic               |
+| **Schema Requirements** | Any (uses `_text_`)        | Any (uses `_text_` + vector)        | Vector field required                    | Vector field required                |
+| **Filtering**           | ✅ Native Solr fq           | ✅ Native Solr fq                    | ✅ Converted to Solr                      | ⚠️ Via initial retrieval             |
 
 ### When to Use Each Approach
 
-| Use Case | Best Approach | Why |
-|----------|--------------|-----|
-| Product catalog search | Keyword | Need exact filters, facets, deterministic results |
-| Research paper discovery | Semantic | Concept matching more important than exact terms |
-| Customer support Q&A | RAG | Users need synthesized answers, not document lists |
-| Legal document search | Keyword | Exact terminology critical, need audit trail |
-| "Find similar" features | Semantic | Vector similarity captures conceptual relationships |
-| Technical documentation help | RAG | Complex questions need context from multiple docs |
+| Use Case                      | Best Approach  | Why                                                        |
+|-------------------------------|----------------|------------------------------------------------------------|
+| Product catalog search        | Keyword        | Need exact filters, facets, deterministic results          |
+| General search (best of both) | **Hybrid RRF** | Balances keyword precision with semantic understanding     |
+| Research paper discovery      | Semantic       | Concept matching more important than exact terms           |
+| Customer support Q&A          | RAG            | Users need synthesized answers, not document lists         |
+| Legal document search         | Keyword        | Exact terminology critical, need audit trail               |
+| "Find similar" features       | Semantic       | Vector similarity captures conceptual relationships        |
+| Technical documentation help  | RAG            | Complex questions need context from multiple docs          |
+| E-commerce with typos         | **Hybrid RRF** | Vector search handles misspellings, keyword adds precision |
 
 See [TECHNICAL_DETAILS.md](TECHNICAL_DETAILS.md) for implementation details.
 
