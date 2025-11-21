@@ -75,14 +75,11 @@ class SolrVectorStoreDebugTest {
         var typeResult = solrContainer.execInContainer(
                 "sh", "-c",
                 String.format(
-                        "curl -X POST -H 'Content-Type: application/json' " +
-                                "--data '{\"add-field-type\":{" +
-                                "\"name\":\"knn_vector_1536\"," +
-                                "\"class\":\"solr.DenseVectorField\"," +
-                                "\"vectorDimension\":1536," +
-                                "\"similarityFunction\":\"cosine\"," +
-                                "\"knnAlgorithm\":\"hnsw\"}}' " +
-                                "http://localhost:8983/solr/%s/schema", COLLECTION_NAME)
+                        """
+                                curl -X POST -H 'Content-Type: application/json' \
+                                --data '{"add-field-type":{"name":"knn_vector_1536","class":"solr.DenseVectorField","vectorDimension":1536,"similarityFunction":"cosine","knnAlgorithm":"hnsw"}}' \
+                                http://localhost:8983/solr/%s/schema
+                                """.strip(), COLLECTION_NAME)
         );
         System.out.println("Field type response: " + typeResult.getStdout());
         if (typeResult.getExitCode() != 0) {
@@ -96,13 +93,11 @@ class SolrVectorStoreDebugTest {
         var fieldResult = solrContainer.execInContainer(
                 "sh", "-c",
                 String.format(
-                        "curl -X POST -H 'Content-Type: application/json' " +
-                                "--data '{\"add-field\":{" +
-                                "\"name\":\"vector\"," +
-                                "\"type\":\"knn_vector_1536\"," +
-                                "\"stored\":true," +
-                                "\"indexed\":true}}' " +
-                                "http://localhost:8983/solr/%s/schema", COLLECTION_NAME)
+                        """
+                                curl -X POST -H 'Content-Type: application/json' \
+                                --data '{"add-field":{"name":"vector","type":"knn_vector_1536","stored":true,"indexed":true}}' \
+                                http://localhost:8983/solr/%s/schema
+                                """.strip(), COLLECTION_NAME)
         );
         System.out.println("Field addition response: " + fieldResult.getStdout());
         if (fieldResult.getExitCode() != 0) {

@@ -28,6 +28,15 @@ import java.util.stream.Collectors;
 @Repository
 public class SearchRepository {
 
+    // Essential field name constants (required for vector search)
+    private static final String FIELD_VECTOR = "vector";
+    private static final String FIELD_SCORE = "score";
+    private static final String FIELD_TEXT_CATCHALL = "_text_";
+
+    // Query type constants
+    private static final String WILDCARD_QUERY = "*:*";
+    private static final String QUERY_TYPE_EDISMAX = "edismax";
+
     Logger log = LoggerFactory.getLogger(SearchRepository.class);
     private final SolrClient solrClient;
     private final EmbeddingService embeddingService;
@@ -39,6 +48,14 @@ public class SearchRepository {
 
     public SearchResponse search(String collection, SearchRequest searchRequest) {
         SolrQuery query = new SolrQuery(searchRequest.query());
+
+        // Use edismax for text queries (better than standard query parser)
+        // Only apply for non-wildcard queries
+        if (!WILDCARD_QUERY.equals(searchRequest.query())) {
+            query.set("defType", QUERY_TYPE_EDISMAX);
+            // Use catch-all field that Solr populates from all text fields
+            query.set("qf", FIELD_TEXT_CATCHALL);
+        }
 
         if (searchRequest.filterQueries() != null) {
             searchRequest.filterQueries().forEach(query::addFilterQuery);
@@ -60,6 +77,11 @@ public class SearchRepository {
             }
         }
 
+        // Enable spell checking (works without knowing specific fields)
+        query.setParam("spellcheck", "true");
+        query.setParam("spellcheck.q", searchRequest.query());
+        query.setParam("spellcheck.collate", "true");
+
         try {
             QueryResponse response = solrClient.query(collection, query);
 
@@ -74,11 +96,23 @@ public class SearchRepository {
                                             .collect(Collectors.toList())))
                         : new java.util.HashMap<>();
 
+            // Handle spell check suggestions
+            SearchResponse.SpellCheckSuggestion spellCheckSuggestion = null;
+            if (response.getSpellCheckResponse() != null &&
+                    response.getSpellCheckResponse().getCollatedResult() != null) {
+                String collation = response.getSpellCheckResponse().getCollatedResult();
+                if (!collation.equals(searchRequest.query())) {
+                    spellCheckSuggestion = new SearchResponse.SpellCheckSuggestion(collation, searchRequest.query());
+                }
+            }
+
             return new SearchResponse(
                     response.getResults().stream()
                             .map(d -> new java.util.HashMap<String, Object>(d))
                             .collect(Collectors.toList()),
-                    facetCountsMap
+                    facetCountsMap,
+                    Map.of(), // No highlighting without knowing field names
+                    spellCheckSuggestion
             );
         } catch (Exception e) {
             throw new RuntimeException(e);
@@ -106,16 +140,21 @@ public class SearchRepository {
     }
 
     /**
-     * Executes hybrid search combining keyword and vector search using reranking.
+     * Executes hybrid search combining keyword and vector search using native RRF (Reciprocal Rank Fusion).
      *
      * <p>This method implements hybrid search with intelligent fallback:
-     * 1. Attempts hybrid search (keyword + vector reranking)
+     * 1. Attempts hybrid search using native RRF (keyword + vector fusion)
      * 2. If no results, falls back to keyword-only search
      * 3. If keyword fails, falls back to vector-only search
-     * 4. Combines both signals using Solr's rerank query parser</p>
+     * 4. Combines both signals using Solr's native RRF query parser (available in Solr 9.8+)</p>
      *
-     * <p>Note: Native RRF (Reciprocal Rank Fusion) is not yet available in Solr 9.10.0.
-     * This implementation uses reranking as an alternative approach to combine keyword and vector search.</p>
+     * <p>RRF (Reciprocal Rank Fusion) provides better fusion than reranking by:
+     * <ul>
+     *   <li>Using the formula: score = sum(1 / (k + rank)) for each result list</li>
+     *   <li>Balancing keyword and vector signals more evenly</li>
+     *   <li>Handling rank positions rather than raw scores</li>
+     *   <li>Configurable k parameter for fusion tuning (default: 60)</li>
+     * </ul></p>
      *
      * @param collection        the Solr collection to search
      * @param query             the text query for keyword search
@@ -131,25 +170,21 @@ public class SearchRepository {
                                                     String filterExpression,
                                                     String fieldsCsv,
                                                     Double minScore) {
-        log.debug("Performing hybrid search in collection: {} with query: {}", collection, query);
+        log.debug("Performing hybrid search (RRF) in collection: {} with query: {}", collection, query);
 
         try {
             // Step 1: Generate embedding for the query text
             String vectorString = embeddingService.embedAndFormatForSolr(query);
 
-            // Step 2: Build hybrid query with keyword search + vector reranking
+            // Step 2: Build hybrid query using native RRF
             ModifiableSolrParams params = new ModifiableSolrParams();
 
-            // Keyword search component - use edismax for flexible text matching
-            params.set("q", query);
-            params.set("defType", "edismax");
-            params.set("qf", "_text_ content^2");  // Search in catch-all text field and boost content field
-
-            // Vector search component using rerank to re-score top keyword results
-            // reRankDocs: number of top docs from main query to rerank
-            // reRankWeight: weight given to the rerank score (1.0 = equal weight)
-            params.set("rq", "{!rerank reRankQuery=$vectorQ reRankDocs=200 reRankWeight=2.0}");
-            params.set("vectorQ", SolrQueryUtils.buildKnnQuery(topK, vectorString));
+            // Native RRF query combines keyword and vector search
+            // Format: {!rrf}({!edismax qf='_text_'}query)({!knn f=vector topK=N}[vector])
+            // Use catch-all field (_text_) which Solr automatically populates from all text fields
+            String keywordQuery = String.format("{!edismax qf='%s'}%s", FIELD_TEXT_CATCHALL, query);
+            String vectorQuery = SolrQueryUtils.buildKnnQuery(FIELD_VECTOR, topK * 2, vectorString); // Fetch more for better fusion
+            params.set("q", String.format("{!rrf}(%s)(%s)", keywordQuery, vectorQuery));
 
             // Apply filter expression if present
             if (filterExpression != null && !filterExpression.isEmpty()) {
@@ -158,18 +193,23 @@ public class SearchRepository {
 
             // Set fields to return
             if (fieldsCsv != null && !fieldsCsv.isEmpty()) {
-                params.set("fl", fieldsCsv + ",score");
+                params.set("fl", fieldsCsv + "," + FIELD_SCORE);
             } else {
-                params.set("fl", "*,score");
+                params.set("fl", "*," + FIELD_SCORE);
             }
 
             // Set number of rows
             params.set("rows", topK);
 
+            // Enable spell checking (works without knowing specific fields)
+            params.set("spellcheck", "true");
+            params.set("spellcheck.q", query);
+            params.set("spellcheck.collate", "true");
+
             // Step 3: Execute query using POST to avoid URI Too Long errors with large vector embeddings
             QueryResponse response = solrClient.query(collection, params, SolrRequest.METHOD.POST);
 
-            log.debug("Hybrid search with reranking returned {} results", response.getResults().size());
+            log.debug("Hybrid search with RRF returned {} results", response.getResults().size());
 
             // Step 4: Convert results (apply minScore filter and handle multi-valued fields)
             List<Map<String, Object>> documents = response.getResults().stream()
@@ -199,16 +239,15 @@ public class SearchRepository {
                     })
                     .collect(Collectors.toList());
 
-            // Handle facets
-            Map<String, List<SearchResponse.FacetCount>> facetCountsMap =
-                    response.getFacetFields() != null ?
-                            response.getFacetFields().stream()
-                                    .collect(Collectors.toMap(
-                                            f -> f.getName(),
-                                            f -> f.getValues().stream()
-                                                    .map(c -> new SearchResponse.FacetCount(c.getName(), c.getCount()))
-                                                    .collect(Collectors.toList())))
-                            : new java.util.HashMap<>();
+            // Handle spell check suggestions
+            SearchResponse.SpellCheckSuggestion spellCheckSuggestion = null;
+            if (response.getSpellCheckResponse() != null &&
+                    response.getSpellCheckResponse().getCollatedResult() != null) {
+                String collation = response.getSpellCheckResponse().getCollatedResult();
+                if (!collation.equals(query)) {
+                    spellCheckSuggestion = new SearchResponse.SpellCheckSuggestion(collation, query);
+                }
+            }
 
             // Step 5: Implement fallback if no results
             if (documents.isEmpty()) {
@@ -216,7 +255,7 @@ public class SearchRepository {
                 return fallbackToKeywordSearch(collection, query, topK, filterExpression, fieldsCsv, minScore);
             }
 
-            return new SearchResponse(documents, facetCountsMap);
+            return new SearchResponse(documents, Map.of(), Map.of(), spellCheckSuggestion);
 
         } catch (Exception e) {
             log.error("Error performing hybrid search with reranking in collection: {}", collection, e);
@@ -239,8 +278,8 @@ public class SearchRepository {
             log.debug("Attempting keyword-only search fallback");
             ModifiableSolrParams params = new ModifiableSolrParams();
             params.set("q", query);
-            params.set("defType", "edismax");
-            params.set("qf", "_text_ content^2");
+            params.set("defType", QUERY_TYPE_EDISMAX);
+            params.set("qf", FIELD_TEXT_CATCHALL);
 
             if (filterExpression != null && !filterExpression.isEmpty()) {
                 params.set("fq", filterExpression);
@@ -491,7 +530,7 @@ public class SearchRepository {
 
             // Build KNN query for vector search
             SolrQuery solrQuery = new SolrQuery();
-            solrQuery.setQuery(SolrQueryUtils.buildKnnQuery("vector", topK, vectorString));
+            solrQuery.setQuery(SolrQueryUtils.buildKnnQuery(FIELD_VECTOR, topK, vectorString));
             solrQuery.setRows(topK);
 
             // Apply Solr-native filter if provided
@@ -504,8 +543,10 @@ public class SearchRepository {
             if (fieldsCsv != null && !fieldsCsv.isBlank()) {
                 solrQuery.setFields(fieldsCsv.split(","));
             } else {
-                solrQuery.setFields("*", "score");
+                solrQuery.setFields("*", FIELD_SCORE);
             }
+
+            // No faceting for semantic search (would require knowing field names)
 
             // Execute search
             QueryResponse response = solrClient.query(collection, solrQuery, SolrRequest.METHOD.POST);
@@ -555,11 +596,12 @@ public class SearchRepository {
             log.debug("Semantic search returned {} documents (before score filtering: {})",
                     documents.size(), response.getResults().size());
 
-            return new SearchResponse(documents, new java.util.HashMap<>());
+            return new SearchResponse(documents, Map.of());
 
         } catch (Exception e) {
             log.error("Semantic search failed for collection: {}, query: {}", collection, query, e);
             throw new RuntimeException("Semantic search failed: " + e.getMessage(), e);
         }
     }
+
 }
