@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is an AI-powered search application built with Spring Boot 3.5.7 and Java 21. The application integrates Apache Solr for both traditional keyword search and semantic vector search, with Anthropic Claude for intelligent query generation and OpenAI for vector embeddings.
+This is an AI-powered search application built with Spring Boot 4.0.0, Spring Framework 7, and Java 25. The application
+integrates Apache Solr for both traditional keyword search and semantic vector search, with Anthropic Claude for
+intelligent query generation and OpenAI for vector embeddings.
 
 ### Core Architecture
 
@@ -37,7 +39,9 @@ The application follows a **package-by-feature** structure organized around main
 
 ### Key Dependencies
 
-- **Spring Boot 3.5.7** with Spring AI 1.1.0
+- **Spring Boot 4.0.0** with Spring Framework 7 and Spring AI 2.0.0-M1
+- **Java 25** with virtual threads enabled
+- **Jackson 3** for JSON serialization (auto-configured by Spring Boot 4)
 - **Anthropic Claude AI** (claude-sonnet-4-5) for query generation and chat
 - **OpenAI** (text-embedding-3-small) for vector embeddings (1536 dimensions)
 - **Apache Solr 9.10.0** for search and vector storage with dense vector support
@@ -148,6 +152,92 @@ spring.ai.anthropic.prompt-caching.enabled=false
 ```
 
 When disabled, no cache options are set and the advisor will not log cache metrics.
+
+## Spring Framework 7 Resilience Features
+
+The application uses Spring Framework 7's native resilience features for retry logic, replacing the legacy
+`spring-retry` library.
+
+### Enabling Resilience
+
+Resilience features are enabled via the `@EnableResilientMethods` annotation on the main application class:
+
+```java
+
+@SpringBootApplication
+@EnableResilientMethods
+public class AiPoweredSearchApplication {
+    // ...
+}
+```
+
+### @Retryable Annotation
+
+The `EmbeddingService` uses `@Retryable` for automatic retry with exponential backoff:
+
+```java
+
+@Retryable(
+        includes = {ResourceAccessException.class, RestClientException.class},
+        maxRetries = 2,
+        delay = 1000,
+        multiplier = 2,
+        maxDelay = 10000
+)
+public float[] embed(String text) {
+    // ...
+}
+```
+
+**Key attributes:**
+
+- `includes`: Exception types that trigger retry
+- `maxRetries`: Number of retry attempts (excludes initial invocation)
+- `delay`: Initial delay between retries in milliseconds
+- `multiplier`: Exponential backoff multiplier
+- `maxDelay`: Maximum delay cap in milliseconds
+
+**Note**: Spring Framework 7's `maxRetries` counts only retry attempts. For 3 total attempts (1 initial + 2 retries),
+use `maxRetries = 2`.
+
+### Migration from spring-retry
+
+| spring-retry                           | Spring Framework 7                          |
+|----------------------------------------|---------------------------------------------|
+| `@EnableRetry`                         | `@EnableResilientMethods`                   |
+| `org.springframework.retry.annotation` | `org.springframework.resilience.annotation` |
+| `retryFor`                             | `includes`                                  |
+| `maxAttempts` (includes initial)       | `maxRetries` (excludes initial)             |
+| `@Backoff(delay=, multiplier=)`        | Direct attributes on `@Retryable`           |
+
+## Jackson 3 Support
+
+Spring Boot 4.0.0 uses Jackson 3 for JSON serialization with the new `tools.jackson` package namespace.
+
+### Package Changes
+
+- **Primary package**: `com.fasterxml.jackson` → `tools.jackson`
+- **Exception**: `jackson-annotations` retains `com.fasterxml.jackson.annotation` package
+
+### Usage in This Project
+
+```java
+// ObjectMapper uses new package
+
+import tools.jackson.databind.ObjectMapper;
+
+// Annotations still use old package (by design)
+import com.fasterxml.jackson.annotation.JsonProperty;
+```
+
+### Key Class Renames
+
+| Jackson 2 / Spring Boot 3 | Jackson 3 / Spring Boot 4 |
+|---------------------------|---------------------------|
+| `@JsonComponent`          | `@JacksonComponent`       |
+| `@JsonMixin`              | `@JacksonMixin`           |
+| `JsonObjectSerializer`    | `ObjectValueSerializer`   |
+| `JsonValueDeserializer`   | `ObjectValueDeserializer` |
 
 ## Development Commands
 
@@ -294,7 +384,7 @@ docker-compose logs solr  # View Solr logs
 
 The `SolrVectorStore` is a custom implementation that:
 
-- Extends `AbstractObservationVectorStore` from Spring AI 1.1.0
+- Extends `AbstractObservationVectorStore` from Spring AI 2.0.0-M1
 - Implements the `VectorStore` interface for document storage and similarity search
 - Uses Solr's `DenseVectorField` type for KNN (K-Nearest Neighbors) search with HNSW algorithm
 - Supports cosine similarity metric for vector comparison
