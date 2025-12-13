@@ -4,10 +4,46 @@ You need to convert the free text query into a structured search query.
 Respond with a JSON object with the following fields:
 
 ## q (Main Query Parameter)
-- The primary search query submitted to Solr
+The `q` parameter defines the main query and influences **both filtering AND relevancy scoring**.
 - Should be a valid Solr query string
 - Use "*:*" to match all documents
 - Examples: "name:Spring", "description:boot", "title:Java AND category:tech"
+# Simple term query
+q=solr
+
+# Field-specific query
+q=title:solr
+
+# Phrase query
+q=title:"apache solr"
+
+# Boolean operators
+q=title:solr AND content:search
+q=title:solr OR title:lucene
+q=title:solr NOT title:elasticsearch
+
+# Required/prohibited terms
+q=+solr +search -elasticsearch
+
+# Range queries
+q=price:[10 TO 50]
+q=created_date:[NOW-1YEAR TO NOW]
+
+# Wildcard queries
+q=title:sol*
+q=title:s?lr
+
+# Fuzzy queries (edit distance)
+q=title:solr~2
+
+# Proximity queries
+q="apache solr"~5
+
+## The `qf` Parameter (Query Fields)
+Used with eDisMax query parser to search across multiple fields with different boosts:
+q=apache solr
+defType=edismax
+qf=title^10 content^2 author^5
 
 ## fq (Filter Query Parameter)
 - A list of filter queries that restrict the document superset without affecting relevance scoring
@@ -15,6 +51,15 @@ Respond with a JSON object with the following fields:
 - Can specify multiple filters (they work as intersection/AND)
 - Examples: ["popularity:[10 TO *]", "section:0"], ["status:active"], ["price:[0 TO 100]"]
 - Best Practice: Use separate fq entries for independent filters that might be reused
+
+**Critical Difference: `q` vs `fq`**
+
+| Aspect | `q` (Query) | `fq` (Filter Query) |
+|--------|-------------|---------------------|
+| Affects relevancy | ✅ Yes | ❌ No |
+| Cached | ❌ No | ✅ Yes (in filterCache) |
+| Multiple allowed | ❌ Only one | ✅ Multiple |
+| Use case | User keywords | System constraints |
 
 ## sort (Sort Parameter)
 - Specifies result ordering by document score, field values, or function results
@@ -37,6 +82,24 @@ Respond with a JSON object with the following fields:
 - Examples: "id,name,price", "id,title,score", "*,special_dv_field"
 - Best Practice: Limit to only necessary fields to reduce response size and improve performance
 
+
+## Query Parsers
+
+### Lucene Query Parser (Default)
+
+Strict syntax, full Boolean support:
+```
+q=title:solr AND (content:search OR content:engine)
+defType=lucene
+
+### eDisMax Query Parser (Recommended for User Queries)
+
+Tolerant of syntax errors, multi-field search, phrase boosting:
+```
+defType=edismax
+q=apache solr search
+
+
 ## facet.fields (Field-Value Faceting)
 - A list of field names for facet constraint counting
 - Generates counts for each distinct term in the specified fields
@@ -50,6 +113,38 @@ Respond with a JSON object with the following fields:
 - Particularly useful for numeric ranges or specific constraint categories
 - Examples: "price:[0 TO 50]", "date:[NOW-1DAY TO NOW]", "popularity:[10 TO *]"
 - Best Practice: Use for categorizing values into specific ranges rather than counting every distinct value
+
+### Range Faceting
+
+For numeric/date fields:
+```
+facet=true
+facet.range=price
+facet.range.start=0
+facet.range.end=100
+facet.range.gap=10
+facet.range.other=before,after
+
+facet.range=created_date
+facet.range.start=NOW/YEAR-5YEARS
+facet.range.end=NOW
+facet.range.gap=+1YEAR
+```
+
+### Query Faceting
+
+Arbitrary queries as facet buckets:
+```
+facet=true
+facet.query=price:[* TO 10]
+facet.query=price:[10 TO 50]
+facet.query=price:[50 TO *]
+```
+
+### Pivot Faceting (Multi-dimensional)
+```
+facet=true
+facet.pivot=category,author
 
 ## FIELD TYPE GUIDELINES
 

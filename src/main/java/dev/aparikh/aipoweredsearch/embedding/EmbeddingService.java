@@ -3,8 +3,7 @@ package dev.aparikh.aipoweredsearch.embedding;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.embedding.EmbeddingModel;
-import org.springframework.retry.annotation.Backoff;
-import org.springframework.retry.annotation.Retryable;
+import org.springframework.resilience.annotation.Retryable;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClientException;
@@ -50,9 +49,9 @@ public class EmbeddingService {
      *
      * <p>This method includes automatic retry logic with exponential backoff:
      * <ul>
-     *   <li>Max attempts: 3</li>
+     *   <li>Max retries: 2 (3 total attempts including initial)</li>
      *   <li>Initial delay: 1 second</li>
-     *   <li>Backoff multiplier: 2x (1s, 2s, 4s)</li>
+     *   <li>Backoff multiplier: 2x (1s, 2s)</li>
      *   <li>Max delay: 10 seconds</li>
      * </ul>
      * </p>
@@ -63,9 +62,11 @@ public class EmbeddingService {
      * @throws RuntimeException if all retry attempts fail
      */
     @Retryable(
-            retryFor = {ResourceAccessException.class, RestClientException.class},
-            maxAttempts = 3,
-            backoff = @Backoff(delay = 1000, multiplier = 2.0, maxDelay = 10000)
+            includes = {ResourceAccessException.class, RestClientException.class},
+            maxRetries = 2,
+            delay = 1000,
+            multiplier = 2,
+            maxDelay = 10000
     )
     public float[] embed(String text) {
 

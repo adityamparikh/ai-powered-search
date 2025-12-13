@@ -15,8 +15,8 @@ import org.springframework.ai.ollama.api.OllamaChatOptions;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.web.client.RestClient;
-import org.testcontainers.containers.SolrContainer;
 import org.testcontainers.ollama.OllamaContainer;
+import org.testcontainers.solr.SolrContainer;
 
 import java.util.List;
 
