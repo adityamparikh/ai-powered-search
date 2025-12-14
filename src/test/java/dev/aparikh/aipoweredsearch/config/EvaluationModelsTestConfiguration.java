@@ -4,8 +4,8 @@ import org.springframework.boot.devtools.restart.RestartScope;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.context.annotation.Bean;
-import org.testcontainers.containers.SolrContainer;
 import org.testcontainers.ollama.OllamaContainer;
+import org.testcontainers.solr.SolrContainer;
 import org.testcontainers.utility.DockerImageName;
 
 /**

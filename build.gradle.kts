@@ -1,6 +1,6 @@
 plugins {
     java
-    id("org.springframework.boot") version "3.5.7"
+    id("org.springframework.boot") version "4.0.0"
     id("io.spring.dependency-management") version "1.1.7"
     id("org.sonarqube") version "5.1.0.4882"
     jacoco
@@ -11,7 +11,7 @@ version = "0.0.1-SNAPSHOT"
 
 java {
     toolchain {
-        languageVersion = JavaLanguageVersion.of(21)
+        languageVersion = JavaLanguageVersion.of(25)
     }
 }
 
@@ -19,11 +19,12 @@ repositories {
     mavenCentral()
 }
 
-extra["springAiVersion"] = "1.1.0"
+extra["springAiVersion"] = "2.0.0-M1"
 
 dependencies {
     implementation("org.springframework.boot:spring-boot-starter-actuator")
-    implementation("org.springframework.boot:spring-boot-starter-web")
+    implementation("org.springframework.boot:spring-boot-starter-restclient")
+    implementation("org.springframework.boot:spring-boot-starter-webmvc")
     implementation("org.springframework.ai:spring-ai-starter-model-anthropic")
     implementation("org.springframework.ai:spring-ai-openai") {
         // Exclude all Jetty artifacts to avoid conflicts; SolrJ will bring its own pinned Jetty 11
@@ -45,28 +46,26 @@ dependencies {
     implementation("org.eclipse.jetty:jetty-alpn-java-client")
 
     // Swagger UI / OpenAPI documentation
-    implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:2.4.0")
+    implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:3.0.0")
 
     // Additional Solr dependencies
     implementation("commons-io:commons-io:2.15.1")
     implementation("org.apache.commons:commons-lang3:3.18.0")
 
-    // Spring Retry for resilient API calls
-    implementation("org.springframework.retry:spring-retry")
-    implementation("org.springframework:spring-aspects")
-
-
     testImplementation("org.springframework.boot:spring-boot-starter-test")
+    testImplementation("org.springframework.boot:spring-boot-starter-webmvc-test")
     testImplementation("org.springframework.boot:spring-boot-testcontainers")
     testImplementation("org.springframework.ai:spring-ai-spring-boot-testcontainers")
     testImplementation("org.springframework.ai:spring-ai-ollama")
-    testImplementation("org.testcontainers:junit-jupiter")
-    testImplementation("org.testcontainers:solr")
-    testImplementation("org.testcontainers:postgresql")
-    testImplementation("org.testcontainers:ollama")
+    testImplementation("org.testcontainers:testcontainers-junit-jupiter")
+    testImplementation("org.testcontainers:testcontainers-solr")
+    testImplementation("org.testcontainers:testcontainers-postgresql")
+    testImplementation("org.testcontainers:testcontainers-ollama")
     testImplementation("org.awaitility:awaitility:4.2.0")
     testImplementation("io.micrometer:micrometer-observation-test")
     testImplementation("org.springframework.boot:spring-boot-devtools")
+    testImplementation("org.springframework.boot:spring-boot-starter-actuator-test")
+    testImplementation("org.springframework.boot:spring-boot-starter-restclient-test")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
@@ -85,11 +84,6 @@ tasks.withType<Test> {
 
 tasks.withType<JavaCompile> {
     options.compilerArgs.addAll(listOf("-Xlint:all", "-Xlint:-processing"))
-}
-
-// JaCoCo configuration for code coverage
-jacoco {
-    toolVersion = "0.8.12"
 }
 
 tasks.jacocoTestReport {
