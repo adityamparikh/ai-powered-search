@@ -67,7 +67,7 @@ class SolrVectorStoreObservationIT {
     private List<Document> documents;
 
     @BeforeEach
-    void setUp() throws Exception {
+    void setUp() {
         // Create collection and schema idempotently
         try {
             solrContainer.execInContainer("/opt/solr/bin/solr", "create_collection", "-c", COLLECTION_NAME, "-d", "_default");

@@ -50,8 +50,7 @@ class SolrSearchIntegrationTest extends SolrTestBase {
         boolean foundSpringBootApp = response.documents().stream()
             .anyMatch(doc -> {
                 Object nameField = doc.get("name");
-                if (nameField instanceof List) {
-                    List<?> nameList = (List<?>) nameField;
+                if (nameField instanceof List<?> nameList) {
                     return nameList.contains("Spring Boot Application");
                 }
                 return "Spring Boot Application".equals(nameField);

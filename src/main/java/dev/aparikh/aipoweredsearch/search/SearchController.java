@@ -133,11 +133,11 @@ class SearchController {
             @Parameter(description = "Natural language search query", required = true,
                     example = "machine learning frameworks for Java")
             @RequestParam("query") String query,
-            @Parameter(description = "Number of results to return (topK)", required = false, example = "10")
+            @Parameter(description = "Number of results to return (topK)", example = "10")
             @RequestParam(name = "k", required = false) Integer k,
-            @Parameter(description = "Minimum similarity score threshold [0..1]", required = false, example = "0.7")
+            @Parameter(description = "Minimum similarity score threshold [0..1]", example = "0.7")
             @RequestParam(name = "minScore", required = false) Double minScore,
-            @Parameter(description = "Comma-separated list of fields to include in the response (e.g., 'content,author,year'). Id is always included.", required = false)
+            @Parameter(description = "Comma-separated list of fields to include in the response (e.g., 'content,author,year'). Id is always included.")
             @RequestParam(name = "fields", required = false) String fields) {
         return searchService.semanticSearch(collection, query, k, minScore, fields);
     }
@@ -199,11 +199,11 @@ class SearchController {
             @Parameter(description = "Natural language search query", required = true,
                     example = "comfortable running shoes")
             @RequestParam(name = "query") String query,
-            @Parameter(description = "Number of results to return from vector search (topK)", required = false, example = "100")
+            @Parameter(description = "Number of results to return from vector search (topK)", example = "100")
             @RequestParam(name = "k", required = false) Integer k,
-            @Parameter(description = "Minimum similarity score threshold [0..1]", required = false, example = "0.5")
+            @Parameter(description = "Minimum similarity score threshold [0..1]", example = "0.5")
             @RequestParam(name = "minScore", required = false) Double minScore,
-            @Parameter(description = "Comma-separated list of fields to include in the response (e.g., 'content,author,year'). Id and score are always included.", required = false)
+            @Parameter(description = "Comma-separated list of fields to include in the response (e.g., 'content,author,year'). Id and score are always included.")
             @RequestParam(name = "fields", required = false) String fields) {
         return searchService.hybridSearch(collection, query, k, minScore, fields);
     }

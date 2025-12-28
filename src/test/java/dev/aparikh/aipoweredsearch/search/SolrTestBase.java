@@ -126,7 +126,7 @@ public abstract class SolrTestBase {
         }
     }
 
-    protected void clearCollection(String collection) throws Exception {
+    protected void clearCollection(String collection) {
         try {
             // Test if collection exists first by doing a simple query
             solrClient.query(collection, new org.apache.solr.client.solrj.SolrQuery("*:*").setRows(0));
@@ -184,7 +184,6 @@ public abstract class SolrTestBase {
             System.out.println("Successfully populated test data in collection: " + collection);
         } catch (Exception e) {
             System.out.println("Failed to populate test data: " + e.getMessage());
-            e.printStackTrace();
             throw e;
         }
     }

@@ -157,7 +157,6 @@ class SolrVectorStoreDebugTest {
 
         } catch (Exception e) {
             System.err.println("Error during embedding test: " + e.getMessage());
-            e.printStackTrace();
         }
     }
 

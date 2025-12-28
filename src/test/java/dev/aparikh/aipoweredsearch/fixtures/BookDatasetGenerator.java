@@ -1,9 +1,7 @@
 package dev.aparikh.aipoweredsearch.fixtures;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Random;
 
 /**
@@ -67,29 +65,13 @@ public class BookDatasetGenerator {
         public double rating;
         public String publisher;
 
-        public Map<String, Object> toMap() {
-            Map<String, Object> map = new HashMap<>();
-            map.put("id", id);
-            map.put("title", title);
-            map.put("author", author);
-            map.put("description", description);
-            map.put("genre", genre);
-            map.put("year", publicationYear);
-            map.put("isbn", isbn);
-            map.put("pages", pages);
-            map.put("rating", rating);
-            map.put("publisher", publisher);
-            return map;
-        }
     }
 
     public static List<Book> generate1000Books() {
         List<Book> books = new ArrayList<>();
         int booksPerGenre = 10;
 
-        for (int genreIdx = 0; genreIdx < GENRES.size(); genreIdx++) {
-            String genre = GENRES.get(genreIdx);
-
+        for (String genre : GENRES) {
             for (int i = 0; i < booksPerGenre; i++) {
                 Book book = new Book();
                 book.id = String.format("book_%04d", books.size() + 1);

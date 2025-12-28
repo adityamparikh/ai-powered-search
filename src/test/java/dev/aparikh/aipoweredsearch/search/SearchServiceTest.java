@@ -46,14 +46,8 @@ class SearchServiceTest {
     private ChatClient.CallResponseSpec callResponseSpec;
     private ChatClient.ChatClientRequestSpec requestSpec;
 
-    @Value("classpath:/prompts/system-message.st")
-    Resource systemResource;
-
-    @Value("classpath:/prompts/semantic-search-system-message.st")
-    Resource semanticSystemResource;
-
     @BeforeEach
-    void setUp() throws Exception {
+    void setUp() {
         // Mock ChatClient's fluent API
         callResponseSpec = mock(ChatClient.CallResponseSpec.class);
         requestSpec = mock(ChatClient.ChatClientRequestSpec.class, org.mockito.Mockito.RETURNS_SELF);
@@ -69,7 +63,7 @@ class SearchServiceTest {
     }
 
     @Test
-    void shouldSearchWithAiGeneratedQuery() throws Exception {
+    void shouldSearchWithAiGeneratedQuery()  {
         // Given
         String collection = "test-collection";
         String freeTextQuery = "find documents about spring boot";
@@ -111,7 +105,7 @@ class SearchServiceTest {
     }
 
     @Test
-    void shouldPerformHybridSearchWithDefaultParameters() throws Exception {
+    void shouldPerformHybridSearchWithDefaultParameters()  {
         // Given
         String collection = "test-collection";
         String freeTextQuery = "machine learning frameworks";
@@ -165,11 +159,11 @@ class SearchServiceTest {
     }
 
     @Test
-    void shouldPerformHybridSearchWithCustomTopK() throws Exception {
+    void shouldPerformHybridSearchWithCustomTopK()  {
         // Given
         String collection = "test-collection";
         String freeTextQuery = "java spring boot tutorials";
-        Integer topK = 50;
+        int topK = 50;
         List<FieldInfo> fields = List.of(
                 new FieldInfo("id", "string", false, true, false, true),
                 new FieldInfo("content", "text_general", false, true, false, true)
@@ -206,15 +200,15 @@ class SearchServiceTest {
         // Then
         assertNotNull(response);
         assertEquals(1, response.documents().size());
-        assertEquals("1", response.documents().get(0).get("id"));
+        assertEquals("1", response.documents().getFirst().get("id"));
     }
 
     @Test
-    void shouldPerformHybridSearchWithMinScoreFilter() throws Exception {
+    void shouldPerformHybridSearchWithMinScoreFilter()  {
         // Given
         String collection = "test-collection";
         String freeTextQuery = "natural language processing";
-        Integer topK = 20;
+        int topK = 20;
         Double minScore = 0.75;
         List<FieldInfo> fields = List.of(
                 new FieldInfo("id", "string", false, true, false, true),
@@ -265,7 +259,7 @@ class SearchServiceTest {
     }
 
     @Test
-    void shouldPerformHybridSearchWithFieldSelection() throws Exception {
+    void shouldPerformHybridSearchWithFieldSelection()  {
         // Given
         String collection = "test-collection";
         String freeTextQuery = "cloud computing platforms";
@@ -310,7 +304,7 @@ class SearchServiceTest {
         // Then
         assertNotNull(response);
         assertEquals(1, response.documents().size());
-        Map<String, Object> doc = response.documents().get(0);
+        Map<String, Object> doc = response.documents().getFirst();
         assertEquals("1", doc.get("id"));
         assertEquals("AWS Guide", doc.get("title"));
         assertEquals("John Doe", doc.get("author"));
@@ -318,7 +312,7 @@ class SearchServiceTest {
     }
 
     @Test
-    void shouldPerformHybridSearchWithFilters() throws Exception {
+    void shouldPerformHybridSearchWithFilters()  {
         // Given
         String collection = "test-collection";
         String freeTextQuery = "python tutorials published after 2023";
@@ -363,13 +357,13 @@ class SearchServiceTest {
         // Then
         assertNotNull(response);
         assertEquals(1, response.documents().size());
-        Map<String, Object> doc = response.documents().get(0);
+        Map<String, Object> doc = response.documents().getFirst();
         assertEquals("1", doc.get("id"));
         assertEquals(2024, doc.get("year"));
     }
 
     @Test
-    void shouldHandleEmptyHybridSearchResults() throws Exception {
+    void shouldHandleEmptyHybridSearchResults()  {
         // Given
         String collection = "test-collection";
         String freeTextQuery = "nonexistent topic xyz123";

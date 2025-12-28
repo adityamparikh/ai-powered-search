@@ -151,7 +151,7 @@ class SemanticAndHybridSearchIntegrationTest {
         log.info("Indexed {} documents for hybrid search", docs.size());
     }
 
-    private void createCollectionWithVectorField(String collection) throws Exception {
+    private void createCollectionWithVectorField(String collection) {
         try {
             // Create collection
             CollectionAdminRequest.Create createRequest = CollectionAdminRequest.createCollection(collection, "_default", 1, 1);

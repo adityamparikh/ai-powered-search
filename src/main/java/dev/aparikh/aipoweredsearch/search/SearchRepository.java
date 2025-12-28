@@ -12,12 +12,15 @@ import org.apache.solr.client.solrj.request.schema.SchemaRequest;
 import org.apache.solr.client.solrj.response.QueryResponse;
 import org.apache.solr.client.solrj.response.schema.SchemaResponse;
 import org.apache.solr.common.SolrDocument;
+import org.apache.solr.common.SolrDocumentList;
 import org.apache.solr.common.params.ModifiableSolrParams;
+import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Repository;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -94,25 +97,15 @@ public class SearchRepository {
                                     f -> f.getValues().stream()
                                             .map(c -> new SearchResponse.FacetCount(c.getName(), c.getCount()))
                                             .collect(Collectors.toList())))
-                        : new java.util.HashMap<>();
-
-            // Handle spell check suggestions
-            SearchResponse.SpellCheckSuggestion spellCheckSuggestion = null;
-            if (response.getSpellCheckResponse() != null &&
-                    response.getSpellCheckResponse().getCollatedResult() != null) {
-                String collation = response.getSpellCheckResponse().getCollatedResult();
-                if (!collation.equals(searchRequest.query())) {
-                    spellCheckSuggestion = new SearchResponse.SpellCheckSuggestion(collation, searchRequest.query());
-                }
-            }
+                        : new HashMap<>();
 
             return new SearchResponse(
                     response.getResults().stream()
-                            .map(d -> new java.util.HashMap<String, Object>(d))
+                            .map(HashMap::new)
                             .collect(Collectors.toList()),
                     facetCountsMap,
                     Map.of(), // No highlighting without knowing field names
-                    spellCheckSuggestion
+                    extractSpellCheck(response, searchRequest.query())
             );
         } catch (Exception e) {
             throw new RuntimeException(e);
@@ -167,9 +160,9 @@ public class SearchRepository {
     public SearchResponse executeHybridRerankSearch(String collection,
                                                     String query,
                                                     int topK,
-                                                    String filterExpression,
-                                                    String fieldsCsv,
-                                                    Double minScore) {
+                                                    @Nullable String filterExpression,
+                                                    @Nullable String fieldsCsv,
+                                                    @Nullable Double minScore) {
         log.debug("Performing hybrid search (RRF) in collection: {} with query: {}", collection, query);
 
         try {
@@ -186,25 +179,8 @@ public class SearchRepository {
             String vectorQuery = SolrQueryUtils.buildKnnQuery(FIELD_VECTOR, topK * 2, vectorString); // Fetch more for better fusion
             params.set("q", String.format("{!rrf}(%s)(%s)", keywordQuery, vectorQuery));
 
-            // Apply filter expression if present
-            if (filterExpression != null && !filterExpression.isEmpty()) {
-                params.set("fq", filterExpression);
-            }
-
-            // Set fields to return
-            if (fieldsCsv != null && !fieldsCsv.isEmpty()) {
-                params.set("fl", fieldsCsv + "," + FIELD_SCORE);
-            } else {
-                params.set("fl", "*," + FIELD_SCORE);
-            }
-
-            // Set number of rows
-            params.set("rows", topK);
-
-            // Enable spell checking (works without knowing specific fields)
-            params.set("spellcheck", "true");
-            params.set("spellcheck.q", query);
-            params.set("spellcheck.collate", "true");
+            configureQueryParams(params, filterExpression, fieldsCsv, topK);
+            configureSpellCheck(params, query);
 
             // Step 3: Execute query using POST to avoid URI Too Long errors with large vector embeddings
             QueryResponse response = solrClient.query(collection, params, SolrRequest.METHOD.POST);
@@ -212,42 +188,7 @@ public class SearchRepository {
             log.debug("Hybrid search with RRF returned {} results", response.getResults().size());
 
             // Step 4: Convert results (apply minScore filter and handle multi-valued fields)
-            List<Map<String, Object>> documents = response.getResults().stream()
-                    .filter(doc -> {
-                        if (minScore != null) {
-                            Object scoreObj = doc.getFieldValue("score");
-                            if (scoreObj instanceof Number) {
-                                return ((Number) scoreObj).doubleValue() >= minScore;
-                            }
-                        }
-                        return true;
-                    })
-                    .map(doc -> {
-                        Map<String, Object> docMap = new java.util.HashMap<>();
-                        for (String fieldName : doc.getFieldNames()) {
-                            Object value = doc.getFieldValue(fieldName);
-                            if (value instanceof List) {
-                                List<?> list = (List<?>) value;
-                                if (!list.isEmpty()) {
-                                    docMap.put(fieldName, list.get(0));
-                                }
-                            } else {
-                                docMap.put(fieldName, value);
-                            }
-                        }
-                        return docMap;
-                    })
-                    .collect(Collectors.toList());
-
-            // Handle spell check suggestions
-            SearchResponse.SpellCheckSuggestion spellCheckSuggestion = null;
-            if (response.getSpellCheckResponse() != null &&
-                    response.getSpellCheckResponse().getCollatedResult() != null) {
-                String collation = response.getSpellCheckResponse().getCollatedResult();
-                if (!collation.equals(query)) {
-                    spellCheckSuggestion = new SearchResponse.SpellCheckSuggestion(collation, query);
-                }
-            }
+            List<Map<String, Object>> documents = convertDocuments(response.getResults(), minScore);
 
             // Step 5: Implement fallback if no results
             if (documents.isEmpty()) {
@@ -255,7 +196,7 @@ public class SearchRepository {
                 return fallbackToKeywordSearch(collection, query, topK, filterExpression, fieldsCsv, minScore);
             }
 
-            return new SearchResponse(documents, Map.of(), Map.of(), spellCheckSuggestion);
+            return new SearchResponse(documents, Map.of(), Map.of(), extractSpellCheck(response, query));
 
         } catch (Exception e) {
             log.error("Error performing hybrid search with reranking in collection: {}", collection, e);
@@ -271,9 +212,9 @@ public class SearchRepository {
     private SearchResponse fallbackToKeywordSearch(String collection,
                                                    String query,
                                                    int topK,
-                                                   String filterExpression,
-                                                   String fieldsCsv,
-                                                   Double minScore) {
+                                                   @Nullable String filterExpression,
+                                                   @Nullable String fieldsCsv,
+                                                   @Nullable Double minScore) {
         try {
             log.debug("Attempting keyword-only search fallback");
             ModifiableSolrParams params = new ModifiableSolrParams();
@@ -281,46 +222,10 @@ public class SearchRepository {
             params.set("defType", QUERY_TYPE_EDISMAX);
             params.set("qf", FIELD_TEXT_CATCHALL);
 
-            if (filterExpression != null && !filterExpression.isEmpty()) {
-                params.set("fq", filterExpression);
-            }
-
-            if (fieldsCsv != null && !fieldsCsv.isEmpty()) {
-                params.set("fl", fieldsCsv + ",score");
-            } else {
-                params.set("fl", "*,score");
-            }
-
-            params.set("rows", topK);
+            configureQueryParams(params, filterExpression, fieldsCsv, topK);
 
             QueryResponse response = solrClient.query(collection, params, SolrRequest.METHOD.POST);
-
-            List<Map<String, Object>> documents = response.getResults().stream()
-                    .filter(doc -> {
-                        if (minScore != null) {
-                            Object scoreObj = doc.getFieldValue("score");
-                            if (scoreObj instanceof Number) {
-                                return ((Number) scoreObj).doubleValue() >= minScore;
-                            }
-                        }
-                        return true;
-                    })
-                    .map(doc -> {
-                        Map<String, Object> docMap = new java.util.HashMap<>();
-                        for (String fieldName : doc.getFieldNames()) {
-                            Object value = doc.getFieldValue(fieldName);
-                            if (value instanceof List) {
-                                List<?> list = (List<?>) value;
-                                if (!list.isEmpty()) {
-                                    docMap.put(fieldName, list.get(0));
-                                }
-                            } else {
-                                docMap.put(fieldName, value);
-                            }
-                        }
-                        return docMap;
-                    })
-                    .collect(Collectors.toList());
+            List<Map<String, Object>> documents = convertDocuments(response.getResults(), minScore);
 
             if (documents.isEmpty()) {
                 log.warn("Keyword search fallback returned no results, attempting vector-only search");
@@ -328,7 +233,7 @@ public class SearchRepository {
             }
 
             log.info("Keyword-only fallback succeeded with {} results", documents.size());
-            return new SearchResponse(documents, new java.util.HashMap<>());
+            return new SearchResponse(documents, new HashMap<>());
 
         } catch (Exception e) {
             log.error("Keyword search fallback failed", e);
@@ -343,9 +248,9 @@ public class SearchRepository {
     private SearchResponse fallbackToVectorSearch(String collection,
                                                   String query,
                                                   int topK,
-                                                  String filterExpression,
-                                                  String fieldsCsv,
-                                                  Double minScore) {
+                                                  @Nullable String filterExpression,
+                                                  @Nullable String fieldsCsv,
+                                                  @Nullable Double minScore) {
         try {
             log.debug("Attempting vector-only search fallback");
             String vectorString = embeddingService.embedAndFormatForSolr(query);
@@ -353,54 +258,18 @@ public class SearchRepository {
             ModifiableSolrParams params = new ModifiableSolrParams();
             params.set("q", SolrQueryUtils.buildKnnQuery(topK, vectorString));
 
-            if (filterExpression != null && !filterExpression.isEmpty()) {
-                params.set("fq", filterExpression);
-            }
-
-            if (fieldsCsv != null && !fieldsCsv.isEmpty()) {
-                params.set("fl", fieldsCsv + ",score");
-            } else {
-                params.set("fl", "*,score");
-            }
-
-            params.set("rows", topK);
+            configureQueryParams(params, filterExpression, fieldsCsv, topK);
 
             QueryResponse response = solrClient.query(collection, params, SolrRequest.METHOD.POST);
-
-            List<Map<String, Object>> documents = response.getResults().stream()
-                    .filter(doc -> {
-                        if (minScore != null) {
-                            Object scoreObj = doc.getFieldValue("score");
-                            if (scoreObj instanceof Number) {
-                                return ((Number) scoreObj).doubleValue() >= minScore;
-                            }
-                        }
-                        return true;
-                    })
-                    .map(doc -> {
-                        Map<String, Object> docMap = new java.util.HashMap<>();
-                        for (String fieldName : doc.getFieldNames()) {
-                            Object value = doc.getFieldValue(fieldName);
-                            if (value instanceof List) {
-                                List<?> list = (List<?>) value;
-                                if (!list.isEmpty()) {
-                                    docMap.put(fieldName, list.get(0));
-                                }
-                            } else {
-                                docMap.put(fieldName, value);
-                            }
-                        }
-                        return docMap;
-                    })
-                    .collect(Collectors.toList());
+            List<Map<String, Object>> documents = convertDocuments(response.getResults(), minScore);
 
             log.info("Vector-only fallback returned {} results", documents.size());
-            return new SearchResponse(documents, new java.util.HashMap<>());
+            return new SearchResponse(documents, new HashMap<>());
 
         } catch (Exception e) {
             log.error("All search strategies failed (hybrid, keyword, vector)", e);
             // Return empty results rather than throwing exception
-            return new SearchResponse(new java.util.ArrayList<>(), new java.util.HashMap<>());
+            return new SearchResponse(new ArrayList<>(), new HashMap<>());
         }
     }
 
@@ -437,36 +306,14 @@ public class SearchRepository {
 
                 Map<String, Object> schemaField = explicitByName.get(fieldName);
                 if (schemaField != null) {
-                    String type = (String) schemaField.get("type");
-                    boolean multiValued = Boolean.TRUE.equals(schemaField.get("multiValued"));
-                    boolean stored = !Boolean.FALSE.equals(schemaField.get("stored")); // default true
-                    boolean docValues = Boolean.TRUE.equals(schemaField.get("docValues"));
-                    boolean indexed = !Boolean.FALSE.equals(schemaField.get("indexed")); // default true
-                    fieldInfos.add(new FieldInfo(fieldName, type, multiValued, stored, docValues, indexed));
+                    fieldInfos.add(extractFieldInfo(fieldName, schemaField));
                     continue;
                 }
 
                 // Try to match a dynamic field pattern
-                Map<String, Object> bestMatch = null;
-                int bestScore = -1; // higher is better
-                for (Map<String, Object> df : dynamicFields) {
-                    String pattern = (String) df.get("name");
-                    if (pattern == null) continue;
-
-                    int score = dynamicMatchScore(fieldName, pattern);
-                    if (score >= 0 && score > bestScore) {
-                        bestScore = score;
-                        bestMatch = df;
-                    }
-                }
-
+                Map<String, Object> bestMatch = findBestDynamicFieldMatch(fieldName, dynamicFields);
                 if (bestMatch != null) {
-                    String type = (String) bestMatch.get("type");
-                    boolean multiValued = Boolean.TRUE.equals(bestMatch.get("multiValued"));
-                    boolean stored = !Boolean.FALSE.equals(bestMatch.get("stored")); // default true
-                    boolean docValues = Boolean.TRUE.equals(bestMatch.get("docValues"));
-                    boolean indexed = !Boolean.FALSE.equals(bestMatch.get("indexed")); // default true
-                    fieldInfos.add(new FieldInfo(fieldName, type, multiValued, stored, docValues, indexed));
+                    fieldInfos.add(extractFieldInfo(fieldName, bestMatch));
                 }
                 // If no dynamic match, we skip this field to avoid returning unknowns when schema is available
             }
@@ -485,6 +332,26 @@ public class SearchRepository {
         }
 
         return fieldInfos;
+    }
+
+    /**
+     * Finds the best matching dynamic field definition for a given field name.
+     */
+    @Nullable
+    private Map<String, Object> findBestDynamicFieldMatch(String fieldName, List<Map<String, Object>> dynamicFields) {
+        Map<String, Object> bestMatch = null;
+        int bestScore = -1; // higher is better
+        for (Map<String, Object> df : dynamicFields) {
+            String pattern = (String) df.get("name");
+            if (pattern == null) continue;
+
+            int score = dynamicMatchScore(fieldName, pattern);
+            if (score >= 0 && score > bestScore) {
+                bestScore = score;
+                bestMatch = df;
+            }
+        }
+        return bestMatch;
     }
 
     // Returns a non-negative score if fieldName matches the dynamic pattern; -1 otherwise.
@@ -506,6 +373,101 @@ public class SearchRepository {
 
         // No wildcard and not equal => does not match
         return -1;
+    }
+
+    /**
+     * Extracts FieldInfo from a schema field map.
+     */
+    private FieldInfo extractFieldInfo(String fieldName, Map<String, Object> schemaField) {
+        String type = (String) schemaField.get("type");
+        boolean multiValued = Boolean.TRUE.equals(schemaField.get("multiValued"));
+        boolean stored = !Boolean.FALSE.equals(schemaField.get("stored")); // default true
+        boolean docValues = Boolean.TRUE.equals(schemaField.get("docValues"));
+        boolean indexed = !Boolean.FALSE.equals(schemaField.get("indexed")); // default true
+        return new FieldInfo(fieldName, type, multiValued, stored, docValues, indexed);
+    }
+
+    /**
+     * Configures common query parameters for filter, fields, and rows.
+     */
+    private void configureQueryParams(ModifiableSolrParams params,
+                                      @Nullable String filterExpression,
+                                      @Nullable String fieldsCsv,
+                                      int topK) {
+        if (filterExpression != null && !filterExpression.isEmpty()) {
+            params.set("fq", filterExpression);
+        }
+        if (fieldsCsv != null && !fieldsCsv.isEmpty()) {
+            params.set("fl", fieldsCsv + "," + FIELD_SCORE);
+        } else {
+            params.set("fl", "*," + FIELD_SCORE);
+        }
+        params.set("rows", topK);
+    }
+
+    /**
+     * Configures spell check parameters.
+     */
+    private void configureSpellCheck(ModifiableSolrParams params, String query) {
+        params.set("spellcheck", "true");
+        params.set("spellcheck.q", query);
+        params.set("spellcheck.collate", "true");
+    }
+
+    /**
+     * Converts SolrDocumentList to a list of Maps, applying minScore filter and flattening multi-valued fields.
+     */
+    private List<Map<String, Object>> convertDocuments(SolrDocumentList results, @Nullable Double minScore) {
+        return results.stream()
+                .filter(doc -> passesMinScoreFilter(doc, minScore))
+                .map(this::flattenDocument)
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Checks if a document passes the minimum score filter.
+     */
+    private boolean passesMinScoreFilter(SolrDocument doc, @Nullable Double minScore) {
+        if (minScore == null) {
+            return true;
+        }
+        Object scoreObj = doc.getFieldValue(FIELD_SCORE);
+        if (scoreObj instanceof Number number) {
+            return number.doubleValue() >= minScore;
+        }
+        return true;
+    }
+
+    /**
+     * Flattens a SolrDocument to a Map, extracting first values from multi-valued fields.
+     */
+    private Map<String, Object> flattenDocument(SolrDocument doc) {
+        Map<String, Object> docMap = new HashMap<>();
+        for (String fieldName : doc.getFieldNames()) {
+            Object value = doc.getFieldValue(fieldName);
+            if (value instanceof List<?> list) {
+                if (!list.isEmpty()) {
+                    docMap.put(fieldName, list.getFirst());
+                }
+            } else {
+                docMap.put(fieldName, value);
+            }
+        }
+        return docMap;
+    }
+
+    /**
+     * Extracts spell check suggestion from query response.
+     */
+    private SearchResponse.@Nullable SpellCheckSuggestion extractSpellCheck(QueryResponse response, String originalQuery) {
+        if (response.getSpellCheckResponse() != null &&
+                response.getSpellCheckResponse().getCollatedResult() != null) {
+            String collation = response.getSpellCheckResponse().getCollatedResult();
+            if (!collation.equals(originalQuery)) {
+                return new SearchResponse.SpellCheckSuggestion(collation, originalQuery);
+            }
+        }
+        return null;
     }
 
     /**
@@ -583,7 +545,7 @@ public class SearchRepository {
                         // Convert numeric types if necessary (e.g., Long to Integer for year)
                         if ("year".equals(outKey) && v instanceof Number num) {
                             // Preserve original if fits in int
-                            copy.put(outKey, Integer.valueOf(num.intValue()));
+                            copy.put(outKey, num.intValue());
                         } else {
                             copy.put(outKey, v);
                         }

@@ -10,6 +10,7 @@ import org.apache.solr.client.solrj.response.QueryResponse;
 import org.apache.solr.client.solrj.response.UpdateResponse;
 import org.apache.solr.common.SolrDocument;
 import org.apache.solr.common.SolrInputDocument;
+import org.jspecify.annotations.NonNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.document.Document;
@@ -30,7 +31,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.UUID;
 
 import static java.util.stream.Collectors.toList;
 
@@ -101,7 +101,6 @@ public class SolrVectorStore extends AbstractObservationVectorStore {
     private final SolrClient solrClient;
     private final String collection;
     private final SolrVectorStoreOptions options;
-    private final boolean initializeSchema;
 
     /**
      * Protected constructor - use Builder to create instances.
@@ -115,9 +114,9 @@ public class SolrVectorStore extends AbstractObservationVectorStore {
         this.solrClient = builder.solrClient;
         this.collection = builder.collection;
         this.options = builder.options != null ? builder.options : SolrVectorStoreOptions.defaults();
-        this.initializeSchema = builder.initializeSchema;
+        boolean initializeSchema = builder.initializeSchema;
 
-        if (this.initializeSchema) {
+        if (initializeSchema) {
             initializeSchema();
         }
     }
@@ -147,7 +146,7 @@ public class SolrVectorStore extends AbstractObservationVectorStore {
             List<Document> documentsWithoutEmbeddings = documents.stream()
                     .filter(doc -> {
                         Object embedding = doc.getMetadata().get("embedding");
-                        return embedding == null || !(embedding instanceof float[]) || ((float[]) embedding).length == 0;
+                        return !(embedding instanceof float[]) || ((float[]) embedding).length == 0;
                     })
                     .toList();
 
@@ -196,7 +195,7 @@ public class SolrVectorStore extends AbstractObservationVectorStore {
      * @param idList list of document IDs to delete
      */
     @Override
-    public void doDelete(List<String> idList) {
+    public void doDelete(@NonNull List<String> idList) {
         try {
             UpdateResponse response = solrClient.deleteById(collection, idList, 1000);
 
@@ -217,7 +216,7 @@ public class SolrVectorStore extends AbstractObservationVectorStore {
     public List<Document> doSimilaritySearch(SearchRequest request) {
         try {
             // Validate query
-            if (request.getQuery() == null || request.getQuery().isEmpty()) {
+            if (request.getQuery().isEmpty()) {
                 throw new IllegalArgumentException("Search query cannot be null or empty");
             }
 
@@ -292,7 +291,7 @@ public class SolrVectorStore extends AbstractObservationVectorStore {
      * Creates observation context builder for metrics.
      */
     @Override
-    public VectorStoreObservationContext.Builder createObservationContextBuilder(String operationType) {
+    public VectorStoreObservationContext.Builder createObservationContextBuilder(@NonNull String operationType) {
         return VectorStoreObservationContext.builder("solr", operationType)
                 .collectionName(this.collection)
                 .dimensions(this.options.vectorDimension())
@@ -323,20 +322,14 @@ public class SolrVectorStore extends AbstractObservationVectorStore {
      * Solr expects: metadata_category:AI or metadata_year:2024
      */
     private String convertFilterToSolrQuery(Filter.Expression filterExpression) {
-        if (filterExpression == null) {
-            return null;
-        }
-        String s = filterExpression.toString();
-        if (s == null || s.isBlank()) {
-            return null;
-        }
-        s = s.trim();
+
+        String filterExpressionString = filterExpression.toString().trim();
         // If it already looks like a Solr filter (field:value or contains AND/OR with colons), pass-through
-        if (s.matches(".*\\w+\\s*:\\s*.+")) {
-            return s;
+        if (filterExpressionString.matches(".*\\w+\\s*:\\s*.+")) {
+            return filterExpressionString;
         }
         // Simple 'key == value' support
-        java.util.regex.Matcher m = java.util.regex.Pattern.compile("(?i)\\b([a-zA-Z0-9_]+)\\s*==\\s*'?([^']*)'?$").matcher(s);
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("(?i)\\b([a-zA-Z0-9_]+)\\s*==\\s*'?([^']*)'?$").matcher(filterExpressionString);
         if (m.find()) {
             String key = m.group(1);
             String value = m.group(2);
@@ -345,7 +338,7 @@ public class SolrVectorStore extends AbstractObservationVectorStore {
             }
             return key + ":" + value;
         }
-        log.warn("Unsupported filter expression, ignoring: {}", s);
+        log.warn("Unsupported filter expression, ignoring: {}", filterExpressionString);
         return null;
     }
 
@@ -353,7 +346,7 @@ public class SolrVectorStore extends AbstractObservationVectorStore {
         SolrInputDocument solrDoc = new SolrInputDocument();
 
         // Set ID
-        String id = document.getId() != null ? document.getId() : UUID.randomUUID().toString();
+        String id = document.getId();
         solrDoc.addField(options.idFieldName(), id);
 
         // Set content
@@ -362,8 +355,7 @@ public class SolrVectorStore extends AbstractObservationVectorStore {
         // Set vector embedding from metadata
         Object embeddingObj = document.getMetadata().get("embedding");
 
-        if (embeddingObj instanceof float[]) {
-            float[] embedding = (float[]) embeddingObj;
+        if (embeddingObj instanceof float[] embedding) {
             List<Float> embeddingList = new ArrayList<>();
             for (float val : embedding) {
                 embeddingList.add(val);
@@ -372,16 +364,14 @@ public class SolrVectorStore extends AbstractObservationVectorStore {
         }
 
         // Add metadata fields with prefix (skip embedding as it's stored separately)
-        if (document.getMetadata() != null) {
-            document.getMetadata().forEach((key, value) -> {
-                if (!options.idFieldName().equals(key) &&
-                    !options.contentFieldName().equals(key) &&
-                    !options.vectorFieldName().equals(key) &&
-                    !"embedding".equals(key)) {
-                    solrDoc.addField(options.metadataPrefix() + key, value);
-                }
-            });
-        }
+        document.getMetadata().forEach((key, value) -> {
+            if (!options.idFieldName().equals(key) &&
+                !options.contentFieldName().equals(key) &&
+                !options.vectorFieldName().equals(key) &&
+                !"embedding".equals(key)) {
+                solrDoc.addField(options.metadataPrefix() + key, value);
+            }
+        });
 
         return solrDoc;
     }
@@ -390,10 +380,9 @@ public class SolrVectorStore extends AbstractObservationVectorStore {
         // Handle potential multi-valued fields from Solr
         Object idObj = solrDoc.getFieldValue(options.idFieldName());
         String id = null;
-        if (idObj instanceof List) {
-            List<?> idList = (List<?>) idObj;
+        if (idObj instanceof List<?> idList) {
             if (!idList.isEmpty()) {
-                id = idList.get(0).toString();
+                id = idList.getFirst().toString();
             }
         } else if (idObj != null) {
             id = idObj.toString();
@@ -401,10 +390,9 @@ public class SolrVectorStore extends AbstractObservationVectorStore {
 
         Object contentObj = solrDoc.getFieldValue(options.contentFieldName());
         String content = null;
-        if (contentObj instanceof List) {
-            List<?> contentList = (List<?>) contentObj;
+        if (contentObj instanceof List<?> contentList) {
             if (!contentList.isEmpty()) {
-                content = contentList.get(0).toString();
+                content = contentList.getFirst().toString();
             }
         } else if (contentObj != null) {
             content = contentObj.toString();
@@ -430,24 +418,12 @@ public class SolrVectorStore extends AbstractObservationVectorStore {
                 Object metadataValue = solrDoc.getFieldValue(fieldName);
 
                 // Handle multi-valued fields - extract first value if it's a list
-                if (metadataValue instanceof List) {
-                    List<?> valueList = (List<?>) metadataValue;
+                if (metadataValue instanceof List<?> valueList) {
                     if (!valueList.isEmpty()) {
-                        Object firstValue = valueList.get(0);
-                        // Convert Long to Integer for year field
-                        if ("year".equals(metadataKey) && firstValue instanceof Long) {
-                            metadata.put(metadataKey, ((Long) firstValue).intValue());
-                        } else {
-                            metadata.put(metadataKey, firstValue);
-                        }
+                        metadata.put(metadataKey, normalizeNumericValue(valueList.getFirst()));
                     }
                 } else if (metadataValue != null) {
-                    // Convert Long to Integer for year field
-                    if ("year".equals(metadataKey) && metadataValue instanceof Long) {
-                        metadata.put(metadataKey, ((Long) metadataValue).intValue());
-                    } else {
-                        metadata.put(metadataKey, metadataValue);
-                    }
+                    metadata.put(metadataKey, normalizeNumericValue(metadataValue));
                 }
             }
         });
@@ -467,6 +443,20 @@ public class SolrVectorStore extends AbstractObservationVectorStore {
     }
 
     /**
+     * Normalizes numeric values from Solr.
+     * Solr often returns integer values as Long; this converts them back to Integer
+     * if they fit within Integer range for more natural API responses.
+     */
+    private Object normalizeNumericValue(Object value) {
+        if (value instanceof Long longValue) {
+            if (longValue >= Integer.MIN_VALUE && longValue <= Integer.MAX_VALUE) {
+                return longValue.intValue();
+            }
+        }
+        return value;
+    }
+
+    /**
      * Builder for SolrVectorStore.
      */
     public static final class Builder extends AbstractVectorStoreBuilder<Builder> {
@@ -483,11 +473,6 @@ public class SolrVectorStore extends AbstractObservationVectorStore {
 
         public Builder options(SolrVectorStoreOptions options) {
             this.options = options;
-            return this;
-        }
-
-        public Builder initializeSchema(boolean initializeSchema) {
-            this.initializeSchema = initializeSchema;
             return this;
         }
 

@@ -20,6 +20,7 @@ import java.util.Map;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -100,7 +101,7 @@ class SearchRepositoryIT extends SolrTestBase {
         assertNotNull(response, "Response should not be null");
         assertNotNull(response.documents(), "Documents list should not be null");
         // RRF combines lexical and semantic search, should return relevant documents
-        assertTrue(response.documents().size() > 0, "Should return at least some documents");
+        assertTrue(!response.documents().isEmpty(), "Should return at least some documents");
 
         // Verify documents have scores
         response.documents().forEach(doc -> {
@@ -232,8 +233,6 @@ class SearchRepositoryIT extends SolrTestBase {
         // Then
         assertNotNull(response, "Response should not be null even with no results");
         assertNotNull(response.documents(), "Documents list should not be null");
-        // With high minScore threshold, we may get no results
-        assertTrue(response.documents().size() >= 0, "Documents size should be >= 0");
     }
 
     @Test
@@ -258,11 +257,11 @@ class SearchRepositoryIT extends SolrTestBase {
         // Then
         assertNotNull(response);
         assertNotNull(response.documents());
-        assertTrue(response.documents().size() > 0, "Should return results");
+        assertFalse(response.documents().isEmpty(), "Should return results");
 
         // RRF should prioritize documents that match in both searches
         // Document with id=1 has "Spring Boot Application" in name field
-        Map<String, Object> firstDoc = response.documents().get(0);
+        Map<String, Object> firstDoc = response.documents().getFirst();
         assertNotNull(firstDoc.get("score"), "First document should have high RRF score");
 
         // Verify score is a reasonable RRF value (typically between 0 and some positive number)

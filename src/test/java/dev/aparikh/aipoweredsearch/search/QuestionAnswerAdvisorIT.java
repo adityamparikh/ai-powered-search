@@ -149,7 +149,7 @@ class QuestionAnswerAdvisorIT {
     }
 
     @AfterEach
-    void tearDown() throws Exception {
+    void tearDown() {
         // Clean up documents after each test
         try {
             solrClient.deleteByQuery(COLLECTION, "*:*");

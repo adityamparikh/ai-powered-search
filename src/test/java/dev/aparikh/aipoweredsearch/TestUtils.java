@@ -3,9 +3,7 @@ package dev.aparikh.aipoweredsearch;
 import org.apache.solr.client.solrj.SolrClient;
 import org.apache.solr.client.solrj.SolrServerException;
 import org.apache.solr.client.solrj.request.CollectionAdminRequest;
-import org.apache.solr.client.solrj.request.schema.SchemaRequest;
 import org.apache.solr.client.solrj.response.CollectionAdminResponse;
-import org.apache.solr.common.params.ModifiableSolrParams;
 
 import java.io.IOException;
 import java.util.*;
@@ -128,55 +126,4 @@ public class TestUtils {
         return embedding;
     }
 
-    /**
-     * Creates test documents with embeddings for integration testing.
-     *
-     * @param count the number of documents to create
-     * @param dimension the dimension of embeddings
-     * @return a map of document IDs to their embeddings
-     */
-    public static Map<String, List<Float>> createTestDocumentsWithEmbeddings(int count, int dimension) {
-        Map<String, List<Float>> documents = new HashMap<>();
-
-        for (int i = 0; i < count; i++) {
-            String docId = "doc-" + i;
-            String content = "Test document " + i + " with sample content for testing";
-            List<Float> embedding = generateMockEmbedding(content, dimension);
-            documents.put(docId, embedding);
-        }
-
-        return documents;
-    }
-
-    /**
-     * Waits for a Solr collection to be ready by checking its status.
-     *
-     * @param solrClient the Solr client to use
-     * @param collectionName the name of the collection
-     * @param maxWaitSeconds maximum seconds to wait
-     * @throws InterruptedException if interrupted while waiting
-     */
-    public static void waitForCollectionReady(SolrClient solrClient, String collectionName, int maxWaitSeconds)
-            throws InterruptedException {
-
-        long startTime = System.currentTimeMillis();
-        long maxWaitMillis = maxWaitSeconds * 1000L;
-
-        while (System.currentTimeMillis() - startTime < maxWaitMillis) {
-            try {
-                ModifiableSolrParams params = new ModifiableSolrParams();
-                params.set("q", "*:*");
-                params.set("rows", "0");
-
-                solrClient.query(collectionName, params);
-                // If query succeeds, collection is ready
-                return;
-            } catch (Exception e) {
-                // Collection not ready yet
-                Thread.sleep(500);
-            }
-        }
-
-        throw new RuntimeException("Collection " + collectionName + " not ready after " + maxWaitSeconds + " seconds");
-    }
 }

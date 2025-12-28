@@ -89,7 +89,7 @@ class IndexServiceTest {
         assertEquals(0, response.failed());
         assertThat(response.documentIds()).hasSize(1);
 
-        String generatedId = response.documentIds().get(0);
+        String generatedId = response.documentIds().getFirst();
         assertNotNull(generatedId);
         assertThat(generatedId).isNotEmpty();
     }

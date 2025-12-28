@@ -171,7 +171,7 @@ class SolrVectorStoreIT {
         assertThat(results).hasSizeGreaterThanOrEqualTo(1);
 
         // The first result should be the most relevant
-        Document firstResult = results.get(0);
+        Document firstResult = results.getFirst();
         assertThat(firstResult.getId()).isEqualTo("1");
         assertThat(firstResult.getText()).contains("Spring AI");
 
@@ -210,7 +210,7 @@ class SolrVectorStoreIT {
                         .build()
         );
         assertThat(aiResults).hasSize(1);
-        assertThat(aiResults.get(0).getMetadata().get("category")).isEqualTo("AI");
+        assertThat(aiResults.getFirst().getMetadata().get("category")).isEqualTo("AI");
 
         // Test filter: year == 2024 (Spring AI syntax)
         List<Document> year2024Results = vectorStore.similaritySearch(
@@ -231,7 +231,7 @@ class SolrVectorStoreIT {
                         .build()
         );
         assertThat(year2023Results).hasSize(1);
-        assertThat(year2023Results.get(0).getMetadata().get("category")).isEqualTo("Search");
+        assertThat(year2023Results.getFirst().getMetadata().get("category")).isEqualTo("Search");
     }
 
     @Test
@@ -264,8 +264,8 @@ class SolrVectorStoreIT {
                             .build()
             );
             assertThat(results).hasSize(1);
-            assertThat(results.get(0).getText()).isEqualTo("Updated content");
-            assertThat(results.get(0).getMetadata().get("version")).isEqualTo(2L);
+            assertThat(results.getFirst().getText()).isEqualTo("Updated content");
+            assertThat(results.getFirst().getMetadata().get("version")).isEqualTo(2L);
         });
     }
 
@@ -313,7 +313,7 @@ class SolrVectorStoreIT {
 
         // Should only get the top result
         assertThat(filteredResults).hasSize(1);
-        assertThat(filteredResults.get(0).getId()).isEqualTo(allResults.get(0).getId());
+        assertThat(filteredResults.getFirst().getId()).isEqualTo(allResults.getFirst().getId());
     }
 
     @Test

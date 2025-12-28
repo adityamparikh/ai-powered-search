@@ -117,7 +117,6 @@ class VectorStoreFactoryIT {
     void shouldHandleConcurrentAccess() throws InterruptedException, ExecutionException {
         // Given
         int numberOfThreads = 10;
-        int requestsPerThread = 5;
         ExecutorService executor = Executors.newFixedThreadPool(numberOfThreads);
         CountDownLatch startLatch = new CountDownLatch(1);
 
@@ -245,27 +244,25 @@ class VectorStoreFactoryIT {
         CountDownLatch completionLatch = new CountDownLatch(operations);
 
         // When - perform random cache operations concurrently
-        IntStream.range(0, operations).forEach(i -> {
-            executor.submit(() -> {
-                try {
-                    int operation = i % 4;
-                    switch (operation) {
-                        case 0 -> vectorStoreFactory.forCollection(TEST_COLLECTION_1);
-                        case 1 -> vectorStoreFactory.forCollection(TEST_COLLECTION_2);
-                        case 2 -> vectorStoreFactory.evict(TEST_COLLECTION_1);
-                        case 3 -> {
-                            if (i % 10 == 0) { // Clear cache occasionally
-                                vectorStoreFactory.clearCache();
-                            } else {
-                                vectorStoreFactory.forCollection(TEST_COLLECTION_3);
-                            }
+        IntStream.range(0, operations).forEach(i -> executor.submit(() -> {
+            try {
+                int operation = i % 4;
+                switch (operation) {
+                    case 0 -> vectorStoreFactory.forCollection(TEST_COLLECTION_1);
+                    case 1 -> vectorStoreFactory.forCollection(TEST_COLLECTION_2);
+                    case 2 -> vectorStoreFactory.evict(TEST_COLLECTION_1);
+                    case 3 -> {
+                        if (i % 10 == 0) { // Clear cache occasionally
+                            vectorStoreFactory.clearCache();
+                        } else {
+                            vectorStoreFactory.forCollection(TEST_COLLECTION_3);
                         }
                     }
-                } finally {
-                    completionLatch.countDown();
                 }
-            });
-        });
+            } finally {
+                completionLatch.countDown();
+            }
+        }));
 
         // Wait for completion
         boolean completed = completionLatch.await(30, TimeUnit.SECONDS);
