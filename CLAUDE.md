@@ -16,7 +16,7 @@ The application follows a **package-by-feature** structure organized around main
   - `SearchRepository`: Low-level Solr query execution and field introspection
   - Traditional search: Converts free-text queries into structured Solr queries using Claude AI
   - Semantic search: Uses vector embeddings (OpenAI) for similarity-based retrieval
-  - Hybrid search: Native RRF (Reciprocal Rank Fusion) combining keyword and vector signals
+  - Hybrid search: Client-side RRF (Reciprocal Rank Fusion) combining keyword and vector signals
 
 - **Indexing Domain** (`dev.aparikh.aipoweredsearch.indexing`):
   - `IndexController`: REST endpoints for document indexing
@@ -28,6 +28,11 @@ The application follows a **package-by-feature** structure organized around main
   - `VectorStoreFactory`: Factory for creating VectorStore instances
   - Implements dense vector support with HNSW (Hierarchical Navigable Small World) algorithm
   - Handles automatic embedding generation and vector similarity search
+
+- **RRF Fusion** (`dev.aparikh.aipoweredsearch.search`):
+    - `RrfMerger`: Client-side Reciprocal Rank Fusion implementation
+    - Merges keyword and vector search results using rank-based scoring
+    - Formula: `score = sum(1 / (k + rank))` with configurable k parameter (default: 60)
 
 - **Configuration** (`dev.aparikh.aipoweredsearch.config`):
     - `AiConfig`: Multi-LLM configuration for Anthropic (chat) and OpenAI (embeddings)
@@ -387,10 +392,11 @@ Documents can be indexed with automatic embedding generation via REST endpoints:
 
 **Hybrid Search (RRF)**: `GET /api/v1/search/{collection}/hybrid?query={text}`
 
-- Uses Solr's native RRF (Reciprocal Rank Fusion) to combine keyword and vector signals
+- Uses client-side RRF (Reciprocal Rank Fusion) to combine keyword and vector signals
+- Executes keyword search and vector search independently, then merges on client side
 - Best for balanced search that leverages both exact matches and semantic understanding
 - Schema-agnostic: works with any Solr collection using `_text_` catch-all field
-- Intelligent fallback: keyword-only → vector-only if no results
+- Intelligent fallback: hybrid → keyword-only → vector-only if no results
 - Example: "machine learning frameworks" (finds both exact term matches and semantically similar content)
 
 **Search Flow**:
@@ -399,13 +405,14 @@ Documents can be indexed with automatic embedding generation via REST endpoints:
 3. Executes search in Solr:
     - Traditional: BM25 keyword search
     - Semantic: KNN similarity search (topK=10 by default)
-    - Hybrid: Native RRF combining both signals
+   - Hybrid: Client-side RRF merging keyword and vector results
 4. Returns documents with scores and enhanced features (highlighting, facets, spell check)
 
 **Implementation**:
 
 - `SearchService` in `src/main/java/dev/aparikh/aipoweredsearch/search/`
-- `SearchRepository.executeHybridRerankSearch()` for RRF implementation (line 167-259)
+- `SearchRepository.executeHybridRerankSearch()` for hybrid search orchestration
+- `RrfMerger` for client-side RRF algorithm implementation
 
 ## Testing Architecture
 

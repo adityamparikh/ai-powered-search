@@ -259,7 +259,7 @@ public class SolrVectorStore extends AbstractObservationVectorStore {
             // We'll filter results after retrieval based on the threshold
 
             // Use POST method to avoid URI Too Long errors with large vector embeddings
-            query.setRequestHandler("/select");
+            query.setParam("qt", "/select");
             QueryResponse response = solrClient.query(collection, query, SolrRequest.METHOD.POST);
             List<SolrDocument> results = response.getResults();
 
@@ -319,34 +319,54 @@ public class SolrVectorStore extends AbstractObservationVectorStore {
 
     /**
      * Converts Spring AI filter expressions to Solr query syntax.
-     * Spring AI uses expressions like: category == 'AI' or year == 2024
-     * Solr expects: metadata_category:AI or metadata_year:2024
      */
     private String convertFilterToSolrQuery(Filter.Expression filterExpression) {
         if (filterExpression == null) {
             return null;
         }
-        String s = filterExpression.toString();
-        if (s == null || s.isBlank()) {
-            return null;
-        }
-        s = s.trim();
-        // If it already looks like a Solr filter (field:value or contains AND/OR with colons), pass-through
-        if (s.matches(".*\\w+\\s*:\\s*.+")) {
-            return s;
-        }
-        // Simple 'key == value' support
-        java.util.regex.Matcher m = java.util.regex.Pattern.compile("(?i)\\b([a-zA-Z0-9_]+)\\s*==\\s*'?([^']*)'?$").matcher(s);
-        if (m.find()) {
-            String key = m.group(1);
-            String value = m.group(2);
-            if (!key.startsWith(options.metadataPrefix())) {
-                key = options.metadataPrefix() + key;
+        return convertOperand(filterExpression);
+    }
+
+    private String convertOperand(Filter.Operand operand) {
+        if (operand instanceof Filter.Expression expression) {
+            return convertExpression(expression);
+        } else if (operand instanceof Filter.Group group) {
+            return "(" + convertOperand(group.content()) + ")";
+        } else if (operand instanceof Filter.Key key) {
+            String fieldName = key.key();
+            if (!fieldName.startsWith(options.metadataPrefix())) {
+                fieldName = options.metadataPrefix() + fieldName;
             }
-            return key + ":" + value;
+            return fieldName;
+        } else if (operand instanceof Filter.Value value) {
+            Object v = value.value();
+            if (v instanceof String s) {
+                return "\"" + s + "\"";
+            }
+            return String.valueOf(v);
         }
-        log.warn("Unsupported filter expression, ignoring: {}", s);
-        return null;
+        return "";
+    }
+
+    private String convertExpression(Filter.Expression expression) {
+        String left = convertOperand(expression.left());
+        String right = convertOperand(expression.right());
+
+        return switch (expression.type()) {
+            case EQ -> left + ":" + right;
+            case NE -> "-" + left + ":" + right;
+            case GT -> left + ":{" + right + " TO *]";
+            case GTE -> left + ":[" + right + " TO *]";
+            case LT -> left + ":[* TO " + right + "}";
+            case LTE -> left + ":[* TO " + right + "]";
+            case AND -> left + " AND " + right;
+            case OR -> left + " OR " + right;
+            case IN -> left + ":(" + right.replace("\"", "") + ")"; // Simplification for IN
+            default -> {
+                log.warn("Unsupported filter expression type, ignoring: {}", expression.type());
+                yield "";
+            }
+        };
     }
 
     private SolrInputDocument toSolrDocument(Document document) {

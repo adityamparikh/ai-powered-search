@@ -8,6 +8,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
+import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariables;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.anthropic.api.AnthropicApi;
 import org.springframework.ai.chat.client.ChatClient;
@@ -60,7 +61,10 @@ import static org.assertj.core.api.Assertions.assertThat;
         AiConfig.class,
         PostgresTestConfiguration.class
 })
-@EnabledIfEnvironmentVariable(named = "ANTHROPIC_API_KEY", matches = ".+")
+@EnabledIfEnvironmentVariables({
+        @EnabledIfEnvironmentVariable(named = "ANTHROPIC_API_KEY", matches = ".+"),
+        @EnabledIfEnvironmentVariable(named = "OPENAI_API_KEY", matches = ".+")
+})
 class PromptCacheMetricsAdvisorIT {
 
     @Autowired

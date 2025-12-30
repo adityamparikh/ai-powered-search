@@ -43,8 +43,6 @@ public class PromptCacheMetricsAdvisor implements BaseAdvisor {
 
     public PromptCacheMetricsAdvisor(boolean cachingEnabled) {
         this.cachingEnabled = cachingEnabled;
-        log.info("[Prompt Caching] PromptCacheMetricsAdvisor@{} initialized with cachingEnabled={}, order={}",
-                System.identityHashCode(this), cachingEnabled, getOrder());
     }
 
     /**
@@ -89,24 +87,29 @@ public class PromptCacheMetricsAdvisor implements BaseAdvisor {
 
     @Override
     public ChatClientRequest before(ChatClientRequest request, AdvisorChain advisorChain) {
-        log.info("[Prompt Caching] PromptCacheMetricsAdvisor@{}.before() invoked",
-                System.identityHashCode(this));
+        if (cachingEnabled) {
+            log.debug("[Prompt Caching] PromptCacheMetricsAdvisor@{}.before() invoked",
+                    System.identityHashCode(this));
+        }
         // Just pass through - we only care about the response
         return request;
     }
 
     @Override
     public ChatClientResponse after(ChatClientResponse response, AdvisorChain advisorChain) {
+        if (!cachingEnabled) {
+            return response;
+        }
         try {
-            log.info("[Prompt Caching] PromptCacheMetricsAdvisor@{}.after() invoked, cachingEnabled={}, response={}, chatResponse={}",
+            log.debug("[Prompt Caching] PromptCacheMetricsAdvisor@{}.after() invoked, cachingEnabled={}, response={}, chatResponse={}",
                     System.identityHashCode(this), cachingEnabled, response != null, response != null && response.chatResponse() != null);
 
             // Log cache metrics if caching is enabled
-            if (cachingEnabled && response != null && response.chatResponse() != null) {
+            if (response != null && response.chatResponse() != null) {
                 logCacheMetrics(response.chatResponse());
             }
 
-            log.info("[Prompt Caching] PromptCacheMetricsAdvisor@{}.after() END", System.identityHashCode(this));
+            log.debug("[Prompt Caching] PromptCacheMetricsAdvisor@{}.after() END", System.identityHashCode(this));
             return response;
         } catch (Exception e) {
             log.error("[Prompt Caching] PromptCacheMetricsAdvisor@{}.after() ERROR", System.identityHashCode(this), e);

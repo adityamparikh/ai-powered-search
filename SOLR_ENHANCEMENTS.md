@@ -16,34 +16,91 @@ The following enhancements have been implemented to leverage native Solr capabil
 
 ---
 
-## 1. Native RRF (Reciprocal Rank Fusion) ⚡
+## 1. Client-Side RRF (Reciprocal Rank Fusion) ⚡
 
 ### What Changed
 
-- **Before**: Used Solr's `rerank` query parser with `reRankWeight=2.0`
-- **After**: Uses native RRF query parser (available in Solr 9.8+)
+- **Before**: Attempted to use Solr's native `{!rrf}` query parser (didn't work correctly)
+- **After**: Uses client-side RRF implementation with separate keyword and vector searches
 
 ### Benefits
 
-- **Better Fusion**: RRF uses the formula `score = sum(1 / (k + rank))` which balances keyword and vector signals more
-  evenly
+- **Full Control**: Complete control over the fusion algorithm and scoring
+- **Solr Version Independent**: Works with any Solr version (not dependent on Solr 9.8+)
+- **Better Debugging**: Can inspect both result sets independently
+- **More Flexible**: Easy to tune k parameter and add custom scoring factors
 - **Rank-Based**: Focuses on rank positions rather than raw scores, which is more robust
-- **Configurable**: The `k` parameter (default: 60) allows tuning the fusion behavior
+
+### How It Works
+
+1. **Execute Keyword Search**: Run edismax query against `_text_` field
+2. **Execute Vector Search**: Run KNN query against vector field
+3. **Merge with RRF**: Combine results using formula: `score = sum(1 / (k + rank))`
+4. **Re-rank**: Sort merged results by RRF score
+
+### RRF Formula
+
+For each document:
+
+```
+rrf_score = 0
+if doc appears in keyword results:
+    rrf_score += 1 / (k + keyword_rank)
+if doc appears in vector results:
+    rrf_score += 1 / (k + vector_rank)
+
+Final results sorted by rrf_score (descending)
+```
+
+Where k = 60 (default), higher k values give more weight to lower-ranked documents.
 
 ### Implementation
 
 ```java
-// Native RRF query format
-String keywordQuery = String.format("{!edismax qf='_text_ content^2 title^5 tags^3'}%s", query);
-String vectorQuery = SolrQueryUtils.buildKnnQuery(topK * 2, vectorString);
-params.
+// Step 1: Execute keyword search
+List<Map<String, Object>> keywordResults = executeKeywordSearch(
+                collection, query, topK * 2, filterExpression, fieldsCsv);
 
-set("q",String.format("{!rrf}(%s)(%s)", keywordQuery, vectorQuery));
+// Step 2: Execute vector search
+List<Map<String, Object>> vectorResults = executeVectorSearch(
+        collection, query, topK * 2, filterExpression, fieldsCsv);
+
+// Step 3: Merge using RRF algorithm
+RrfMerger rrfMerger = new RrfMerger(); // Uses default k=60
+List<Map<String, Object>> mergedResults = rrfMerger.merge(keywordResults, vectorResults);
+
+// Step 4: Apply filters and limit
+return mergedResults.
+
+stream()
+    .
+
+filter(doc ->
+
+scoreAboveThreshold(doc, minScore))
+        .
+
+limit(topK)
+    .
+
+collect(Collectors.toList());
 ```
 
 ### Location
 
-- `SearchRepository.executeHybridRerankSearch()` (line 133-253)
+- `SearchRepository.executeHybridRerankSearch()` - Orchestrates hybrid search
+- `SearchRepository.executeKeywordSearch()` - Executes keyword component
+- `SearchRepository.executeVectorSearch()` - Executes vector component
+- `RrfMerger.merge()` - Client-side RRF algorithm implementation
+
+### Response Fields
+
+Merged documents include:
+
+- `score`: Final RRF score
+- `rrf_score`: Same as score (for transparency)
+- `keyword_score`: Original keyword search score (if document appeared in keyword results)
+- `vector_score`: Original vector similarity score (if document appeared in vector results)
 
 ---
 
