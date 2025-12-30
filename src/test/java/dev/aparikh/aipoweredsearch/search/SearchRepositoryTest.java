@@ -15,11 +15,14 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -131,15 +134,25 @@ class SearchRepositoryTest {
         // When
         searchRepository.executeHybridRerankSearch(collection, query, topK, null, null, null);
 
-        // Then
+        // Then - With client-side RRF, we make TWO separate queries (keyword + vector)
         ArgumentCaptor<SolrParams> queryCaptor = ArgumentCaptor.forClass(SolrParams.class);
-        verify(solrClient).query(eq(collection), queryCaptor.capture(), eq(SolrRequest.METHOD.POST));
+        verify(solrClient, times(2)).query(eq(collection), queryCaptor.capture(), eq(SolrRequest.METHOD.POST));
 
-        SolrParams capturedQuery = queryCaptor.getValue();
+        // Get both captured queries
+        List<SolrParams> capturedQueries = queryCaptor.getAllValues();
+        assertEquals(2, capturedQueries.size(), "Should make 2 queries: keyword and vector");
 
-        // Verify it uses catch-all field (_text_) which works with any schema
-        String q = capturedQuery.get("q");
-        assertTrue(q.contains("{!edismax qf='_text_'}"),
-                "Should use _text_ catch-all field for schema-agnostic search: " + q);
+        // First query should be keyword search using edismax with _text_ field
+        SolrParams keywordQuery = capturedQueries.get(0);
+        assertEquals("edismax", keywordQuery.get("defType"),
+                "First query should use edismax");
+        assertEquals("_text_", keywordQuery.get("qf"),
+                "Should use _text_ catch-all field for schema-agnostic keyword search");
+
+        // Second query should be vector KNN search
+        SolrParams vectorQuery = capturedQueries.get(1);
+        String vectorQ = vectorQuery.get("q");
+        assertTrue(vectorQ.contains("{!knn"),
+                "Second query should be KNN vector search: " + vectorQ);
     }
 }

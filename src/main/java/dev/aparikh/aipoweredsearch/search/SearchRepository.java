@@ -18,6 +18,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Repository;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -140,19 +141,20 @@ public class SearchRepository {
     }
 
     /**
-     * Executes hybrid search combining keyword and vector search using native RRF (Reciprocal Rank Fusion).
+     * Executes hybrid search combining keyword and vector search using client-side RRF (Reciprocal Rank Fusion).
      *
      * <p>This method implements hybrid search with intelligent fallback:
-     * 1. Attempts hybrid search using native RRF (keyword + vector fusion)
-     * 2. If no results, falls back to keyword-only search
-     * 3. If keyword fails, falls back to vector-only search
-     * 4. Combines both signals using Solr's native RRF query parser (available in Solr 9.8+)</p>
+     * 1. Executes keyword search independently (edismax)
+     * 2. Executes vector search independently (KNN)
+     * 3. Merges results using client-side RRF algorithm
+     * 4. If merged results empty, falls back to keyword-only search
+     * 5. If keyword fails, falls back to vector-only search</p>
      *
-     * <p>RRF (Reciprocal Rank Fusion) provides better fusion than reranking by:
+     * <p>RRF (Reciprocal Rank Fusion) provides better fusion than simple score averaging by:
      * <ul>
      *   <li>Using the formula: score = sum(1 / (k + rank)) for each result list</li>
-     *   <li>Balancing keyword and vector signals more evenly</li>
-     *   <li>Handling rank positions rather than raw scores</li>
+     *   <li>Balancing keyword and vector signals evenly (rank-based, not score-based)</li>
+     *   <li>Handling different scoring scales robustly</li>
      *   <li>Configurable k parameter for fusion tuning (default: 60)</li>
      * </ul></p>
      *
@@ -161,7 +163,7 @@ public class SearchRepository {
      * @param topK              number of results to return
      * @param filterExpression  optional filter query
      * @param fieldsCsv         optional comma-separated list of fields to return
-     * @param minScore          optional minimum score threshold
+     * @param minScore          optional minimum RRF score threshold
      * @return search response with hybrid-ranked documents
      */
     public SearchResponse executeHybridRerankSearch(String collection,
@@ -170,98 +172,162 @@ public class SearchRepository {
                                                     String filterExpression,
                                                     String fieldsCsv,
                                                     Double minScore) {
-        log.debug("Performing hybrid search (RRF) in collection: {} with query: {}", collection, query);
+        log.debug("Performing hybrid search (client-side RRF) in collection: {} with query: {}", collection, query);
 
         try {
-            // Step 1: Generate embedding for the query text
-            String vectorString = embeddingService.embedAndFormatForSolr(query);
+            // Step 1: Execute keyword search
+            List<Map<String, Object>> keywordResults = executeKeywordSearch(
+                    collection, query, topK * 2, filterExpression, fieldsCsv);
+            log.debug("Keyword search returned {} results", keywordResults.size());
 
-            // Step 2: Build hybrid query using native RRF
-            ModifiableSolrParams params = new ModifiableSolrParams();
+            // Step 2: Execute vector search
+            List<Map<String, Object>> vectorResults = executeVectorSearch(
+                    collection, query, topK * 2, filterExpression, fieldsCsv);
+            log.debug("Vector search returned {} results", vectorResults.size());
 
-            // Native RRF query combines keyword and vector search
-            // Format: {!rrf}({!edismax qf='_text_'}query)({!knn f=vector topK=N}[vector])
-            // Use catch-all field (_text_) which Solr automatically populates from all text fields
-            String keywordQuery = String.format("{!edismax qf='%s'}%s", FIELD_TEXT_CATCHALL, query);
-            String vectorQuery = SolrQueryUtils.buildKnnQuery(FIELD_VECTOR, topK * 2, vectorString); // Fetch more for better fusion
-            params.set("q", String.format("{!rrf}(%s)(%s)", keywordQuery, vectorQuery));
+            // Step 3: Merge using RRF algorithm
+            RrfMerger rrfMerger = new RrfMerger(); // Uses default k=60
+            List<Map<String, Object>> mergedResults = rrfMerger.merge(keywordResults, vectorResults);
+            log.debug("RRF merged results: {} unique documents", mergedResults.size());
 
-            // Apply filter expression if present
-            if (filterExpression != null && !filterExpression.isEmpty()) {
-                params.set("fq", filterExpression);
-            }
-
-            // Set fields to return
-            if (fieldsCsv != null && !fieldsCsv.isEmpty()) {
-                params.set("fl", fieldsCsv + "," + FIELD_SCORE);
-            } else {
-                params.set("fl", "*," + FIELD_SCORE);
-            }
-
-            // Set number of rows
-            params.set("rows", topK);
-
-            // Enable spell checking (works without knowing specific fields)
-            params.set("spellcheck", "true");
-            params.set("spellcheck.q", query);
-            params.set("spellcheck.collate", "true");
-
-            // Step 3: Execute query using POST to avoid URI Too Long errors with large vector embeddings
-            QueryResponse response = solrClient.query(collection, params, SolrRequest.METHOD.POST);
-
-            log.debug("Hybrid search with RRF returned {} results", response.getResults().size());
-
-            // Step 4: Convert results (apply minScore filter and handle multi-valued fields)
-            List<Map<String, Object>> documents = response.getResults().stream()
+            // Step 4: Apply minScore filter and limit to topK
+            List<Map<String, Object>> finalResults = mergedResults.stream()
                     .filter(doc -> {
                         if (minScore != null) {
-                            Object scoreObj = doc.getFieldValue("score");
+                            Object scoreObj = doc.get("score");
                             if (scoreObj instanceof Number) {
                                 return ((Number) scoreObj).doubleValue() >= minScore;
                             }
                         }
                         return true;
                     })
-                    .map(doc -> {
-                        Map<String, Object> docMap = new java.util.HashMap<>();
-                        for (String fieldName : doc.getFieldNames()) {
-                            Object value = doc.getFieldValue(fieldName);
-                            if (value instanceof List) {
-                                List<?> list = (List<?>) value;
-                                if (!list.isEmpty()) {
-                                    docMap.put(fieldName, list.get(0));
-                                }
-                            } else {
-                                docMap.put(fieldName, value);
-                            }
-                        }
-                        return docMap;
-                    })
+                    .limit(topK)
                     .collect(Collectors.toList());
 
-            // Handle spell check suggestions
-            SearchResponse.SpellCheckSuggestion spellCheckSuggestion = null;
-            if (response.getSpellCheckResponse() != null &&
-                    response.getSpellCheckResponse().getCollatedResult() != null) {
-                String collation = response.getSpellCheckResponse().getCollatedResult();
-                if (!collation.equals(query)) {
-                    spellCheckSuggestion = new SearchResponse.SpellCheckSuggestion(collation, query);
-                }
-            }
+            log.debug("Final hybrid results after filtering and limiting: {} documents", finalResults.size());
 
-            // Step 5: Implement fallback if no results
-            if (documents.isEmpty()) {
+            // Step 5: Handle spell check (from keyword search only)
+            SearchResponse.SpellCheckSuggestion spellCheckSuggestion = null;
+            // Note: We don't have spell check data here since we're using direct query execution
+            // Could enhance in future by capturing spell check from keyword search
+
+            // Step 6: Implement fallback if no results
+            if (finalResults.isEmpty()) {
                 log.warn("Hybrid search returned no results, attempting keyword-only fallback");
                 return fallbackToKeywordSearch(collection, query, topK, filterExpression, fieldsCsv, minScore);
             }
 
-            return new SearchResponse(documents, Map.of(), Map.of(), spellCheckSuggestion);
+            return new SearchResponse(finalResults, Map.of(), Map.of(), spellCheckSuggestion);
 
         } catch (Exception e) {
-            log.error("Error performing hybrid search with reranking in collection: {}", collection, e);
+            log.error("Error performing hybrid search with RRF in collection: {}", collection, e);
             log.warn("Hybrid search failed, attempting keyword-only fallback");
             return fallbackToKeywordSearch(collection, query, topK, filterExpression, fieldsCsv, minScore);
         }
+    }
+
+    /**
+     * Executes keyword-only search using edismax query parser.
+     *
+     * @param collection       the Solr collection
+     * @param query            the text query
+     * @param rows             number of results to return
+     * @param filterExpression optional filter query
+     * @param fieldsCsv        optional comma-separated list of fields to return
+     * @return list of documents with scores
+     */
+    private List<Map<String, Object>> executeKeywordSearch(String collection,
+                                                           String query,
+                                                           int rows,
+                                                           String filterExpression,
+                                                           String fieldsCsv) throws Exception {
+        ModifiableSolrParams params = new ModifiableSolrParams();
+        params.set("q", query);
+        params.set("defType", QUERY_TYPE_EDISMAX);
+        params.set("qf", FIELD_TEXT_CATCHALL);
+        params.set("rows", rows);
+
+        if (filterExpression != null && !filterExpression.isEmpty()) {
+            params.set("fq", filterExpression);
+        }
+
+        if (fieldsCsv != null && !fieldsCsv.isEmpty()) {
+            params.set("fl", fieldsCsv + "," + FIELD_SCORE);
+        } else {
+            params.set("fl", "*," + FIELD_SCORE);
+        }
+
+        QueryResponse response = solrClient.query(collection, params, SolrRequest.METHOD.POST);
+
+        return response.getResults().stream()
+                .map(doc -> {
+                    Map<String, Object> docMap = new HashMap<>();
+                    for (String fieldName : doc.getFieldNames()) {
+                        Object value = doc.getFieldValue(fieldName);
+                        if (value instanceof List) {
+                            List<?> list = (List<?>) value;
+                            if (!list.isEmpty()) {
+                                docMap.put(fieldName, list.get(0));
+                            }
+                        } else {
+                            docMap.put(fieldName, value);
+                        }
+                    }
+                    return docMap;
+                })
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Executes vector-only search using KNN query.
+     *
+     * @param collection       the Solr collection
+     * @param query            the text query (will be embedded)
+     * @param rows             number of results to return
+     * @param filterExpression optional filter query
+     * @param fieldsCsv        optional comma-separated list of fields to return
+     * @return list of documents with similarity scores
+     */
+    private List<Map<String, Object>> executeVectorSearch(String collection,
+                                                          String query,
+                                                          int rows,
+                                                          String filterExpression,
+                                                          String fieldsCsv) throws Exception {
+        String vectorString = embeddingService.embedAndFormatForSolr(query);
+
+        ModifiableSolrParams params = new ModifiableSolrParams();
+        params.set("q", SolrQueryUtils.buildKnnQuery(FIELD_VECTOR, rows, vectorString));
+        params.set("rows", rows);
+
+        if (filterExpression != null && !filterExpression.isEmpty()) {
+            params.set("fq", filterExpression);
+        }
+
+        if (fieldsCsv != null && !fieldsCsv.isEmpty()) {
+            params.set("fl", fieldsCsv + "," + FIELD_SCORE);
+        } else {
+            params.set("fl", "*," + FIELD_SCORE);
+        }
+
+        QueryResponse response = solrClient.query(collection, params, SolrRequest.METHOD.POST);
+
+        return response.getResults().stream()
+                .map(doc -> {
+                    Map<String, Object> docMap = new HashMap<>();
+                    for (String fieldName : doc.getFieldNames()) {
+                        Object value = doc.getFieldValue(fieldName);
+                        if (value instanceof List) {
+                            List<?> list = (List<?>) value;
+                            if (!list.isEmpty()) {
+                                docMap.put(fieldName, list.get(0));
+                            }
+                        } else {
+                            docMap.put(fieldName, value);
+                        }
+                    }
+                    return docMap;
+                })
+                .collect(Collectors.toList());
     }
 
     /**
