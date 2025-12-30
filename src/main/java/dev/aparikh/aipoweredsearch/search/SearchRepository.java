@@ -47,6 +47,59 @@ public class SearchRepository {
         this.embeddingService = embeddingService;
     }
 
+    /**
+     * Converts a SolrDocument to a Map, handling multi-valued fields by extracting the first value.
+     */
+    private Map<String, Object> convertSolrDocumentToMap(SolrDocument doc) {
+        Map<String, Object> docMap = new HashMap<>();
+        for (String fieldName : doc.getFieldNames()) {
+            Object value = doc.getFieldValue(fieldName);
+            if (value instanceof List) {
+                List<?> list = (List<?>) value;
+                if (!list.isEmpty()) {
+                    docMap.put(fieldName, list.get(0));
+                }
+            } else {
+                docMap.put(fieldName, value);
+            }
+        }
+        return docMap;
+    }
+
+    /**
+     * Sets up field list parameter, automatically adding score field if not already present.
+     */
+    private void setupFieldList(ModifiableSolrParams params, String fieldsCsv) {
+        if (fieldsCsv != null && !fieldsCsv.isEmpty()) {
+            params.set("fl", fieldsCsv + "," + FIELD_SCORE);
+        } else {
+            params.set("fl", "*," + FIELD_SCORE);
+        }
+    }
+
+    /**
+     * Sets up filter query parameter if provided.
+     */
+    private void setupFilterQuery(ModifiableSolrParams params, String filterExpression) {
+        if (filterExpression != null && !filterExpression.isEmpty()) {
+            params.set("fq", filterExpression);
+        }
+    }
+
+    /**
+     * Filters documents by minimum score threshold.
+     */
+    private boolean passesMinScore(Map<String, Object> doc, Double minScore) {
+        if (minScore == null) {
+            return true;
+        }
+        Object scoreObj = doc.get(FIELD_SCORE);
+        if (scoreObj instanceof Number) {
+            return ((Number) scoreObj).doubleValue() >= minScore;
+        }
+        return true;
+    }
+
     public SearchResponse search(String collection, SearchRequest searchRequest) {
         SolrQuery query = new SolrQuery(searchRequest.query());
 
@@ -109,7 +162,7 @@ public class SearchRepository {
 
             return new SearchResponse(
                     response.getResults().stream()
-                            .map(d -> new java.util.HashMap<String, Object>(d))
+                            .map(this::convertSolrDocumentToMap)
                             .collect(Collectors.toList()),
                     facetCountsMap,
                     Map.of(), // No highlighting without knowing field names
@@ -192,15 +245,7 @@ public class SearchRepository {
 
             // Step 4: Apply minScore filter and limit to topK
             List<Map<String, Object>> finalResults = mergedResults.stream()
-                    .filter(doc -> {
-                        if (minScore != null) {
-                            Object scoreObj = doc.get("score");
-                            if (scoreObj instanceof Number) {
-                                return ((Number) scoreObj).doubleValue() >= minScore;
-                            }
-                        }
-                        return true;
-                    })
+                    .filter(doc -> passesMinScore(doc, minScore))
                     .limit(topK)
                     .collect(Collectors.toList());
 
@@ -247,34 +292,13 @@ public class SearchRepository {
         params.set("qf", FIELD_TEXT_CATCHALL);
         params.set("rows", rows);
 
-        if (filterExpression != null && !filterExpression.isEmpty()) {
-            params.set("fq", filterExpression);
-        }
-
-        if (fieldsCsv != null && !fieldsCsv.isEmpty()) {
-            params.set("fl", fieldsCsv + "," + FIELD_SCORE);
-        } else {
-            params.set("fl", "*," + FIELD_SCORE);
-        }
+        setupFilterQuery(params, filterExpression);
+        setupFieldList(params, fieldsCsv);
 
         QueryResponse response = solrClient.query(collection, params, SolrRequest.METHOD.POST);
 
         return response.getResults().stream()
-                .map(doc -> {
-                    Map<String, Object> docMap = new HashMap<>();
-                    for (String fieldName : doc.getFieldNames()) {
-                        Object value = doc.getFieldValue(fieldName);
-                        if (value instanceof List) {
-                            List<?> list = (List<?>) value;
-                            if (!list.isEmpty()) {
-                                docMap.put(fieldName, list.get(0));
-                            }
-                        } else {
-                            docMap.put(fieldName, value);
-                        }
-                    }
-                    return docMap;
-                })
+                .map(this::convertSolrDocumentToMap)
                 .collect(Collectors.toList());
     }
 
@@ -299,35 +323,79 @@ public class SearchRepository {
         params.set("q", SolrQueryUtils.buildKnnQuery(FIELD_VECTOR, rows, vectorString));
         params.set("rows", rows);
 
-        if (filterExpression != null && !filterExpression.isEmpty()) {
-            params.set("fq", filterExpression);
-        }
-
-        if (fieldsCsv != null && !fieldsCsv.isEmpty()) {
-            params.set("fl", fieldsCsv + "," + FIELD_SCORE);
-        } else {
-            params.set("fl", "*," + FIELD_SCORE);
-        }
+        setupFilterQuery(params, filterExpression);
+        setupFieldList(params, fieldsCsv);
 
         QueryResponse response = solrClient.query(collection, params, SolrRequest.METHOD.POST);
 
         return response.getResults().stream()
-                .map(doc -> {
-                    Map<String, Object> docMap = new HashMap<>();
-                    for (String fieldName : doc.getFieldNames()) {
-                        Object value = doc.getFieldValue(fieldName);
-                        if (value instanceof List) {
-                            List<?> list = (List<?>) value;
-                            if (!list.isEmpty()) {
-                                docMap.put(fieldName, list.get(0));
-                            }
-                        } else {
-                            docMap.put(fieldName, value);
-                        }
-                    }
-                    return docMap;
-                })
+                .map(this::convertSolrDocumentToMap)
                 .collect(Collectors.toList());
+    }
+
+    /**
+     * Executes a fallback search strategy (keyword or vector).
+     */
+    private SearchResponse executeFallbackSearch(String collection,
+                                                 String query,
+                                                 int topK,
+                                                 String filterExpression,
+                                                 String fieldsCsv,
+                                                 Double minScore,
+                                                 boolean useVector) {
+        try {
+            ModifiableSolrParams params = new ModifiableSolrParams();
+
+            if (useVector) {
+                log.debug("Attempting vector-only search fallback");
+                String vectorString = embeddingService.embedAndFormatForSolr(query);
+                params.set("q", SolrQueryUtils.buildKnnQuery(FIELD_VECTOR, topK, vectorString));
+            } else {
+                log.debug("Attempting keyword-only search fallback");
+                params.set("q", query);
+                params.set("defType", QUERY_TYPE_EDISMAX);
+                params.set("qf", FIELD_TEXT_CATCHALL);
+            }
+
+            setupFilterQuery(params, filterExpression);
+            setupFieldList(params, fieldsCsv);
+            params.set("rows", topK);
+
+            QueryResponse response = solrClient.query(collection, params, SolrRequest.METHOD.POST);
+
+            List<Map<String, Object>> documents = response.getResults().stream()
+                    .filter(doc -> {
+                        if (minScore != null) {
+                            Object scoreObj = doc.getFieldValue(FIELD_SCORE);
+                            if (scoreObj instanceof Number) {
+                                return ((Number) scoreObj).doubleValue() >= minScore;
+                            }
+                        }
+                        return true;
+                    })
+                    .map(this::convertSolrDocumentToMap)
+                    .collect(Collectors.toList());
+
+            if (documents.isEmpty() && !useVector) {
+                log.warn("Keyword search fallback returned no results, attempting vector-only search");
+                return executeFallbackSearch(collection, query, topK, filterExpression, fieldsCsv, minScore, true);
+            }
+
+            String searchType = useVector ? "Vector-only" : "Keyword-only";
+            log.info("{} fallback returned {} results", searchType, documents.size());
+            return new SearchResponse(documents, Map.of(), Map.of(), null);
+
+        } catch (Exception e) {
+            if (!useVector) {
+                log.error("Keyword search fallback failed", e);
+                log.warn("Attempting vector-only search as last resort");
+                return executeFallbackSearch(collection, query, topK, filterExpression, fieldsCsv, minScore, true);
+            } else {
+                log.error("All search strategies failed (hybrid, keyword, vector)", e);
+                // Return empty results rather than throwing exception
+                return new SearchResponse(new ArrayList<>(), Map.of(), Map.of(), null);
+            }
+        }
     }
 
     /**
@@ -340,134 +408,7 @@ public class SearchRepository {
                                                    String filterExpression,
                                                    String fieldsCsv,
                                                    Double minScore) {
-        try {
-            log.debug("Attempting keyword-only search fallback");
-            ModifiableSolrParams params = new ModifiableSolrParams();
-            params.set("q", query);
-            params.set("defType", QUERY_TYPE_EDISMAX);
-            params.set("qf", FIELD_TEXT_CATCHALL);
-
-            if (filterExpression != null && !filterExpression.isEmpty()) {
-                params.set("fq", filterExpression);
-            }
-
-            if (fieldsCsv != null && !fieldsCsv.isEmpty()) {
-                params.set("fl", fieldsCsv + ",score");
-            } else {
-                params.set("fl", "*,score");
-            }
-
-            params.set("rows", topK);
-
-            QueryResponse response = solrClient.query(collection, params, SolrRequest.METHOD.POST);
-
-            List<Map<String, Object>> documents = response.getResults().stream()
-                    .filter(doc -> {
-                        if (minScore != null) {
-                            Object scoreObj = doc.getFieldValue("score");
-                            if (scoreObj instanceof Number) {
-                                return ((Number) scoreObj).doubleValue() >= minScore;
-                            }
-                        }
-                        return true;
-                    })
-                    .map(doc -> {
-                        Map<String, Object> docMap = new java.util.HashMap<>();
-                        for (String fieldName : doc.getFieldNames()) {
-                            Object value = doc.getFieldValue(fieldName);
-                            if (value instanceof List) {
-                                List<?> list = (List<?>) value;
-                                if (!list.isEmpty()) {
-                                    docMap.put(fieldName, list.get(0));
-                                }
-                            } else {
-                                docMap.put(fieldName, value);
-                            }
-                        }
-                        return docMap;
-                    })
-                    .collect(Collectors.toList());
-
-            if (documents.isEmpty()) {
-                log.warn("Keyword search fallback returned no results, attempting vector-only search");
-                return fallbackToVectorSearch(collection, query, topK, filterExpression, fieldsCsv, minScore);
-            }
-
-            log.info("Keyword-only fallback succeeded with {} results", documents.size());
-            return new SearchResponse(documents, new java.util.HashMap<>());
-
-        } catch (Exception e) {
-            log.error("Keyword search fallback failed", e);
-            log.warn("Attempting vector-only search as last resort");
-            return fallbackToVectorSearch(collection, query, topK, filterExpression, fieldsCsv, minScore);
-        }
-    }
-
-    /**
-     * Last resort fallback to vector-only search.
-     */
-    private SearchResponse fallbackToVectorSearch(String collection,
-                                                  String query,
-                                                  int topK,
-                                                  String filterExpression,
-                                                  String fieldsCsv,
-                                                  Double minScore) {
-        try {
-            log.debug("Attempting vector-only search fallback");
-            String vectorString = embeddingService.embedAndFormatForSolr(query);
-
-            ModifiableSolrParams params = new ModifiableSolrParams();
-            params.set("q", SolrQueryUtils.buildKnnQuery(topK, vectorString));
-
-            if (filterExpression != null && !filterExpression.isEmpty()) {
-                params.set("fq", filterExpression);
-            }
-
-            if (fieldsCsv != null && !fieldsCsv.isEmpty()) {
-                params.set("fl", fieldsCsv + ",score");
-            } else {
-                params.set("fl", "*,score");
-            }
-
-            params.set("rows", topK);
-
-            QueryResponse response = solrClient.query(collection, params, SolrRequest.METHOD.POST);
-
-            List<Map<String, Object>> documents = response.getResults().stream()
-                    .filter(doc -> {
-                        if (minScore != null) {
-                            Object scoreObj = doc.getFieldValue("score");
-                            if (scoreObj instanceof Number) {
-                                return ((Number) scoreObj).doubleValue() >= minScore;
-                            }
-                        }
-                        return true;
-                    })
-                    .map(doc -> {
-                        Map<String, Object> docMap = new java.util.HashMap<>();
-                        for (String fieldName : doc.getFieldNames()) {
-                            Object value = doc.getFieldValue(fieldName);
-                            if (value instanceof List) {
-                                List<?> list = (List<?>) value;
-                                if (!list.isEmpty()) {
-                                    docMap.put(fieldName, list.get(0));
-                                }
-                            } else {
-                                docMap.put(fieldName, value);
-                            }
-                        }
-                        return docMap;
-                    })
-                    .collect(Collectors.toList());
-
-            log.info("Vector-only fallback returned {} results", documents.size());
-            return new SearchResponse(documents, new java.util.HashMap<>());
-
-        } catch (Exception e) {
-            log.error("All search strategies failed (hybrid, keyword, vector)", e);
-            // Return empty results rather than throwing exception
-            return new SearchResponse(new java.util.ArrayList<>(), new java.util.HashMap<>());
-        }
+        return executeFallbackSearch(collection, query, topK, filterExpression, fieldsCsv, minScore, false);
     }
 
     /**
