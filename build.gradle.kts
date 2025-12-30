@@ -80,6 +80,7 @@ dependencyManagement {
 tasks.withType<Test> {
     useJUnitPlatform()
     finalizedBy(tasks.jacocoTestReport)
+    maxHeapSize = "2g"
 }
 
 tasks.withType<JavaCompile> {
