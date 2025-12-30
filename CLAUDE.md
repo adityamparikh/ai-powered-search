@@ -69,7 +69,7 @@ fields at runtime and adapts accordingly.
 
 The application leverages advanced Apache Solr features for enhanced search quality and user experience:
 
-- **Native RRF (Reciprocal Rank Fusion)**: Balanced fusion of keyword and vector search (Solr 9.8+)
+- **Client-side RRF (Reciprocal Rank Fusion)**: Balanced fusion of keyword and vector search using client-side merging
 - **Highlighting**: Shows users why results matched their query
 - **Faceting**: Filter and aggregate results by category, year, etc.
 - **Spell Checking**: "Did you mean...?" suggestions for misspelled queries
@@ -390,29 +390,64 @@ Documents can be indexed with automatic embedding generation via REST endpoints:
 - Combines AI-powered filter parsing with vector similarity
 - Example: "comfortable running shoes under $100"
 
-**Hybrid Search (RRF)**: `GET /api/v1/search/{collection}/hybrid?query={text}`
+**Hybrid Search (RRF)**:
+`GET /api/v1/search/{collection}/hybrid?query={text}&k={topK}&minScore={threshold}&fields={csv}`
 
 - Uses client-side RRF (Reciprocal Rank Fusion) to combine keyword and vector signals
 - Executes keyword search and vector search independently, then merges on client side
 - Best for balanced search that leverages both exact matches and semantic understanding
 - Schema-agnostic: works with any Solr collection using `_text_` catch-all field
 - Intelligent fallback: hybrid → keyword-only → vector-only if no results
+- Parameters:
+    - `k`: topK results (defaults to 100)
+    - `minScore`: minimum RRF score threshold
+    - `fields`: comma-separated list of fields to return
 - Example: "machine learning frameworks" (finds both exact term matches and semantically similar content)
+
+**RAG Question Answering**: `POST /api/v1/search/ask`
+
+Request body:
+
+```json
+{
+  "question": "What are the benefits of Spring Boot?",
+  "conversationId": "optional-session-id"
+}
+```
+
+Response:
+
+```json
+{
+  "answer": "Generated answer based on retrieved context",
+  "conversationId": "session-id",
+  "sources": []
+}
+```
+
+- Uses QuestionAnswerAdvisor to automatically retrieve relevant documents from VectorStore
+- Claude generates conversational answers based on retrieved context
+- Maintains conversation history for follow-up questions
+- Reduces hallucinations by grounding answers in indexed documents
+- Example: "How does dependency injection work in Spring?"
 
 **Search Flow**:
 1. Claude AI parses natural language filters and search intent
 2. For semantic/hybrid search: generates query embedding using OpenAI
 3. Executes search in Solr:
     - Traditional: BM25 keyword search
-    - Semantic: KNN similarity search (topK=10 by default)
+   - Semantic: KNN similarity search (topK=50 by default)
    - Hybrid: Client-side RRF merging keyword and vector results
-4. Returns documents with scores and enhanced features (highlighting, facets, spell check)
+4. For RAG: QuestionAnswerAdvisor retrieves context and injects into prompt
+5. Returns documents with scores and enhanced features (highlighting, facets, spell check)
 
 **Implementation**:
 
 - `SearchService` in `src/main/java/dev/aparikh/aipoweredsearch/search/`
 - `SearchRepository.executeHybridRerankSearch()` for hybrid search orchestration
 - `RrfMerger` for client-side RRF algorithm implementation
+- `SearchService.ask()` for RAG question answering
+- `AiConfig.ragChatClient` bean with QuestionAnswerAdvisor configuration
 
 ## Testing Architecture
 
@@ -428,9 +463,11 @@ The project has comprehensive test coverage across four levels:
 
 2. **Integration Tests** (`@SpringBootTest` with Testcontainers)
    - Full application context tests: `SearchIntegrationTest`, `IndexIntegrationTest`
+   - Search functionality tests: `SemanticAndHybridSearchIntegrationTest`, `RagQuestionAnswerIntegrationTest`
    - Uses Testcontainers for Solr, ZooKeeper, and PostgreSQL
    - Tests complete request/response cycles
    - Verifies actual database interactions
+   - Requires ANTHROPIC_API_KEY and OPENAI_API_KEY for semantic/hybrid/RAG tests
 
 3. **Vector Store Tests** (Requires OpenAI API key)
    - `SolrVectorStoreIT`: Tests vector store operations
@@ -464,6 +501,12 @@ The project has comprehensive test coverage across four levels:
 # Run specific test classes
 ./gradlew test --tests "SearchIntegrationTest"
 ./gradlew test --tests "IndexServiceTest"
+
+# Run semantic/hybrid search integration tests (requires API keys)
+./gradlew test --tests "SemanticAndHybridSearchIntegrationTest"
+
+# Run RAG integration tests (requires API keys)
+./gradlew test --tests "RagQuestionAnswerIntegrationTest"
 
 # Run with detailed output
 ./gradlew test --tests "SolrVectorStoreIT" --info
@@ -588,25 +631,33 @@ with Jetty 12.x.
 ### Vector Search POST Method
 Vector searches use POST method to avoid "URI too long" errors when sending large embedding arrays (1536 dimensions).
 
-### Hybrid Search with RRF
+### Hybrid Search with Client-Side RRF
 
-The `executeHybridRerankSearch()` method in `SearchRepository` implements native RRF:
+The `executeHybridRerankSearch()` method in `SearchRepository` implements client-side RRF:
 
 ```java
-// Native RRF combines keyword and vector search
-String keywordQuery = String.format("{!edismax qf='_text_'}%s", query);
-String vectorQuery = SolrQueryUtils.buildKnnQuery("vector", topK * 2, vectorString);
-params.
+// Step 1: Execute keyword search independently
+List<Map<String, Object>> keywordResults = executeKeywordSearch(
+                collection, query, topK * 2, filterExpression, fieldsCsv);
 
-set("q",String.format("{!rrf}(%s)(%s)", keywordQuery, vectorQuery));
+// Step 2: Execute vector search independently
+List<Map<String, Object>> vectorResults = executeVectorSearch(
+        collection, query, topK * 2, filterExpression, fieldsCsv);
+
+// Step 3: Merge using RRF algorithm
+RrfMerger rrfMerger = new RrfMerger(); // Uses default k=60
+List<Map<String, Object>> mergedResults = rrfMerger.merge(keywordResults, vectorResults);
 ```
 
 **Key features**:
 
-- Uses Solr's `{!rrf}` query parser (Solr 9.8+)
-- Fetches `topK * 2` results for better fusion
+- Uses client-side RRF merging via `RrfMerger` class
+- RRF formula: `score = sum(1 / (k + rank))` with configurable k parameter (default: 60)
+- Executes keyword (edismax) and vector (KNN) searches independently
+- Fetches `topK * 2` results from each search for better fusion quality
 - Schema-agnostic using `_text_` catch-all field
 - Intelligent fallback: hybrid → keyword → vector if no results
+- Applies minScore filtering and topK limiting after fusion
 
 ### Observation and Metrics
 The `SolrVectorStore` extends `AbstractObservationVectorStore` for integration with Micrometer:
@@ -614,10 +665,51 @@ The `SolrVectorStore` extends `AbstractObservationVectorStore` for integration w
 - Monitors similarity search performance
 - Provides metrics for observability platforms
 
+### RAG Configuration
+
+The RAG (Retrieval-Augmented Generation) feature uses a dedicated `ragChatClient` bean configured in `AiConfig`:
+
+```java
+
+@Bean
+@Qualifier("ragChatClient")
+public ChatClient ragChatClient(ChatModel chatModel,
+                                ChatMemory chatMemory,
+                                VectorStore vectorStore,
+                                ...) {
+    return ChatClient.builder(chatModel)
+            .defaultAdvisors(
+                    QuestionAnswerAdvisor.builder(vectorStore)
+                            .searchRequest(SearchRequest.builder()
+                                    .topK(5)
+                                    .similarityThreshold(0.3)
+                                    .build())
+                            .build(),
+                    MessageChatMemoryAdvisor.builder(chatMemory).build(),
+                    SimpleLoggerAdvisor.builder().build(),
+                    PromptCacheMetricsAdvisor.builder()
+                            .cachingEnabled(cachingEnabled)
+                            .build()
+            )
+            .build();
+}
+```
+
+**Key components**:
+
+- **QuestionAnswerAdvisor**: Automatically retrieves relevant documents from VectorStore based on question
+- **MessageChatMemoryAdvisor**: Maintains conversation context across multiple questions
+- **SimpleLoggerAdvisor**: Logs prompts and responses for debugging
+- **PromptCacheMetricsAdvisor**: Tracks Anthropic prompt caching metrics
+- **VectorStore**: Default collection configured via `solr.default.collection` property (defaults to "books")
+- **Search parameters**: topK=5, similarityThreshold=0.3 (lower threshold for better recall)
+
 ### Chat Memory
-- Conversation ID is hardcoded as "007" in the application
+
+- Conversation ID defaults to "default" if not provided in AskRequest
 - PostgreSQL-backed for persistence across restarts
 - Schema auto-initialization enabled via `spring.ai.chat.memory.repository.jdbc.initialize-schema=always`
+- Allows multi-turn conversations where context is maintained
 
 ### Virtual Threads
 The application uses Java virtual threads (`spring.threads.virtual.enabled=true`) for improved concurrency handling.

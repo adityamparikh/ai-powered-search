@@ -10,10 +10,11 @@ This guide provides comprehensive documentation on the vector store implementati
 4. [Embedding Generation](#embedding-generation)
 5. [Indexing Documents](#indexing-documents)
 6. [Semantic Search](#semantic-search)
-7. [Keyword Search](#keyword-search)
-8. [Configuration](#configuration)
-9. [API Reference](#api-reference)
-10. [Examples](#examples)
+7. [Hybrid Search](#hybrid-search)
+8. [Keyword Search](#keyword-search)
+9. [Configuration](#configuration)
+10. [API Reference](#api-reference)
+11. [Examples](#examples)
 
 ## Overview
 
@@ -483,6 +484,112 @@ SearchRequest.query(query)
   ]
 }
 ```
+
+## Hybrid Search
+
+### Client-Side RRF Implementation
+
+**Location**: `src/main/java/dev/aparikh/aipoweredsearch/search/SearchService.java`
+
+#### Hybrid Search Method
+
+```java
+public SearchResponse hybridSearch(String collection, String query,
+                                   Integer k, Double minScore, String fieldsCsv)
+```
+
+**Process**:
+
+1. Parse query parameters (topK default: 100)
+2. Generate filters using Claude AI (optional)
+3. Execute hybrid search via SearchRepository
+4. Apply client-side RRF merging
+5. Return re-ranked results
+
+### RRF (Reciprocal Rank Fusion)
+
+**Location**: `src/main/java/dev/aparikh/aipoweredsearch/search/RrfMerger.java`
+
+**Formula**: `rrf_score = sum(1 / (k + rank))`
+
+- k=60 (default) - prevents early ranks from dominating
+- rank is 1-indexed position in each result list
+
+**Example Calculation**:
+Document appears at rank 3 in keyword search and rank 5 in vector search:
+
+```
+rrf_score = 1/(60+3) + 1/(60+5) = 0.0159 + 0.0154 = 0.0313
+```
+
+### Execution Flow
+
+**SearchRepository.executeHybridRerankSearch()**:
+
+1. **Parallel Search Execution**:
+   ```java
+   // Keyword search with edismax and _text_ field
+   List<Map<String, Object>> keywordResults = executeKeywordSearch(
+       collection, query, topK * 2, filterExpression, fieldsCsv);
+
+   // Vector search with KNN
+   List<Map<String, Object>> vectorResults = executeVectorSearch(
+       collection, query, topK * 2, filterExpression, fieldsCsv);
+   ```
+
+2. **RRF Merging**:
+   ```java
+   RrfMerger rrfMerger = new RrfMerger(); // k=60
+   List<Map<String, Object>> mergedResults =
+       rrfMerger.merge(keywordResults, vectorResults);
+   ```
+
+3. **Filtering & Limiting**:
+    - Apply minScore threshold if provided
+    - Limit to topK results
+    - Sort by RRF score (descending)
+
+### Fallback Strategy
+
+Intelligent fallback ensures robust search:
+
+1. Try hybrid search first
+2. If no results → fallback to keyword-only search
+3. If still no results → fallback to vector-only search
+4. Returns empty results only if all strategies fail
+
+### API Usage
+
+**Request**:
+
+```
+GET /api/v1/search/books/hybrid?query=machine learning&k=50&minScore=0.01
+```
+
+**Response**:
+
+```json
+{
+  "documents": [
+    {
+      "id": "doc-123",
+      "content": "...",
+      "score": 0.0313,        // RRF score
+      "rrf_score": 0.0313,    // Same as score
+      "keyword_score": 8.5,   // Original BM25 score
+      "vector_score": 0.89    // Original cosine similarity
+    }
+  ]
+}
+```
+
+### Benefits
+
+- **Balanced Results**: Combines lexical precision with semantic understanding
+- **Schema-Agnostic**: Uses `_text_` catch-all field, works with any schema
+- **Robust**: Graceful degradation with fallback strategy
+- **Full Control**: Client-side implementation allows tuning
+- **Transparent Scoring**: Includes original scores for debugging
 
 ## Keyword Search
 

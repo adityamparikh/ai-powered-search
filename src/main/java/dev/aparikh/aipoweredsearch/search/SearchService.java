@@ -11,12 +11,17 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.memory.ChatMemory;
+import org.springframework.ai.document.Document;
+import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Service;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * Service layer for AI-enhanced search operations.
@@ -50,7 +55,6 @@ public class SearchService {
     private final Logger log = LoggerFactory.getLogger(SearchService.class);
 
     private final Resource systemResource;
-    private final Resource semanticSystemResource;
     private final SearchRepository searchRepository;
     private final ChatClient chatClient;
     private final ChatClient ragChatClient;
@@ -60,20 +64,17 @@ public class SearchService {
      * Constructs a new SearchService with required dependencies.
      *
      * @param systemResource the system prompt template for traditional search query generation
-     * @param semanticSystemResource the system prompt template for semantic search filter parsing
      * @param searchRepository the repository for low-level Solr operations
      * @param chatClient the ChatClient configured for search query generation
      * @param ragChatClient the ChatClient configured with QuestionAnswerAdvisor for RAG
      * @param vectorStoreFactory the factory to obtain per-collection VectorStore instances
      */
     public SearchService(@Value("classpath:/prompts/system-message.st") Resource systemResource,
-                         @Value("classpath:/prompts/semantic-search-system-message.st") Resource semanticSystemResource,
                          SearchRepository searchRepository,
                          @Qualifier("searchChatClient") ChatClient chatClient,
                          @Qualifier("ragChatClient") ChatClient ragChatClient,
                          VectorStoreFactory vectorStoreFactory) {
         this.systemResource = systemResource;
-        this.semanticSystemResource = semanticSystemResource;
         this.searchRepository = searchRepository;
         this.chatClient = chatClient;
         this.ragChatClient = ragChatClient;
@@ -124,41 +125,12 @@ public class SearchService {
         return searchRepository.search(collection, searchRequest);
     }
 
-    /**
-     * Performs semantic search using vector similarity.
-     *
-     * <p>This method:
-     * <ol>
-     *   <li>Uses Claude AI to parse natural language filters from the query</li>
-     *   <li>Generates a vector embedding from the free text query using OpenAI (automatically by VectorStore)</li>
-     *   <li>Executes vector similarity search in Solr with KNN using VectorStore</li>
-     *   <li>Returns semantically similar results ranked by cosine similarity</li>
-     * </ol>
-     * </p>
-     *
-     * @param collection    the Solr collection to search
-     * @param freeTextQuery the natural language search query
-     * @return search response with semantically similar documents
-     */
-    public SearchResponse semanticSearch(String collection, String freeTextQuery) {
-        return semanticSearch(collection, freeTextQuery, null, null);
-    }
-
-    /**
-     * Performs semantic search using vector similarity with optional tuning parameters.
-     *
-     * @param collection    the Solr collection to search
-     * @param freeTextQuery the natural language search query
-     * @param k             optional topK results to return
-     * @param minScore      optional minimum similarity score threshold [0..1]
-     * @return search response with semantically similar documents
-     */
-    public SearchResponse semanticSearch(String collection, String freeTextQuery, Integer k, Double minScore) {
-        return semanticSearch(collection, freeTextQuery, k, minScore, null);
-    }
 
     /**
      * Performs semantic search using vector similarity with optional tuning parameters and field selection.
+     *
+     * <p>This method leverages {@link SolrVectorStore#doSimilaritySearch} to avoid code duplication
+     * and benefit from the observability features of {@link org.springframework.ai.vectorstore.observation.AbstractObservationVectorStore}.
      *
      * @param collection    the Solr collection to search
      * @param freeTextQuery the natural language search query
@@ -171,29 +143,31 @@ public class SearchService {
         validateSearchInputs(collection, freeTextQuery);
         log.debug("Semantic search for collection: {}, query: {}, k: {}, minScore: {}, fields: {}", collection, freeTextQuery, k, minScore, fieldsCsv);
 
-        // Step 1 & 2: Optionally generate filters with AI (currently not applied to maximize recall)
-        // We still parse with AI for future use, but we intentionally do NOT apply filters to
-        // semantic search here because overly aggressive filters can suppress relevant results
-        // for short/natural queries like "scary" or "supernatural" in tests.
-        String userMessage = buildQueryUserMessage(freeTextQuery, collection);
-        QueryGenerationResponse queryGenerationResponse = generateQueryWithAI(semanticSystemResource, userMessage);
-        String filterExpression = null; // ignore AI filters for semantic search endpoint
-
-        // Step 4: Execute semantic search using SearchRepository for Solr-native filter support
-        // This bypasses Spring AI's FilterExpressionTextParser which cannot handle Solr range syntax
         // Use a higher default topK to improve recall for short/natural queries
         int topK = (k != null && k > 0) ? k : 50;
+        double similarityThreshold = (minScore != null) ? minScore : 0.0;
 
-        // Important: Use the original freeTextQuery for embeddings to preserve semantic intent/recall.
-        // We still apply any parsed filters from the AI on Solr side.
-        return searchRepository.semanticSearch(
-                collection,
-                freeTextQuery,
-                topK,
-                filterExpression,
-                fieldsCsv,
-                minScore
-        );
+        // Build Spring AI SearchRequest - leverages VectorStore's built-in search capabilities
+        // Note: We don't apply AI-generated filters here to maximize recall for semantic search
+        org.springframework.ai.vectorstore.SearchRequest searchRequest =
+                org.springframework.ai.vectorstore.SearchRequest.builder()
+                        .query(freeTextQuery)
+                        .topK(topK)
+                        .similarityThreshold(similarityThreshold)
+                        .build();
+
+        // Get VectorStore for the collection and execute similarity search
+        // This delegates to SolrVectorStore.doSimilaritySearch() which has:
+        // - Observability/metrics support via AbstractObservationVectorStore
+        // - Proper embedding generation
+        // - KNN query execution
+        VectorStore vectorStore = vectorStoreFactory.forCollection(collection);
+        List<Document> documents = vectorStore.similaritySearch(searchRequest);
+
+        log.debug("Semantic search returned {} documents", documents.size());
+
+        // Convert Spring AI Documents to SearchResponse format
+        return toSearchResponse(documents, fieldsCsv);
     }
 
     /**
@@ -361,5 +335,71 @@ public class SearchService {
             return String.join(" AND ", filterQueries);
         }
         return null;
+    }
+
+    /**
+     * Converts Spring AI Documents to SearchResponse format.
+     *
+     * <p>This method transforms the VectorStore search results into the API response format,
+     * handling metadata extraction and optional field filtering.
+     *
+     * @param documents the Spring AI Documents from VectorStore search
+     * @param fieldsCsv optional comma-separated list of fields to include (null = all fields)
+     * @return SearchResponse with converted documents
+     */
+    private SearchResponse toSearchResponse(List<Document> documents, String fieldsCsv) {
+        // Parse requested fields if provided
+        List<String> requestedFields = null;
+        if (fieldsCsv != null && !fieldsCsv.isBlank()) {
+            requestedFields = List.of(fieldsCsv.split(","));
+        }
+        final List<String> fieldsToInclude = requestedFields;
+
+        List<Map<String, Object>> documentMaps = documents.stream()
+                .map(doc -> {
+                    Map<String, Object> docMap = new HashMap<>();
+
+                    // Always include id
+                    if (doc.getId() != null) {
+                        docMap.put("id", doc.getId());
+                    }
+
+                    // Include content if requested or no filter specified
+                    if (fieldsToInclude == null || fieldsToInclude.contains("content")) {
+                        if (doc.getText() != null) {
+                            docMap.put("content", doc.getText());
+                        }
+                    }
+
+                    // Include metadata fields
+                    if (doc.getMetadata() != null) {
+                        doc.getMetadata().forEach((key, value) -> {
+                            // Skip the embedding field - it's internal
+                            if ("embedding".equals(key)) {
+                                return;
+                            }
+
+                            // Strip metadata_ prefix if present (for consistency with previous API)
+                            String outputKey = key.startsWith("metadata_")
+                                    ? key.substring("metadata_".length())
+                                    : key;
+
+                            // Include if no filter or field is in filter list
+                            if (fieldsToInclude == null || fieldsToInclude.contains(outputKey) || fieldsToInclude.contains(key)) {
+                                // Handle type conversions (e.g., Long to Integer for year)
+                                if ("year".equals(outputKey) && value instanceof Long) {
+                                    docMap.put(outputKey, ((Long) value).intValue());
+                                } else {
+                                    docMap.put(outputKey, value);
+                                }
+                            }
+                        });
+                    }
+
+                    return docMap;
+                })
+                .collect(Collectors.toList());
+
+        return new SearchResponse(documentMaps, Map.of());
     }
 }

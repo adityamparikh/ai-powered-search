@@ -569,43 +569,77 @@ public SearchResponse search(String collection, String freeTextQuery)
 
 #### Method 2: Semantic Search (Vector Similarity)
 ```java
-public SearchResponse semanticSearch(String collection, String freeTextQuery)
+public SearchResponse semanticSearch(String collection, String freeTextQuery,
+                                     Integer k, Double minScore, String fieldsCsv)
 ```
 
 **Flow:**
-1. **Schema Retrieval**: Same as keyword search
 
-2. **Claude AI Filter Generation**:
-   - Uses semantic search system prompt from `classpath:/prompts/semantic-search-system-message.st`
-   - Claude analyzes query intent and generates filter queries
-   - Does NOT generate main search query (vector search handles semantic meaning)
-   - Returns filter queries (fq), sort, field list, facets
+1. **Parameter Validation**:
+    - Validates collection and query inputs
+    - Sets topK to k (default: 50 for better recall)
+    - Sets similarityThreshold to minScore (default: 0.0)
 
-3. **Filter Expression Building**:
-   - Combines filter queries into single filter expression
-   - Example: `["category:framework", "year:[2020 TO *]"]` → `"category:framework AND year:[2020 TO *]"`
-
-4. **Vector Search Execution**:
-   - Create SolrVectorStore instance
-   - Build SearchRequest:
+2. **Vector Store Search**:
+    - Gets VectorStore instance for collection via VectorStoreFactory
+    - Build Spring AI SearchRequest:
      ```java
-     org.springframework.ai.vectorstore.SearchRequest searchRequest = 
+     org.springframework.ai.vectorstore.SearchRequest searchRequest =
          org.springframework.ai.vectorstore.SearchRequest.builder()
-             .query(freeTextQuery)           // Query text to embed
-             .topK(10)                       // Return 10 nearest neighbors
-             .filterExpression(filterExpression)  // Apply filters
+             .query(freeTextQuery)                // Query text to embed
+             .topK(topK)                         // Return topK nearest neighbors
+             .similarityThreshold(similarityThreshold) // Min similarity score
              .build();
      ```
    - Call `vectorStore.similaritySearch(searchRequest)`
-   - VectorStore automatically:
-     - Generates embedding from query text
-     - Executes KNN query in Solr
+    - VectorStore (SolrVectorStore) automatically:
+        - Generates 1536-dim embedding using OpenAI text-embedding-3-small
+        - Executes KNN query in Solr using HNSW algorithm
      - Returns similar documents ranked by cosine similarity
 
-5. **Response Conversion**:
+3. **Response Conversion**:
    - Convert Spring AI Documents to SearchResponse format
-   - Include id, content, metadata, and score
-   - Note: Faceting not currently supported in VectorStore
+   - Include only requested fields (if fieldsCsv provided)
+   - Include id, content, metadata, and similarity score
+   - Note: No Claude AI involvement - pure vector similarity search
+   - Note: No filter generation - maximizes recall for semantic search
+
+#### Method 3: Hybrid Search (Client-Side RRF)
+
+```java
+public SearchResponse hybridSearch(String collection, String freeTextQuery,
+                                   Integer k, Double minScore, String fieldsCsv)
+```
+
+**Flow:**
+
+1. **Parameter Validation**:
+    - Validates collection and query inputs
+    - Sets topK to k (default: 100)
+    - Uses minScore for filtering results (optional)
+
+2. **Claude AI Filter Generation**:
+    - Uses semantic search system prompt
+    - Generates filter queries for structured filtering
+    - Returns filters, sort, field list
+
+3. **Hybrid Search Execution**:
+    - Delegates to `SearchRepository.executeHybridRerankSearch()`
+    - Executes two searches in parallel:
+        - **Keyword search**: edismax with `_text_` catch-all field
+        - **Vector search**: KNN with OpenAI embeddings
+    - Fetches `topK * 2` results from each for better fusion
+
+4. **Client-Side RRF Merging**:
+    - Uses `RrfMerger` class with formula: `score = sum(1 / (k + rank))`
+    - Default k=60 for balanced fusion
+    - Documents in both result sets get combined scores
+    - Re-ranks all results by RRF score
+
+5. **Fallback Strategy**:
+    - If hybrid returns no results → fallback to keyword-only
+    - If keyword returns no results → fallback to vector-only
+    - Ensures robust search even with poor queries
 
 **Conversation Memory:**
 - Uses ChatMemory with conversation ID "007"
@@ -630,20 +664,35 @@ public SearchResponse search(String collection, SearchRequest searchRequest)
 6. Execute via `solrClient.query(collection, query)`
 7. Convert results to SearchResponse with facet counts
 
-**Method 2: Semantic Search Execution**
+**Method 2: Hybrid Search with RRF**
 ```java
-public SearchResponse semanticSearch(String collection, List<Float> queryVector, 
-                                     SearchRequest searchRequest, int topK)
+public SearchResponse executeHybridRerankSearch(String collection, String query,
+                                                int topK, String filterExpression,
+                                                String fieldsCsv, Double minScore)
 ```
 
 **Implementation:**
-1. Build KNN query with vector:
+
+1. Execute keyword search via `executeKeywordSearch()`:
+    - Uses edismax query parser with `_text_` catch-all field
+    - Fetches `topK * 2` results for better fusion
+    - Applies filter expression if provided
+
+2. Execute vector search via `executeVectorSearch()`:
+    - Generates embedding using EmbeddingService
+    - Builds KNN query: `{!knn f=vector topK=...}[vector]`
+    - Fetches `topK * 2` results
+    - Uses POST method to avoid URI length issues
+
+3. Merge results using RrfMerger:
+   ```java
+   RrfMerger rrfMerger = new RrfMerger(); // k=60 default
+   List<Map<String, Object>> mergedResults = rrfMerger.merge(
+       keywordResults, vectorResults);
    ```
-   {!knn f=vector topK=10}[0.1, 0.2, 0.3, ...]
-   ```
-2. Apply filter queries, sort, field list, faceting
-3. Execute KNN query
-4. Return results with facet counts
+
+4. Apply minScore filtering and topK limiting
+5. Implement fallback strategy if no results
 
 **Method 3: Field Schema Retrieval**
 ```java
