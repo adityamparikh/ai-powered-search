@@ -1,0 +1,122 @@
+[
+  {
+    "id": "spring-boot-1",
+    "title": "Introduction to Spring Boot",
+    "content": "Spring Boot is a powerful framework that simplifies Java application development. It provides auto-configuration, embedded servers, production-ready features, and eliminates boilerplate code. Key benefits include rapid development, convention over configuration, microservices support, and easy integration with Spring ecosystem.",
+    "category": "frameworks",
+    "tags": [
+      "spring",
+      "java",
+      "microservices",
+      "framework"
+    ]
+  },
+  {
+    "id": "spring-di-1",
+    "title": "Dependency Injection in Spring",
+    "content": "Dependency Injection (DI) is a core principle in Spring Framework. It allows objects to receive their dependencies from external sources rather than creating them. Spring supports constructor injection, setter injection, and field injection. DI promotes loose coupling, testability, and maintainability. The IoC container manages the lifecycle of beans and their dependencies.",
+    "category": "design-patterns",
+    "tags": [
+      "spring",
+      "di",
+      "ioc",
+      "design-pattern"
+    ]
+  },
+  {
+    "id": "java-21-1",
+    "title": "Java 21 LTS Features",
+    "content": "Java 21 is a Long-Term Support release with major features including Virtual Threads (Project Loom) for lightweight concurrency, Pattern Matching for switch expressions, Record Patterns for deconstructing records, Sequenced Collections for predictable ordering, and String Templates for easier string manipulation. Virtual threads enable massive scalability with minimal resource overhead.",
+    "category": "programming-languages",
+    "tags": [
+      "java",
+      "java21",
+      "virtual-threads",
+      "lts"
+    ]
+  },
+  {
+    "id": "solr-1",
+    "title": "Apache Solr Search Platform",
+    "content": "Apache Solr is a powerful open-source search platform built on Apache Lucene. It provides full-text search, faceted search, distributed search with SolrCloud, vector search with HNSW algorithm, highlighting, spell checking, and advanced query parsing. Solr supports both keyword-based and semantic vector search, making it ideal for modern AI-powered search applications.",
+    "category": "search-engines",
+    "tags": [
+      "solr",
+      "search",
+      "lucene",
+      "vector-search"
+    ]
+  },
+  {
+    "id": "spring-ai-1",
+    "title": "Spring AI Framework",
+    "content": "Spring AI brings artificial intelligence capabilities to Spring applications. It provides abstractions for working with LLMs like Claude and OpenAI, vector stores for semantic search, embeddings for text vectorization, and RAG (Retrieval-Augmented Generation) patterns. QuestionAnswerAdvisor automatically retrieves relevant documents and provides them as context to LLMs for accurate answers.",
+    "category": "ai-frameworks",
+    "tags": [
+      "spring-ai",
+      "llm",
+      "rag",
+      "embeddings"
+    ]
+  },
+  {
+    "id": "microservices-1",
+    "title": "Microservices Architecture",
+    "content": "Microservices architecture structures an application as a collection of loosely coupled services. Each service is independently deployable, scalable, and maintainable. Benefits include technology diversity, fault isolation, and easier scaling. Spring Boot and Spring Cloud provide excellent support for building microservices with service discovery, configuration management, and circuit breakers.",
+    "category": "architecture",
+    "tags": [
+      "microservices",
+      "spring-cloud",
+      "architecture",
+      "distributed-systems"
+    ]
+  },
+  {
+    "id": "vector-search-1",
+    "title": "Vector Search and Embeddings",
+    "content": "Vector search enables semantic similarity matching by converting text into high-dimensional vectors (embeddings). Unlike keyword search, vector search understands meaning and context. Common algorithms include HNSW (Hierarchical Navigable Small World) for approximate nearest neighbor search. Modern search systems combine keyword and vector search using techniques like Reciprocal Rank Fusion (RRF) for best results.",
+    "category": "search-technology",
+    "tags": [
+      "vector-search",
+      "embeddings",
+      "hnsw",
+      "semantic-search"
+    ]
+  },
+  {
+    "id": "rag-1",
+    "title": "RAG (Retrieval-Augmented Generation)",
+    "content": "RAG is a technique that enhances LLM responses by retrieving relevant documents from a knowledge base and providing them as context. This reduces hallucinations, provides up-to-date information, and grounds responses in factual data. The RAG pipeline includes: query embedding generation, vector similarity search, document retrieval, context injection, and LLM answer generation.",
+    "category": "ai-techniques",
+    "tags": [
+      "rag",
+      "llm",
+      "retrieval",
+      "ai"
+    ]
+  },
+  {
+    "id": "testcontainers-1",
+    "title": "Testcontainers for Integration Testing",
+    "content": "Testcontainers is a Java library that provides lightweight, throwaway instances of databases, message brokers, and other services for integration testing. It uses Docker containers to spin up real dependencies, ensuring tests run in realistic environments. Supports PostgreSQL, Solr, Kafka, and many other services. Essential for testing Spring Boot applications with external dependencies.",
+    "category": "testing",
+    "tags": [
+      "testcontainers",
+      "testing",
+      "docker",
+      "integration-tests"
+    ]
+  },
+  {
+    "id": "anthropic-claude-1",
+    "title": "Anthropic Claude AI",
+    "content": "Claude is a family of large language models developed by Anthropic. Claude Sonnet 4 and Opus 4 provide advanced reasoning, long context windows (200K+ tokens), and strong instruction following. Claude supports prompt caching for cost reduction, structured output, and tool use. It excels at natural language understanding, code generation, and complex reasoning tasks.",
+    "category": "ai-models",
+    "tags": [
+      "claude",
+      "anthropic",
+      "llm",
+      "ai"
+    ]
+  }
+]

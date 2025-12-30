@@ -129,15 +129,17 @@ This document contains in-depth technical information about the AI-Powered Searc
 
 ### 2. Semantic Vector Search (`semanticSearch()`)
 
-**Implementation:** `SearchService.semanticSearch()` at lines 156-215
+**Implementation:** `SearchService.semanticSearch()` at lines 142-171
 
 **How it works:**
 1. Client sends natural language query
-2. Claude AI parses query to extract filter criteria
-3. OpenAI generates 1536-dimension embedding for query text
-4. Solr executes KNN similarity search using HNSW algorithm
-5. Results ranked by cosine similarity (0-1 scale)
-6. Returns semantically similar documents
+2. Builds Spring AI `SearchRequest` with topK (default: 50) and similarity threshold
+3. Gets `VectorStore` instance for the collection via `VectorStoreFactory`
+4. Delegates to `VectorStore.similaritySearch()` which:
+    - Generates 1536-dimension embedding using OpenAI
+    - Executes KNN vector search in Solr using HNSW algorithm
+    - Returns documents ranked by cosine similarity
+5. Converts Spring AI `Document` objects to `SearchResponse` format
 
 **Strengths:**
 - ✅ Understands semantic meaning and context
@@ -167,9 +169,53 @@ This document contains in-depth technical information about the AI-Powered Searc
 - Cross-lingual information retrieval
 - Exploratory "find things like this" queries
 
-### 3. RAG Question Answering (`ask()`)
+### 3. Hybrid Search with Client-Side RRF (`hybridSearch()`)
 
-**Implementation:** `SearchService.ask()` at lines 235-260
+**Implementation:** `SearchService.hybridSearch()` at lines 173-196, `SearchRepository.executeHybridRerankSearch()` at
+lines 157-227
+
+**How it works:**
+
+1. Client sends natural language query with optional parameters (k, minScore, fields)
+2. Claude AI parses query to extract filter criteria
+3. Executes two searches in parallel:
+    - **Keyword search**: Using edismax query parser with `_text_` catch-all field
+    - **Vector search**: KNN similarity search with OpenAI embeddings
+4. Merges results using client-side RRF (Reciprocal Rank Fusion):
+    - Formula: `rrf_score = sum(1 / (k + rank))` where k=60 (default)
+    - Documents appearing in both result sets get combined scores
+5. Re-ranks merged results by RRF score
+6. Applies minScore filtering and topK limiting
+7. Implements intelligent fallback: hybrid → keyword → vector if no results
+
+**Strengths:**
+
+- ✅ Combines strengths of both keyword and semantic search
+- ✅ Schema-agnostic using `_text_` catch-all field
+- ✅ Full control over fusion algorithm and scoring
+- ✅ More robust than single search approach
+- ✅ Handles documents that match either lexically or semantically
+- ✅ Balances precision (keyword) with recall (semantic)
+- ✅ Graceful degradation with fallback strategy
+
+**Limitations:**
+
+- ❌ Higher computational cost (two searches + merging)
+- ❌ Requires both embedding generation and keyword indexing
+- ❌ Client-side merging adds latency
+- ❌ RRF k parameter may need tuning for optimal results
+- ❌ More complex debugging when results are unexpected
+
+**Best Use Cases:**
+
+- General-purpose search where both precision and recall are important
+- E-commerce product search (exact brands + similar products)
+- Documentation search (exact terms + related concepts)
+- When you don't know if users will search with exact terms or concepts
+
+### 4. RAG Question Answering (`ask()`)
+
+**Implementation:** `SearchService.ask()` at lines 198-223
 
 **How it works:**
 1. Client sends conversational question with optional conversation ID

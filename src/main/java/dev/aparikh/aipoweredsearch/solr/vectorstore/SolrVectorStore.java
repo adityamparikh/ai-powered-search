@@ -217,7 +217,7 @@ public class SolrVectorStore extends AbstractObservationVectorStore {
     public List<Document> doSimilaritySearch(SearchRequest request) {
         try {
             // Validate query
-            if (request.getQuery() == null || request.getQuery().isEmpty()) {
+            if (request.getQuery().isEmpty()) {
                 throw new IllegalArgumentException("Search query cannot be null or empty");
             }
 
