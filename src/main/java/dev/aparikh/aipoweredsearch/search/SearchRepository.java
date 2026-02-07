@@ -23,6 +23,8 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.stream.Collectors;
 
 
@@ -37,6 +39,12 @@ public class SearchRepository {
     // Query type constants
     private static final String WILDCARD_QUERY = "*:*";
     private static final String QUERY_TYPE_EDISMAX = "edismax";
+
+    /**
+     * Multiplier applied to topK when fetching from individual searches.
+     * Over-fetching improves fusion quality by giving RRF more candidates.
+     */
+    private static final int OVER_FETCH_MULTIPLIER = 2;
 
     Logger log = LoggerFactory.getLogger(SearchRepository.class);
     private final SolrClient solrClient;
@@ -194,29 +202,28 @@ public class SearchRepository {
     }
 
     /**
-     * Executes hybrid search combining keyword and vector search using client-side RRF (Reciprocal Rank Fusion).
+     * Executes hybrid search combining keyword and vector search using client-side RRF
+     * (Reciprocal Rank Fusion).
      *
-     * <p>This method implements hybrid search with intelligent fallback:
-     * 1. Executes keyword search independently (edismax)
-     * 2. Executes vector search independently (KNN)
-     * 3. Merges results using client-side RRF algorithm
-     * 4. If merged results empty, falls back to keyword-only search
-     * 5. If keyword fails, falls back to vector-only search</p>
+     * <p>This method runs keyword and vector searches <strong>concurrently</strong> and then
+     * merges the results using the RRF algorithm. If the merged results are empty, it falls
+     * back through a cascade: keyword-only, then vector-only.</p>
      *
-     * <p>RRF (Reciprocal Rank Fusion) provides better fusion than simple score averaging by:
-     * <ul>
-     *   <li>Using the formula: score = sum(1 / (k + rank)) for each result list</li>
-     *   <li>Balancing keyword and vector signals evenly (rank-based, not score-based)</li>
-     *   <li>Handling different scoring scales robustly</li>
-     *   <li>Configurable k parameter for fusion tuning (default: 60)</li>
-     * </ul></p>
+     * <p>Execution flow:
+     * <ol>
+     *   <li>Launch keyword search (edismax) and vector search (KNN) in parallel</li>
+     *   <li>Await both results</li>
+     *   <li>Merge using {@link RrfMerger}</li>
+     *   <li>Apply minScore filter and limit to topK</li>
+     *   <li>If empty, try keyword-only fallback, then vector-only fallback</li>
+     * </ol>
      *
-     * @param collection        the Solr collection to search
-     * @param query             the text query for keyword search
-     * @param topK              number of results to return
-     * @param filterExpression  optional filter query
-     * @param fieldsCsv         optional comma-separated list of fields to return
-     * @param minScore          optional minimum RRF score threshold
+     * @param collection       the Solr collection to search
+     * @param query            the text query for keyword search
+     * @param topK             number of results to return
+     * @param filterExpression optional filter query
+     * @param fieldsCsv        optional comma-separated list of fields to return
+     * @param minScore         optional minimum RRF score threshold
      * @return search response with hybrid-ranked documents
      */
     public SearchResponse executeHybridRerankSearch(String collection,
@@ -227,23 +234,39 @@ public class SearchRepository {
                                                     Double minScore) {
         log.debug("Performing hybrid search (client-side RRF) in collection: {} with query: {}", collection, query);
 
+        int fetchSize = topK * OVER_FETCH_MULTIPLIER;
+
         try {
-            // Step 1: Execute keyword search
-            List<Map<String, Object>> keywordResults = executeKeywordSearch(
-                    collection, query, topK * 2, filterExpression, fieldsCsv);
-            log.debug("Keyword search returned {} results", keywordResults.size());
+            // Run keyword and vector searches concurrently
+            CompletableFuture<List<Map<String, Object>>> keywordFuture = CompletableFuture.supplyAsync(() -> {
+                try {
+                    return executeKeywordSearch(collection, query, fetchSize, filterExpression, fieldsCsv);
+                } catch (Exception e) {
+                    throw new CompletionException(e);
+                }
+            });
 
-            // Step 2: Execute vector search
-            List<Map<String, Object>> vectorResults = executeVectorSearch(
-                    collection, query, topK * 2, filterExpression, fieldsCsv);
-            log.debug("Vector search returned {} results", vectorResults.size());
+            CompletableFuture<List<Map<String, Object>>> vectorFuture = CompletableFuture.supplyAsync(() -> {
+                try {
+                    return executeVectorSearch(collection, query, fetchSize, filterExpression, fieldsCsv);
+                } catch (Exception e) {
+                    throw new CompletionException(e);
+                }
+            });
 
-            // Step 3: Merge using RRF algorithm
-            RrfMerger rrfMerger = new RrfMerger(); // Uses default k=60
+            // Wait for both to complete
+            List<Map<String, Object>> keywordResults = keywordFuture.join();
+            List<Map<String, Object>> vectorResults = vectorFuture.join();
+
+            log.debug("Keyword search returned {} results, vector search returned {} results",
+                    keywordResults.size(), vectorResults.size());
+
+            // Merge using RRF
+            RrfMerger rrfMerger = new RrfMerger();
             List<Map<String, Object>> mergedResults = rrfMerger.merge(keywordResults, vectorResults);
             log.debug("RRF merged results: {} unique documents", mergedResults.size());
 
-            // Step 4: Apply minScore filter and limit to topK
+            // Apply minScore filter and limit to topK
             List<Map<String, Object>> finalResults = mergedResults.stream()
                     .filter(doc -> passesMinScore(doc, minScore))
                     .limit(topK)
@@ -251,23 +274,18 @@ public class SearchRepository {
 
             log.debug("Final hybrid results after filtering and limiting: {} documents", finalResults.size());
 
-            // Step 5: Handle spell check (from keyword search only)
-            SearchResponse.SpellCheckSuggestion spellCheckSuggestion = null;
-            // Note: We don't have spell check data here since we're using direct query execution
-            // Could enhance in future by capturing spell check from keyword search
-
-            // Step 6: Implement fallback if no results
-            if (finalResults.isEmpty()) {
-                log.warn("Hybrid search returned no results, attempting keyword-only fallback");
-                return fallbackToKeywordSearch(collection, query, topK, filterExpression, fieldsCsv, minScore);
+            if (!finalResults.isEmpty()) {
+                return new SearchResponse(finalResults, Map.of(), Map.of(), null);
             }
 
-            return new SearchResponse(finalResults, Map.of(), Map.of(), spellCheckSuggestion);
+            // Fallback cascade
+            log.warn("Hybrid search returned no results, attempting fallback");
+            return fallbackSearch(collection, query, topK, filterExpression, fieldsCsv, minScore);
 
         } catch (Exception e) {
             log.error("Error performing hybrid search with RRF in collection: {}", collection, e);
-            log.warn("Hybrid search failed, attempting keyword-only fallback");
-            return fallbackToKeywordSearch(collection, query, topK, filterExpression, fieldsCsv, minScore);
+            log.warn("Hybrid search failed, attempting fallback");
+            return fallbackSearch(collection, query, topK, filterExpression, fieldsCsv, minScore);
         }
     }
 
@@ -281,11 +299,11 @@ public class SearchRepository {
      * @param fieldsCsv        optional comma-separated list of fields to return
      * @return list of documents with scores
      */
-    private List<Map<String, Object>> executeKeywordSearch(String collection,
-                                                           String query,
-                                                           int rows,
-                                                           String filterExpression,
-                                                           String fieldsCsv) throws Exception {
+    List<Map<String, Object>> executeKeywordSearch(String collection,
+                                                   String query,
+                                                   int rows,
+                                                   String filterExpression,
+                                                   String fieldsCsv) throws Exception {
         ModifiableSolrParams params = new ModifiableSolrParams();
         params.set("q", query);
         params.set("defType", QUERY_TYPE_EDISMAX);
@@ -312,11 +330,11 @@ public class SearchRepository {
      * @param fieldsCsv        optional comma-separated list of fields to return
      * @return list of documents with similarity scores
      */
-    private List<Map<String, Object>> executeVectorSearch(String collection,
-                                                          String query,
-                                                          int rows,
-                                                          String filterExpression,
-                                                          String fieldsCsv) throws Exception {
+    List<Map<String, Object>> executeVectorSearch(String collection,
+                                                  String query,
+                                                  int rows,
+                                                  String filterExpression,
+                                                  String fieldsCsv) throws Exception {
         String vectorString = embeddingService.embedAndFormatForSolr(query);
 
         ModifiableSolrParams params = new ModifiableSolrParams();
@@ -334,81 +352,51 @@ public class SearchRepository {
     }
 
     /**
-     * Executes a fallback search strategy (keyword or vector).
+     * Fallback strategy when hybrid search produces no results.
+     * Tries keyword-only first, then vector-only as a last resort.
      */
-    private SearchResponse executeFallbackSearch(String collection,
-                                                 String query,
-                                                 int topK,
-                                                 String filterExpression,
-                                                 String fieldsCsv,
-                                                 Double minScore,
-                                                 boolean useVector) {
+    private SearchResponse fallbackSearch(String collection,
+                                          String query,
+                                          int topK,
+                                          String filterExpression,
+                                          String fieldsCsv,
+                                          Double minScore) {
+        // Try keyword-only first
         try {
-            ModifiableSolrParams params = new ModifiableSolrParams();
+            List<Map<String, Object>> keywordResults = executeKeywordSearch(
+                    collection, query, topK, filterExpression, fieldsCsv);
 
-            if (useVector) {
-                log.debug("Attempting vector-only search fallback");
-                String vectorString = embeddingService.embedAndFormatForSolr(query);
-                params.set("q", SolrQueryUtils.buildKnnQuery(FIELD_VECTOR, topK, vectorString));
-            } else {
-                log.debug("Attempting keyword-only search fallback");
-                params.set("q", query);
-                params.set("defType", QUERY_TYPE_EDISMAX);
-                params.set("qf", FIELD_TEXT_CATCHALL);
-            }
-
-            setupFilterQuery(params, filterExpression);
-            setupFieldList(params, fieldsCsv);
-            params.set("rows", topK);
-
-            QueryResponse response = solrClient.query(collection, params, SolrRequest.METHOD.POST);
-
-            List<Map<String, Object>> documents = response.getResults().stream()
-                    .filter(doc -> {
-                        if (minScore != null) {
-                            Object scoreObj = doc.getFieldValue(FIELD_SCORE);
-                            if (scoreObj instanceof Number) {
-                                return ((Number) scoreObj).doubleValue() >= minScore;
-                            }
-                        }
-                        return true;
-                    })
-                    .map(this::convertSolrDocumentToMap)
+            List<Map<String, Object>> filtered = keywordResults.stream()
+                    .filter(doc -> passesMinScore(doc, minScore))
                     .collect(Collectors.toList());
 
-            if (documents.isEmpty() && !useVector) {
-                log.warn("Keyword search fallback returned no results, attempting vector-only search");
-                return executeFallbackSearch(collection, query, topK, filterExpression, fieldsCsv, minScore, true);
+            if (!filtered.isEmpty()) {
+                log.info("Keyword-only fallback returned {} results", filtered.size());
+                return new SearchResponse(filtered, Map.of(), Map.of(), null);
             }
-
-            String searchType = useVector ? "Vector-only" : "Keyword-only";
-            log.info("{} fallback returned {} results", searchType, documents.size());
-            return new SearchResponse(documents, Map.of(), Map.of(), null);
-
         } catch (Exception e) {
-            if (!useVector) {
-                log.error("Keyword search fallback failed", e);
-                log.warn("Attempting vector-only search as last resort");
-                return executeFallbackSearch(collection, query, topK, filterExpression, fieldsCsv, minScore, true);
-            } else {
-                log.error("All search strategies failed (hybrid, keyword, vector)", e);
-                // Return empty results rather than throwing exception
-                return new SearchResponse(new ArrayList<>(), Map.of(), Map.of(), null);
-            }
+            log.error("Keyword fallback failed", e);
         }
-    }
 
-    /**
-     * Fallback to keyword-only search when hybrid search fails or returns no results.
-     * If keyword search also fails, attempts vector-only search as last resort.
-     */
-    private SearchResponse fallbackToKeywordSearch(String collection,
-                                                   String query,
-                                                   int topK,
-                                                   String filterExpression,
-                                                   String fieldsCsv,
-                                                   Double minScore) {
-        return executeFallbackSearch(collection, query, topK, filterExpression, fieldsCsv, minScore, false);
+        // Try vector-only as last resort
+        try {
+            List<Map<String, Object>> vectorResults = executeVectorSearch(
+                    collection, query, topK, filterExpression, fieldsCsv);
+
+            List<Map<String, Object>> filtered = vectorResults.stream()
+                    .filter(doc -> passesMinScore(doc, minScore))
+                    .collect(Collectors.toList());
+
+            if (!filtered.isEmpty()) {
+                log.info("Vector-only fallback returned {} results", filtered.size());
+                return new SearchResponse(filtered, Map.of(), Map.of(), null);
+            }
+        } catch (Exception e) {
+            log.error("Vector fallback failed", e);
+        }
+
+        log.warn("All search strategies returned no results for query: {}", query);
+        return new SearchResponse(new ArrayList<>(), Map.of(), Map.of(), null);
     }
 
     /**

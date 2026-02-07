@@ -4,28 +4,29 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
-import java.util.HashMap;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
 /**
- * Utility class for merging search results using Reciprocal Rank Fusion (RRF).
+ * Merges search results from multiple retrieval strategies using Reciprocal Rank Fusion (RRF).
  *
- * <p>RRF is a method for combining results from multiple search strategies (e.g., keyword and vector search)
- * by computing a unified score based on document ranks rather than raw scores. This approach is more robust
- * than simple score averaging because it normalizes different scoring scales.</p>
+ * <p>RRF combines results from different search methods (e.g., keyword and vector search)
+ * by computing a unified score based on document ranks rather than raw scores. This is more
+ * robust than score averaging because it normalizes different scoring scales.</p>
  *
- * <p>The RRF formula is: <code>score = sum(1 / (k + rank))</code> where:
+ * <p>The RRF formula is: {@code score = sum(1 / (k + rank))} where:
  * <ul>
- *   <li>k is a constant (default 60) that prevents early ranks from dominating</li>
- *   <li>rank is the position of the document in each result list (1-indexed)</li>
+ *   <li>{@code k} is a smoothing constant (default 60) that prevents top ranks from dominating</li>
+ *   <li>{@code rank} is the 1-indexed position of the document in each result list</li>
  * </ul>
- * </p>
  *
- * <p>Example: If a document appears at rank 3 in keyword results and rank 5 in vector results:
- * <code>rrf_score = 1/(60+3) + 1/(60+5) = 0.0159 + 0.0154 = 0.0313</code>
- * </p>
+ * <p>Example: A document at rank 3 in keyword results and rank 5 in vector results:
+ * {@code rrf_score = 1/(60+3) + 1/(60+5) = 0.0159 + 0.0154 = 0.0313}</p>
+ *
+ * <p>This class is thread-safe and immutable after construction.</p>
  *
  * @author Aditya Parikh
  * @since 1.0.0
@@ -33,11 +34,15 @@ import java.util.Map;
 public class RrfMerger {
 
     private static final Logger log = LoggerFactory.getLogger(RrfMerger.class);
-    private static final int DEFAULT_K = 60;
-    private static final String ID_FIELD = "id";
-    private static final String RRF_SCORE_FIELD = "rrf_score";
-    private static final String KEYWORD_SCORE_FIELD = "keyword_score";
-    private static final String VECTOR_SCORE_FIELD = "vector_score";
+
+    static final int DEFAULT_K = 60;
+    static final String ID_FIELD = "id";
+    static final String RRF_SCORE_FIELD = "rrf_score";
+    static final String KEYWORD_SCORE_FIELD = "keyword_score";
+    static final String VECTOR_SCORE_FIELD = "vector_score";
+    static final String KEYWORD_RANK_FIELD = "keyword_rank";
+    static final String VECTOR_RANK_FIELD = "vector_rank";
+    static final String SCORE_FIELD = "score";
 
     private final int k;
 
@@ -51,7 +56,10 @@ public class RrfMerger {
     /**
      * Creates an RrfMerger with a custom k parameter.
      *
-     * @param k the constant used in RRF formula (higher k gives more weight to lower ranks)
+     * @param k the smoothing constant for the RRF formula; must be positive.
+     *          Higher values give more uniform weighting across ranks;
+     *          lower values give more weight to top-ranked documents.
+     * @throws IllegalArgumentException if k is not positive
      */
     public RrfMerger(int k) {
         if (k <= 0) {
@@ -62,134 +70,141 @@ public class RrfMerger {
     }
 
     /**
-     * Merges keyword and vector search results using RRF algorithm.
+     * Returns the k parameter used by this merger.
+     */
+    public int getK() {
+        return k;
+    }
+
+    /**
+     * Merges keyword and vector search results using the RRF algorithm.
      *
-     * <p>Documents are identified by their "id" field. If a document appears in both result sets,
-     * it receives RRF score contributions from both. Documents appearing in only one set
-     * receive RRF score from that set only.</p>
+     * <p>Documents are identified by their {@code id} field. If a document appears in both
+     * result sets, it receives RRF score contributions from both. Documents appearing in
+     * only one set receive a score contribution from that set only.</p>
      *
-     * @param keywordResults results from keyword/lexical search (ranked by relevance)
-     * @param vectorResults  results from vector/semantic search (ranked by similarity)
-     * @return merged and re-ranked results sorted by RRF score (descending)
+     * <p>When a document appears in both lists, fields are merged with vector result values
+     * taking precedence on conflict (except for the {@code id} field which is always preserved).</p>
+     *
+     * <p>The output documents contain the following additional fields:
+     * <ul>
+     *   <li>{@code rrf_score}: the combined RRF score</li>
+     *   <li>{@code score}: same as rrf_score (for compatibility)</li>
+     *   <li>{@code keyword_score}: original score from keyword search (if present)</li>
+     *   <li>{@code vector_score}: original score from vector search (if present)</li>
+     *   <li>{@code keyword_rank}: rank in keyword results (if present)</li>
+     *   <li>{@code vector_rank}: rank in vector results (if present)</li>
+     * </ul>
+     *
+     * @param keywordResults results from keyword/lexical search, ordered by relevance; may be null
+     * @param vectorResults  results from vector/semantic search, ordered by similarity; may be null
+     * @return merged results sorted by RRF score descending; never null
+     * @throws IllegalArgumentException if any document is missing an {@code id} field
      */
     public List<Map<String, Object>> merge(List<Map<String, Object>> keywordResults,
                                            List<Map<String, Object>> vectorResults) {
-        log.debug("Merging {} keyword results and {} vector results using RRF (k={})",
-                keywordResults.size(), vectorResults.size(), k);
+        List<Map<String, Object>> safeKeyword = keywordResults != null ? keywordResults : Collections.emptyList();
+        List<Map<String, Object>> safeVector = vectorResults != null ? vectorResults : Collections.emptyList();
 
-        // Map to store RRF scores and merged documents
+        log.debug("Merging {} keyword results and {} vector results using RRF (k={})",
+                safeKeyword.size(), safeVector.size(), k);
+
+        if (safeKeyword.isEmpty() && safeVector.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        // LinkedHashMap preserves insertion order for deterministic iteration
         Map<String, MergedDocument> documentMap = new LinkedHashMap<>();
 
-        // Process keyword results (rank 1-indexed)
-        for (int i = 0; i < keywordResults.size(); i++) {
-            Map<String, Object> doc = keywordResults.get(i);
+        // Process keyword results (1-indexed ranks)
+        for (int i = 0; i < safeKeyword.size(); i++) {
+            Map<String, Object> doc = safeKeyword.get(i);
             String docId = extractDocId(doc);
-            int rank = i + 1; // 1-indexed rank
+            int rank = i + 1;
             double rrfContribution = 1.0 / (k + rank);
 
-            MergedDocument mergedDoc = documentMap.computeIfAbsent(docId,
-                    id -> new MergedDocument(docId, new HashMap<>(doc)));
-            mergedDoc.addKeywordScore(rrfContribution, rank, extractScore(doc));
+            MergedDocument merged = documentMap.computeIfAbsent(docId,
+                    id -> new MergedDocument(id, doc));
+            merged.addKeywordScore(rrfContribution, rank, extractScore(doc));
 
-            log.trace("Document {} from keyword search: rank={}, rrfContribution={}", docId, rank, rrfContribution);
+            log.trace("Keyword doc {}: rank={}, rrf={}", docId, rank, rrfContribution);
         }
 
-        // Process vector results (rank 1-indexed)
-        for (int i = 0; i < vectorResults.size(); i++) {
-            Map<String, Object> doc = vectorResults.get(i);
+        // Process vector results (1-indexed ranks)
+        for (int i = 0; i < safeVector.size(); i++) {
+            Map<String, Object> doc = safeVector.get(i);
             String docId = extractDocId(doc);
-            int rank = i + 1; // 1-indexed rank
+            int rank = i + 1;
             double rrfContribution = 1.0 / (k + rank);
 
-            MergedDocument mergedDoc = documentMap.get(docId);
-            if (mergedDoc == null) {
+            MergedDocument merged = documentMap.get(docId);
+            if (merged == null) {
                 // Document only in vector results
-                mergedDoc = new MergedDocument(docId, new HashMap<>(doc));
-                documentMap.put(docId, mergedDoc);
+                merged = new MergedDocument(docId, doc);
+                documentMap.put(docId, merged);
             } else {
-                // Document in both: merge fields (prefer vector fields if different)
-                mergedDoc.mergeFields(doc);
+                // Document in both — merge fields, preferring vector values
+                merged.mergeVectorFields(doc);
             }
-            mergedDoc.addVectorScore(rrfContribution, rank, extractScore(doc));
+            merged.addVectorScore(rrfContribution, rank, extractScore(doc));
 
-            log.trace("Document {} from vector search: rank={}, rrfContribution={}", docId, rank, rrfContribution);
+            log.trace("Vector doc {}: rank={}, rrf={}", docId, rank, rrfContribution);
         }
 
-        // Convert to list and add RRF scores to documents
-        List<Map<String, Object>> mergedResults = new ArrayList<>();
-        for (MergedDocument mergedDoc : documentMap.values()) {
-            Map<String, Object> doc = mergedDoc.document;
-            doc.put(RRF_SCORE_FIELD, mergedDoc.rrfScore);
-
-            // Include original scores for debugging/transparency
-            if (mergedDoc.keywordOriginalScore != null) {
-                doc.put(KEYWORD_SCORE_FIELD, mergedDoc.keywordOriginalScore);
-            }
-            if (mergedDoc.vectorOriginalScore != null) {
-                doc.put(VECTOR_SCORE_FIELD, mergedDoc.vectorOriginalScore);
-            }
-
-            // Set main score to RRF score
-            doc.put("score", mergedDoc.rrfScore);
-
-            mergedResults.add(doc);
+        // Build final result list with all scoring metadata
+        List<Map<String, Object>> mergedResults = new ArrayList<>(documentMap.size());
+        for (MergedDocument merged : documentMap.values()) {
+            mergedResults.add(merged.toDocument());
         }
 
         // Sort by RRF score descending
-        mergedResults.sort((d1, d2) -> {
-            Double score1 = (Double) d1.get(RRF_SCORE_FIELD);
-            Double score2 = (Double) d2.get(RRF_SCORE_FIELD);
-            return Double.compare(score2, score1); // Descending order
-        });
+        mergedResults.sort(Comparator.comparingDouble(
+                (Map<String, Object> d) -> ((Number) d.get(RRF_SCORE_FIELD)).doubleValue()).reversed());
 
         log.debug("RRF merge complete: {} unique documents after fusion", mergedResults.size());
         return mergedResults;
     }
 
     /**
-     * Extracts document ID from a search result.
+     * Extracts the document ID from a result map.
      *
-     * @param document the document map
-     * @return document ID as string
-     * @throws IllegalArgumentException if document has no ID field
+     * @throws IllegalArgumentException if the document has no {@code id} field
      */
-    private String extractDocId(Map<String, Object> document) {
+    String extractDocId(Map<String, Object> document) {
         Object id = document.get(ID_FIELD);
         if (id == null) {
-            throw new IllegalArgumentException("Document missing required 'id' field: " + document);
+            throw new IllegalArgumentException("Document missing required 'id' field: " + document.keySet());
         }
         return id.toString();
     }
 
     /**
-     * Extracts the score from a document, returning null if not present.
-     *
-     * @param document the document map
-     * @return score as Double or null
+     * Extracts the score from a document as a Double, returning null if absent or non-numeric.
      */
-    private Double extractScore(Map<String, Object> document) {
-        Object score = document.get("score");
-        if (score instanceof Number) {
-            return ((Number) score).doubleValue();
+    Double extractScore(Map<String, Object> document) {
+        Object score = document.get(SCORE_FIELD);
+        if (score instanceof Number number) {
+            return number.doubleValue();
         }
         return null;
     }
 
     /**
-     * Internal class to track merged document data during RRF computation.
+     * Tracks a single document's data during RRF merging.
      */
-    private static class MergedDocument {
+    static class MergedDocument {
         final String id;
-        final Map<String, Object> document;
+        final Map<String, Object> fields;
         double rrfScore;
         Double keywordOriginalScore;
         Double vectorOriginalScore;
         Integer keywordRank;
         Integer vectorRank;
 
-        MergedDocument(String id, Map<String, Object> document) {
+        MergedDocument(String id, Map<String, Object> sourceDocument) {
             this.id = id;
-            this.document = document;
+            // Copy so we don't mutate the caller's map
+            this.fields = new LinkedHashMap<>(sourceDocument);
             this.rrfScore = 0.0;
         }
 
@@ -205,15 +220,41 @@ public class RrfMerger {
             this.vectorOriginalScore = originalScore;
         }
 
-        void mergeFields(Map<String, Object> otherDoc) {
-            // Merge fields from vector results, preferring vector values for conflicts
-            for (Map.Entry<String, Object> entry : otherDoc.entrySet()) {
+        /**
+         * Merges fields from a vector search result into this document.
+         * Vector values take precedence on conflict, except for the {@code id} field.
+         */
+        void mergeVectorFields(Map<String, Object> vectorDoc) {
+            for (Map.Entry<String, Object> entry : vectorDoc.entrySet()) {
                 String key = entry.getKey();
-                // Don't overwrite existing fields except score (we'll replace with RRF score later)
-                if (!document.containsKey(key) || "score".equals(key)) {
-                    document.put(key, entry.getValue());
+                if (ID_FIELD.equals(key) || SCORE_FIELD.equals(key)) {
+                    continue; // Never overwrite id; score will be replaced with RRF score
                 }
+                fields.put(key, entry.getValue());
             }
+        }
+
+        /**
+         * Produces the final document map with all RRF scoring metadata.
+         */
+        Map<String, Object> toDocument() {
+            Map<String, Object> doc = new LinkedHashMap<>(fields);
+            doc.put(RRF_SCORE_FIELD, rrfScore);
+            doc.put(SCORE_FIELD, rrfScore);
+
+            if (keywordOriginalScore != null) {
+                doc.put(KEYWORD_SCORE_FIELD, keywordOriginalScore);
+            }
+            if (vectorOriginalScore != null) {
+                doc.put(VECTOR_SCORE_FIELD, vectorOriginalScore);
+            }
+            if (keywordRank != null) {
+                doc.put(KEYWORD_RANK_FIELD, keywordRank);
+            }
+            if (vectorRank != null) {
+                doc.put(VECTOR_RANK_FIELD, vectorRank);
+            }
+            return doc;
         }
     }
 }
