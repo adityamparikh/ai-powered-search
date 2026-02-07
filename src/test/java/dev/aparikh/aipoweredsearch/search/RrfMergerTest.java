@@ -518,14 +518,16 @@ class RrfMergerTest {
             List<Map<String, Object>> keyword = new ArrayList<>();
             List<Map<String, Object>> vector = new ArrayList<>();
 
-            for (int i = 0; i < size; i++) {
-                keyword.add(doc("kw-" + i, 10.0 - i * 0.01));
-                vector.add(doc("vec-" + i, 0.99 - i * 0.001));
-            }
-            // Add some overlapping documents
+            // Add overlapping documents first so they get high ranks (1-50) in both lists.
+            // Being top-ranked in both lists gives a higher RRF score than being top-ranked in only one.
             for (int i = 0; i < 50; i++) {
-                keyword.add(doc("both-" + i, 8.0 - i * 0.01));
-                vector.add(doc("both-" + i, 0.90 - i * 0.001));
+                keyword.add(doc("both-" + i, 10.0 - i * 0.01));
+                vector.add(doc("both-" + i, 0.99 - i * 0.001));
+            }
+
+            for (int i = 0; i < size; i++) {
+                keyword.add(doc("kw-" + i, 8.0 - i * 0.01));
+                vector.add(doc("vec-" + i, 0.90 - i * 0.001));
             }
 
             List<Map<String, Object>> result = merger.merge(keyword, vector);
@@ -533,12 +535,47 @@ class RrfMergerTest {
             // 500 keyword-only + 500 vector-only + 50 shared = 1050
             assertEquals(1050, result.size());
 
-            // Shared documents should be ranked highest
+            // Shared documents should be ranked highest (they appear at top ranks in both lists)
             for (int i = 0; i < 50; i++) {
                 String topId = (String) result.get(i).get("id");
                 assertTrue(topId.startsWith("both-"),
                         "Top results should be documents appearing in both lists, got: " + topId);
             }
+        }
+
+        @Test
+        void midRankedDocInBothListsShouldBeatHigherRankedDocInOneList() {
+            // "both-" docs at ranks 80-89 in both lists.
+            // "kw-" docs at ranks 1-79 in keyword only.
+            // A doc at rank 80 in both lists: 2 * 1/(60+80) = 2 * 0.00714 = 0.01429
+            // A doc at rank 50 in one list:    1/(60+50)     = 0.00909
+            // So a mid-ranked dual-list doc should beat a moderately-ranked single-list doc.
+            List<Map<String, Object>> keyword = new ArrayList<>();
+            List<Map<String, Object>> vector = new ArrayList<>();
+
+            for (int i = 0; i < 79; i++) {
+                keyword.add(doc("kw-" + i, 10.0 - i * 0.01));
+                vector.add(doc("vec-" + i, 0.99 - i * 0.001));
+            }
+            for (int i = 0; i < 10; i++) {
+                keyword.add(doc("both-" + i, 5.0 - i * 0.01));
+                vector.add(doc("both-" + i, 0.50 - i * 0.001));
+            }
+
+            List<Map<String, Object>> result = merger.merge(keyword, vector);
+
+            // Find best single-list and best dual-list scores
+            double bestDualScore = result.stream()
+                    .filter(d -> ((String) d.get("id")).startsWith("both-"))
+                    .mapToDouble(d -> ((Number) d.get(RrfMerger.RRF_SCORE_FIELD)).doubleValue())
+                    .max().orElseThrow();
+            double worstSingleInTop50 = result.stream()
+                    .filter(d -> !((String) d.get("id")).startsWith("both-"))
+                    .mapToDouble(d -> ((Number) d.get(RrfMerger.RRF_SCORE_FIELD)).doubleValue())
+                    .sorted().toArray()[50 - 1]; // 50th best single-list doc
+
+            assertTrue(bestDualScore > worstSingleInTop50,
+                    "Mid-ranked dual-list doc should beat a moderately-ranked single-list doc");
         }
 
         @Test

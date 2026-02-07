@@ -23,8 +23,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionException;
 import java.util.stream.Collectors;
 
 
@@ -237,26 +235,9 @@ public class SearchRepository {
         int fetchSize = topK * OVER_FETCH_MULTIPLIER;
 
         try {
-            // Run keyword and vector searches concurrently
-            CompletableFuture<List<Map<String, Object>>> keywordFuture = CompletableFuture.supplyAsync(() -> {
-                try {
-                    return executeKeywordSearch(collection, query, fetchSize, filterExpression, fieldsCsv);
-                } catch (Exception e) {
-                    throw new CompletionException(e);
-                }
-            });
-
-            CompletableFuture<List<Map<String, Object>>> vectorFuture = CompletableFuture.supplyAsync(() -> {
-                try {
-                    return executeVectorSearch(collection, query, fetchSize, filterExpression, fieldsCsv);
-                } catch (Exception e) {
-                    throw new CompletionException(e);
-                }
-            });
-
-            // Wait for both to complete
-            List<Map<String, Object>> keywordResults = keywordFuture.join();
-            List<Map<String, Object>> vectorResults = vectorFuture.join();
+            // Virtual threads handle blocking I/O efficiently — no need for CompletableFuture
+            List<Map<String, Object>> keywordResults = executeKeywordSearch(collection, query, fetchSize, filterExpression, fieldsCsv);
+            List<Map<String, Object>> vectorResults = executeVectorSearch(collection, query, fetchSize, filterExpression, fieldsCsv);
 
             log.debug("Keyword search returned {} results, vector search returned {} results",
                     keywordResults.size(), vectorResults.size());
