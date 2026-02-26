@@ -1,0 +1,618 @@
+{
+  "description": "AI-Powered Search \u2014 JVM & Infrastructure: JVM memory, GC, virtual threads (Java 21+), PostgreSQL pool, and container health for Solr/ZooKeeper/PostgreSQL",
+  "editable": true,
+  "graphTooltip": 1,
+  "id": null,
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 400,
+      "title": "JVM Memory",
+      "type": "row"
+    },
+    {
+      "datasource": {"uid": "prometheus", "type": "prometheus"},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 20,
+            "lineWidth": 2
+          }
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 1
+      },
+      "id": 110,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "title": "JVM Heap Memory",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "jvm_memory_used_bytes{job=\"ai-powered-search\",area=\"heap\"}",
+          "legendFormat": "Used ({{id}})",
+          "refId": "A"
+        },
+        {
+          "expr": "jvm_memory_committed_bytes{job=\"ai-powered-search\",area=\"heap\"}",
+          "legendFormat": "Committed ({{id}})",
+          "refId": "B"
+        },
+        {
+          "expr": "jvm_memory_max_bytes{job=\"ai-powered-search\",area=\"heap\"}",
+          "legendFormat": "Max ({{id}})",
+          "refId": "C"
+        }
+      ]
+    },
+    {
+      "datasource": {"uid": "prometheus", "type": "prometheus"},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 20,
+            "lineWidth": 2
+          }
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 1
+      },
+      "id": 111,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "title": "JVM Non-Heap Memory",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum(jvm_memory_used_bytes{job=\"ai-powered-search\",area=\"nonheap\"}) by (id)",
+          "legendFormat": "{{id}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 9
+      },
+      "id": 401,
+      "title": "GC & Threads (Virtual Threads Enabled)",
+      "type": "row"
+    },
+    {
+      "datasource": {"uid": "prometheus", "type": "prometheus"},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 15,
+            "lineWidth": 2
+          }
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 10
+      },
+      "id": 120,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "title": "GC Pause Duration",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "rate(jvm_gc_pause_seconds_sum{job=\"ai-powered-search\"}[5m]) / rate(jvm_gc_pause_seconds_count{job=\"ai-powered-search\"}[5m])",
+          "legendFormat": "Avg Pause ({{action}}, {{cause}})",
+          "refId": "A"
+        },
+        {
+          "expr": "jvm_gc_pause_seconds_max{job=\"ai-powered-search\"}",
+          "legendFormat": "Max Pause ({{action}}, {{cause}})",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "datasource": {"uid": "prometheus", "type": "prometheus"},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 15,
+            "lineWidth": 2
+          }
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 10
+      },
+      "id": 121,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "title": "Thread Counts (Platform + Virtual)",
+      "description": "Java 21+ virtual threads enabled via spring.threads.virtual.enabled=true",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "jvm_threads_live_threads{job=\"ai-powered-search\"}",
+          "legendFormat": "Live Threads",
+          "refId": "A"
+        },
+        {
+          "expr": "jvm_threads_daemon_threads{job=\"ai-powered-search\"}",
+          "legendFormat": "Daemon Threads",
+          "refId": "B"
+        },
+        {
+          "expr": "jvm_threads_peak_threads{job=\"ai-powered-search\"}",
+          "legendFormat": "Peak Threads",
+          "refId": "C"
+        },
+        {
+          "expr": "jvm_threads_started_threads_total{job=\"ai-powered-search\"}",
+          "legendFormat": "Total Started (cumulative)",
+          "refId": "D"
+        }
+      ]
+    },
+    {
+      "datasource": {"uid": "prometheus", "type": "prometheus"},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 10
+      },
+      "id": 122,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "title": "Thread States",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "jvm_threads_states_threads{job=\"ai-powered-search\",state=\"runnable\"}",
+          "legendFormat": "Runnable",
+          "refId": "A"
+        },
+        {
+          "expr": "jvm_threads_states_threads{job=\"ai-powered-search\",state=\"waiting\"}",
+          "legendFormat": "Waiting",
+          "refId": "B"
+        },
+        {
+          "expr": "jvm_threads_states_threads{job=\"ai-powered-search\",state=\"timed-waiting\"}",
+          "legendFormat": "Timed Waiting",
+          "refId": "C"
+        },
+        {
+          "expr": "jvm_threads_states_threads{job=\"ai-powered-search\",state=\"blocked\"}",
+          "legendFormat": "Blocked",
+          "refId": "D"
+        }
+      ]
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 18
+      },
+      "id": 402,
+      "title": "PostgreSQL \u2014 Chat Memory Connection Pool",
+      "type": "row"
+    },
+    {
+      "datasource": {"uid": "prometheus", "type": "prometheus"},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 15,
+            "lineWidth": 2
+          }
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 19
+      },
+      "id": 130,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "title": "HikariCP Connection Pool",
+      "description": "PostgreSQL connection pool for chat memory (JDBC)",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "hikaricp_connections_active{job=\"ai-powered-search\",pool=\"HikariPool-1\"}",
+          "legendFormat": "Active",
+          "refId": "A"
+        },
+        {
+          "expr": "hikaricp_connections_idle{job=\"ai-powered-search\",pool=\"HikariPool-1\"}",
+          "legendFormat": "Idle",
+          "refId": "B"
+        },
+        {
+          "expr": "hikaricp_connections_pending{job=\"ai-powered-search\",pool=\"HikariPool-1\"}",
+          "legendFormat": "Pending",
+          "refId": "C"
+        },
+        {
+          "expr": "hikaricp_connections{job=\"ai-powered-search\",pool=\"HikariPool-1\"}",
+          "legendFormat": "Total",
+          "refId": "D"
+        },
+        {
+          "expr": "hikaricp_connections_max{job=\"ai-powered-search\",pool=\"HikariPool-1\"}",
+          "legendFormat": "Max",
+          "refId": "E"
+        }
+      ]
+    },
+    {
+      "datasource": {"uid": "prometheus", "type": "prometheus"},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 12,
+            "lineWidth": 2
+          }
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 19
+      },
+      "id": 131,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "title": "HikariCP Connection Acquisition Time",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "hikaricp_connections_acquire_seconds_max{job=\"ai-powered-search\"}",
+          "legendFormat": "Acquire Max",
+          "refId": "A"
+        },
+        {
+          "expr": "rate(hikaricp_connections_acquire_seconds_sum{job=\"ai-powered-search\"}[5m]) / rate(hikaricp_connections_acquire_seconds_count{job=\"ai-powered-search\"}[5m])",
+          "legendFormat": "Acquire Avg",
+          "refId": "B"
+        },
+        {
+          "expr": "hikaricp_connections_creation_seconds_max{job=\"ai-powered-search\"}",
+          "legendFormat": "Creation Max",
+          "refId": "C"
+        },
+        {
+          "expr": "hikaricp_connections_usage_seconds_max{job=\"ai-powered-search\"}",
+          "legendFormat": "Usage Max",
+          "refId": "D"
+        }
+      ]
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 27
+      },
+      "id": 403,
+      "title": "System Resources",
+      "type": "row"
+    },
+    {
+      "datasource": {"uid": "prometheus", "type": "prometheus"},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "max": 1,
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 20,
+            "lineWidth": 2
+          },
+          "thresholds": {
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.7
+              },
+              {
+                "color": "red",
+                "value": 0.9
+              }
+            ]
+          }
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 28
+      },
+      "id": 140,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "title": "System CPU Usage",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "system_cpu_usage{job=\"ai-powered-search\"}",
+          "legendFormat": "System CPU",
+          "refId": "A"
+        },
+        {
+          "expr": "process_cpu_usage{job=\"ai-powered-search\"}",
+          "legendFormat": "Process CPU",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "datasource": {"uid": "prometheus", "type": "prometheus"},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 15,
+            "lineWidth": 2
+          }
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 28
+      },
+      "id": 141,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "title": "File Descriptors",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "process_files_open_files{job=\"ai-powered-search\"}",
+          "legendFormat": "Open Files",
+          "refId": "A"
+        },
+        {
+          "expr": "process_files_max_files{job=\"ai-powered-search\"}",
+          "legendFormat": "Max Files",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "datasource": {"uid": "prometheus", "type": "prometheus"},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 40,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 28
+      },
+      "id": 142,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "sum"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "title": "Logback Events",
+      "description": "Application log output by level \u2014 watch for spikes in WARN/ERROR",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum(increase(logback_events_total{job=\"ai-powered-search\",level=\"error\"}[5m]))",
+          "legendFormat": "ERROR",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(increase(logback_events_total{job=\"ai-powered-search\",level=\"warn\"}[5m]))",
+          "legendFormat": "WARN",
+          "refId": "B"
+        },
+        {
+          "expr": "sum(increase(logback_events_total{job=\"ai-powered-search\",level=\"info\"}[5m]))",
+          "legendFormat": "INFO",
+          "refId": "C"
+        }
+      ]
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": [
+    "ai-powered-search",
+    "jvm",
+    "infrastructure",
+    "postgresql",
+    "hikari"
+  ],
+  "templating": {
+    "list": []
+  },
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "title": "AI-Powered Search \u2014 JVM & Infrastructure",
+  "uid": "ai-search-jvm-infra",
+  "version": 1
+}

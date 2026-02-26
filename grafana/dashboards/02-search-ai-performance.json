@@ -1,0 +1,740 @@
+{
+  "description": "AI-Powered Search \u2014 Search & AI Performance: Keyword vs Semantic vs Hybrid latency, Anthropic prompt caching, OpenAI embedding metrics, RAG pipeline",
+  "editable": true,
+  "graphTooltip": 1,
+  "id": null,
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 200,
+      "title": "Search Type Comparison",
+      "type": "row"
+    },
+    {
+      "datasource": {"uid": "prometheus", "type": "prometheus"},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.5
+              },
+              {
+                "color": "red",
+                "value": 2
+              }
+            ]
+          }
+        }
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 0,
+        "y": 1
+      },
+      "id": 20,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "title": "Keyword Search (p95)",
+      "description": "AI-enhanced keyword search via Claude query generation \u2192 Solr edismax",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket{job=\"ai-powered-search\",uri=\"/api/v1/search/{collection}\",method=\"GET\"}[5m])) by (le))",
+          "legendFormat": "p95",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": {"uid": "prometheus", "type": "prometheus"},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 3
+              }
+            ]
+          }
+        }
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 6,
+        "y": 1
+      },
+      "id": 21,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "title": "Semantic Search (p95)",
+      "description": "OpenAI embedding \u2192 Solr KNN cosine similarity (1536-dim HNSW)",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket{job=\"ai-powered-search\",uri=\"/api/v1/search/{collection}/semantic\",method=\"GET\"}[5m])) by (le))",
+          "legendFormat": "p95",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": {"uid": "prometheus", "type": "prometheus"},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1.5
+              },
+              {
+                "color": "red",
+                "value": 4
+              }
+            ]
+          }
+        }
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 12,
+        "y": 1
+      },
+      "id": 22,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "title": "Hybrid RRF Search (p95)",
+      "description": "Client-side RRF: edismax + KNN merged with score = \u03a3(1/(k+rank)), k=60",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket{job=\"ai-powered-search\",uri=\"/api/v1/search/{collection}/hybrid\",method=\"GET\"}[5m])) by (le))",
+          "legendFormat": "p95",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": {"uid": "prometheus", "type": "prometheus"},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 3
+              },
+              {
+                "color": "red",
+                "value": 6
+              }
+            ]
+          }
+        }
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 18,
+        "y": 1
+      },
+      "id": 23,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "title": "RAG Q&A (p95)",
+      "description": "QuestionAnswerAdvisor: vector retrieval (topK=5) \u2192 Claude answer generation",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket{job=\"ai-powered-search\",uri=\"/api/v1/search/ask\",method=\"POST\"}[5m])) by (le))",
+          "legendFormat": "p95",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": {"uid": "prometheus", "type": "prometheus"},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 12,
+            "lineWidth": 2,
+            "spanNulls": true
+          }
+        }
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 6
+      },
+      "id": 24,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max",
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "title": "Search Latency Comparison Over Time (p95)",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket{job=\"ai-powered-search\",uri=\"/api/v1/search/{collection}\",method=\"GET\"}[5m])) by (le))",
+          "legendFormat": "Keyword (~100ms target)",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket{job=\"ai-powered-search\",uri=\"/api/v1/search/{collection}/semantic\",method=\"GET\"}[5m])) by (le))",
+          "legendFormat": "Semantic (~500ms target)",
+          "refId": "B"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket{job=\"ai-powered-search\",uri=\"/api/v1/search/{collection}/hybrid\",method=\"GET\"}[5m])) by (le))",
+          "legendFormat": "Hybrid RRF (~600ms target)",
+          "refId": "C"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket{job=\"ai-powered-search\",uri=\"/api/v1/search/ask\",method=\"POST\"}[5m])) by (le))",
+          "legendFormat": "RAG Q&A (~2s target)",
+          "refId": "D"
+        }
+      ]
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 15
+      },
+      "id": 201,
+      "title": "Anthropic Claude \u2014 Prompt Caching & Token Usage",
+      "type": "row"
+    },
+    {
+      "datasource": {"uid": "prometheus", "type": "prometheus"},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 70,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 16
+      },
+      "id": 30,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "sum",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "title": "Anthropic Token Usage by Type",
+      "description": "Token breakdown: cache creation (miss), cache read (hit), regular input, and output tokens",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum(rate(ai_chat_client_token_usage_total{job=\"ai-powered-search\",type=\"cache_creation\"}[5m]))",
+          "legendFormat": "Cache Creation (miss)",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rate(ai_chat_client_token_usage_total{job=\"ai-powered-search\",type=\"cache_read\"}[5m]))",
+          "legendFormat": "Cache Read (hit)",
+          "refId": "B"
+        },
+        {
+          "expr": "sum(rate(ai_chat_client_token_usage_total{job=\"ai-powered-search\",type=\"input\"}[5m]))",
+          "legendFormat": "Regular Input",
+          "refId": "C"
+        },
+        {
+          "expr": "sum(rate(ai_chat_client_token_usage_total{job=\"ai-powered-search\",type=\"output\"}[5m]))",
+          "legendFormat": "Output",
+          "refId": "D"
+        }
+      ]
+    },
+    {
+      "datasource": {"uid": "prometheus", "type": "prometheus"},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "max": 1,
+          "thresholds": {
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.5
+              },
+              {
+                "color": "green",
+                "value": 0.8
+              }
+            ]
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 20,
+            "lineWidth": 2
+          }
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 16
+      },
+      "id": 31,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "title": "Prompt Cache Hit Rate",
+      "description": "Cache reads / (cache reads + cache creation). Target: >80% after warmup. 90% cheaper per cached token.",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum(rate(ai_chat_client_token_usage_total{job=\"ai-powered-search\",type=\"cache_read\"}[5m])) / (sum(rate(ai_chat_client_token_usage_total{job=\"ai-powered-search\",type=\"cache_read\"}[5m])) + sum(rate(ai_chat_client_token_usage_total{job=\"ai-powered-search\",type=\"cache_creation\"}[5m])))",
+          "legendFormat": "Cache Hit Rate",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": {"uid": "prometheus", "type": "prometheus"},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2
+          }
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 24
+      },
+      "id": 32,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "title": "Claude Chat Client Latency",
+      "description": "Anthropic API call duration for query generation (searchChatClient) and RAG (ragChatClient)",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(spring_ai_chat_client_call_seconds_bucket{job=\"ai-powered-search\"}[5m])) by (le))",
+          "legendFormat": "Chat Call p95",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(spring_ai_chat_client_call_seconds_bucket{job=\"ai-powered-search\"}[5m])) by (le))",
+          "legendFormat": "Chat Call p50",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "datasource": {"uid": "prometheus", "type": "prometheus"},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2
+          }
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 24
+      },
+      "id": 33,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "sum"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "title": "Claude API Call Count",
+      "description": "Number of calls to Anthropic API (query gen + RAG)",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum(rate(spring_ai_chat_client_call_seconds_count{job=\"ai-powered-search\"}[5m]))",
+          "legendFormat": "Calls/s",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(increase(spring_ai_chat_client_call_seconds_count{job=\"ai-powered-search\"}[1h]))",
+          "legendFormat": "Total (1h window)",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 32
+      },
+      "id": 202,
+      "title": "OpenAI Embeddings",
+      "type": "row"
+    },
+    {
+      "datasource": {"uid": "prometheus", "type": "prometheus"},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 12,
+            "lineWidth": 2
+          }
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 33
+      },
+      "id": 40,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "title": "Embedding Generation Latency",
+      "description": "OpenAI text-embedding-3-small (1536-dim) API call duration",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(spring_ai_embedding_model_call_seconds_bucket{job=\"ai-powered-search\"}[5m])) by (le))",
+          "legendFormat": "p95",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(spring_ai_embedding_model_call_seconds_bucket{job=\"ai-powered-search\"}[5m])) by (le))",
+          "legendFormat": "p50",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "datasource": {"uid": "prometheus", "type": "prometheus"},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 60,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 33
+      },
+      "id": 41,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "sum",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "title": "Embedding Token Throughput",
+      "description": "Tokens processed by OpenAI embedding model per interval",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum(rate(spring_ai_embedding_model_token_usage_total{job=\"ai-powered-search\",type=\"input\"}[5m]))",
+          "legendFormat": "Input Tokens/s",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(increase(spring_ai_embedding_model_call_seconds_count{job=\"ai-powered-search\"}[5m]))",
+          "legendFormat": "Calls (5m)",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 41
+      },
+      "id": 203,
+      "title": "Indexing Pipeline",
+      "type": "row"
+    },
+    {
+      "datasource": {"uid": "prometheus", "type": "prometheus"},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 12,
+            "lineWidth": 2
+          }
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 42
+      },
+      "id": 50,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "title": "Document Indexing Latency",
+      "description": "End-to-end indexing time: embedding generation + Solr document write",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket{job=\"ai-powered-search\",uri=\"/api/v1/index/{collection}\",method=\"POST\"}[5m])) by (le))",
+          "legendFormat": "Single Doc p95",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket{job=\"ai-powered-search\",uri=\"/api/v1/index/{collection}/batch\",method=\"POST\"}[5m])) by (le))",
+          "legendFormat": "Batch p95",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "datasource": {"uid": "prometheus", "type": "prometheus"},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 60
+          }
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 42
+      },
+      "id": 51,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "sum"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "title": "Documents Indexed Rate",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum(rate(http_server_requests_seconds_count{job=\"ai-powered-search\",uri=\"/api/v1/index/{collection}\",method=\"POST\",status=\"200\"}[5m]))",
+          "legendFormat": "Single Docs/s",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rate(http_server_requests_seconds_count{job=\"ai-powered-search\",uri=\"/api/v1/index/{collection}/batch\",method=\"POST\",status=\"200\"}[5m]))",
+          "legendFormat": "Batch Requests/s",
+          "refId": "B"
+        }
+      ]
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": [
+    "ai-powered-search",
+    "search",
+    "ai",
+    "anthropic",
+    "openai"
+  ],
+  "templating": {
+    "list": []
+  },
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "title": "AI-Powered Search \u2014 Search & AI Performance",
+  "uid": "ai-search-ai-perf",
+  "version": 1
+}

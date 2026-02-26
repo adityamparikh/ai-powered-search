@@ -1,0 +1,691 @@
+{
+  "description": "AI-Powered Search \u2014 Solr & Vector Store: SolrVectorStore operations (add, delete, similarity search), KNN performance, Solr connection pool, and RRF fusion metrics",
+  "editable": true,
+  "graphTooltip": 1,
+  "id": null,
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 300,
+      "title": "Vector Store \u2014 Observation Metrics (Micrometer)",
+      "type": "row"
+    },
+    {
+      "datasource": {"uid": "prometheus", "type": "prometheus"},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.5
+              },
+              {
+                "color": "red",
+                "value": 2
+              }
+            ]
+          }
+        }
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 0,
+        "y": 1
+      },
+      "id": 60,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "title": "Similarity Search (p95)",
+      "description": "SolrVectorStore.doSimilaritySearch() via AbstractObservationVectorStore",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(spring_ai_vector_store_query_seconds_bucket{job=\"ai-powered-search\"}[5m])) by (le))",
+          "legendFormat": "p95",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": {"uid": "prometheus", "type": "prometheus"},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 3
+              }
+            ]
+          }
+        }
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 6,
+        "y": 1
+      },
+      "id": 61,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "title": "Document Add (p95)",
+      "description": "SolrVectorStore.doAdd() \u2014 embedding + Solr index write",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(spring_ai_vector_store_add_seconds_bucket{job=\"ai-powered-search\"}[5m])) by (le))",
+          "legendFormat": "p95",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": {"uid": "prometheus", "type": "prometheus"},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "thresholds": {
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        }
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 12,
+        "y": 1
+      },
+      "id": 62,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "title": "Query Operations/s",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "sum(rate(spring_ai_vector_store_query_seconds_count{job=\"ai-powered-search\"}[5m]))",
+          "legendFormat": "Queries/s",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": {"uid": "prometheus", "type": "prometheus"},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "thresholds": {
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        }
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 18,
+        "y": 1
+      },
+      "id": 63,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "title": "Add Operations/s",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "sum(rate(spring_ai_vector_store_add_seconds_count{job=\"ai-powered-search\"}[5m]))",
+          "legendFormat": "Adds/s",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": {"uid": "prometheus", "type": "prometheus"},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 12,
+            "lineWidth": 2
+          }
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 6
+      },
+      "id": 64,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "title": "Vector Store Operation Latency Over Time",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(spring_ai_vector_store_query_seconds_bucket{job=\"ai-powered-search\"}[5m])) by (le))",
+          "legendFormat": "Similarity Search p95",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(spring_ai_vector_store_query_seconds_bucket{job=\"ai-powered-search\"}[5m])) by (le))",
+          "legendFormat": "Similarity Search p50",
+          "refId": "B"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(spring_ai_vector_store_add_seconds_bucket{job=\"ai-powered-search\"}[5m])) by (le))",
+          "legendFormat": "Document Add p95",
+          "refId": "C"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(spring_ai_vector_store_delete_seconds_bucket{job=\"ai-powered-search\"}[5m])) by (le))",
+          "legendFormat": "Document Delete p95",
+          "refId": "D"
+        }
+      ]
+    },
+    {
+      "datasource": {"uid": "prometheus", "type": "prometheus"},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 60,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 6
+      },
+      "id": 65,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "sum"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "title": "Vector Store Operation Throughput",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum(increase(spring_ai_vector_store_query_seconds_count{job=\"ai-powered-search\"}[5m]))",
+          "legendFormat": "Queries",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(increase(spring_ai_vector_store_add_seconds_count{job=\"ai-powered-search\"}[5m]))",
+          "legendFormat": "Adds",
+          "refId": "B"
+        },
+        {
+          "expr": "sum(increase(spring_ai_vector_store_delete_seconds_count{job=\"ai-powered-search\"}[5m]))",
+          "legendFormat": "Deletes",
+          "refId": "C"
+        }
+      ]
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 14
+      },
+      "id": 301,
+      "title": "Solr Search Internals",
+      "type": "row"
+    },
+    {
+      "datasource": {"uid": "prometheus", "type": "prometheus"},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 12,
+            "lineWidth": 2,
+            "spanNulls": true
+          }
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 15
+      },
+      "id": 70,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "title": "Solr Query Latency (Custom Timers)",
+      "description": "If custom Micrometer timers are registered for Solr query execution. Alternatively shows HTTP endpoint breakdown.",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(solr_query_seconds_bucket{job=\"ai-powered-search\",type=\"keyword\"}[5m])) by (le))",
+          "legendFormat": "Keyword (edismax) p95",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(solr_query_seconds_bucket{job=\"ai-powered-search\",type=\"knn\"}[5m])) by (le))",
+          "legendFormat": "KNN (vector) p95",
+          "refId": "B"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(solr_query_seconds_bucket{job=\"ai-powered-search\",type=\"hybrid_keyword\"}[5m])) by (le))",
+          "legendFormat": "Hybrid-Keyword p95",
+          "refId": "C"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(solr_query_seconds_bucket{job=\"ai-powered-search\",type=\"hybrid_vector\"}[5m])) by (le))",
+          "legendFormat": "Hybrid-Vector p95",
+          "refId": "D"
+        }
+      ]
+    },
+    {
+      "datasource": {"uid": "prometheus", "type": "prometheus"},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 12,
+            "lineWidth": 2,
+            "spanNulls": true
+          }
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 15
+      },
+      "id": 71,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "title": "Search Results Count",
+      "description": "Average number of documents returned per search type",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "avg(solr_query_results_total{job=\"ai-powered-search\",type=\"keyword\"})",
+          "legendFormat": "Keyword Results",
+          "refId": "A"
+        },
+        {
+          "expr": "avg(solr_query_results_total{job=\"ai-powered-search\",type=\"knn\"})",
+          "legendFormat": "KNN Results",
+          "refId": "B"
+        },
+        {
+          "expr": "avg(solr_query_results_total{job=\"ai-powered-search\",type=\"rrf_merged\"})",
+          "legendFormat": "RRF Merged",
+          "refId": "C"
+        }
+      ]
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 23
+      },
+      "id": 302,
+      "title": "RRF Fusion Analysis",
+      "type": "row"
+    },
+    {
+      "datasource": {"uid": "prometheus", "type": "prometheus"},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 15,
+            "lineWidth": 2
+          }
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 24
+      },
+      "id": 80,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "title": "Hybrid Search Breakdown \u2014 Keyword vs Vector vs Merge",
+      "description": "Time spent in each phase of the RRF hybrid pipeline: keyword search, vector search, and client-side merge",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(rrf_keyword_search_seconds_bucket{job=\"ai-powered-search\"}[5m])) by (le))",
+          "legendFormat": "Keyword Phase p95",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(rrf_vector_search_seconds_bucket{job=\"ai-powered-search\"}[5m])) by (le))",
+          "legendFormat": "Vector Phase p95",
+          "refId": "B"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(rrf_merge_seconds_bucket{job=\"ai-powered-search\"}[5m])) by (le))",
+          "legendFormat": "RRF Merge p95",
+          "refId": "C"
+        }
+      ]
+    },
+    {
+      "datasource": {"uid": "prometheus", "type": "prometheus"},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 12,
+            "lineWidth": 2
+          }
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 24
+      },
+      "id": 81,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "title": "RRF Fusion \u2014 Result Overlap & Coverage",
+      "description": "Documents appearing in both keyword and vector results, and unique-to-each counts",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "avg(rrf_overlap_count{job=\"ai-powered-search\"})",
+          "legendFormat": "Overlap (both)",
+          "refId": "A"
+        },
+        {
+          "expr": "avg(rrf_keyword_only_count{job=\"ai-powered-search\"})",
+          "legendFormat": "Keyword-only",
+          "refId": "B"
+        },
+        {
+          "expr": "avg(rrf_vector_only_count{job=\"ai-powered-search\"})",
+          "legendFormat": "Vector-only",
+          "refId": "C"
+        }
+      ]
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 32
+      },
+      "id": 303,
+      "title": "Solr Connection Health",
+      "type": "row"
+    },
+    {
+      "datasource": {"uid": "prometheus", "type": "prometheus"},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2
+          }
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 33
+      },
+      "id": 90,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "title": "Solr HTTP/2 Client Connection Pool",
+      "description": "Http2SolrClient connection pool status (Jetty 11)",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "solr_client_connections_active{job=\"ai-powered-search\"}",
+          "legendFormat": "Active",
+          "refId": "A"
+        },
+        {
+          "expr": "solr_client_connections_idle{job=\"ai-powered-search\"}",
+          "legendFormat": "Idle",
+          "refId": "B"
+        },
+        {
+          "expr": "solr_client_connections_max{job=\"ai-powered-search\"}",
+          "legendFormat": "Max",
+          "refId": "C"
+        }
+      ]
+    },
+    {
+      "datasource": {"uid": "prometheus", "type": "prometheus"},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 60,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 33
+      },
+      "id": 91,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "sum"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "title": "Solr Error Breakdown",
+      "description": "Solr connection errors, timeouts, and server errors",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum(increase(solr_client_errors_total{job=\"ai-powered-search\",type=\"connection\"}[5m]))",
+          "legendFormat": "Connection Errors",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(increase(solr_client_errors_total{job=\"ai-powered-search\",type=\"timeout\"}[5m]))",
+          "legendFormat": "Timeouts",
+          "refId": "B"
+        },
+        {
+          "expr": "sum(increase(solr_client_errors_total{job=\"ai-powered-search\",type=\"server\"}[5m]))",
+          "legendFormat": "Server Errors",
+          "refId": "C"
+        }
+      ]
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": [
+    "ai-powered-search",
+    "solr",
+    "vector-store",
+    "rrf"
+  ],
+  "templating": {
+    "list": []
+  },
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "title": "AI-Powered Search \u2014 Solr & Vector Store",
+  "uid": "ai-search-solr-vector",
+  "version": 1
+}

@@ -57,6 +57,9 @@ services:
       - "4317:4317"   # OpenTelemetry gRPC
       - "4318:4318"   # OpenTelemetry HTTP
       - "9090:9090"   # Prometheus
+    volumes:
+      - ./grafana/provisioning/dashboards:/otel-lgtm/grafana/conf/provisioning/dashboards
+      - ./grafana/dashboards:/grafana-dashboards
     environment:
       - GF_SECURITY_ADMIN_USER=admin
       - GF_SECURITY_ADMIN_PASSWORD=admin
