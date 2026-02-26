@@ -242,6 +242,7 @@ public class SearchRepository {
             log.debug("Keyword search returned {} results, vector search returned {} results",
                     keywordResults.size(), vectorResults.size());
 
+
             // Merge using RRF
             RrfMerger rrfMerger = new RrfMerger();
             List<Map<String, Object>> mergedResults = rrfMerger.merge(keywordResults, vectorResults);
