@@ -45,6 +45,22 @@ services:
     environment:
       ZOO_4LW_COMMANDS_WHITELIST: "mntr,conf,ruok"
 
+  lgtm:
+    image: grafana/otel-lgtm:latest
+    container_name: ai-powered-search-lgtm
+    networks:
+      - search
+    ports:
+      - "3000:3000"   # Grafana UI
+      - "3100:3100"   # Loki
+      - "3200:3200"   # Tempo
+      - "4317:4317"   # OpenTelemetry gRPC
+      - "4318:4318"   # OpenTelemetry HTTP
+      - "9090:9090"   # Prometheus
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+
 volumes:
   postgres_data:
   solr_data:

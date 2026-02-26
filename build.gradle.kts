@@ -23,6 +23,7 @@ extra["springAiVersion"] = "2.0.0-M1"
 
 dependencies {
     implementation("org.springframework.boot:spring-boot-starter-actuator")
+    implementation("org.springframework.boot:spring-boot-starter-opentelemetry")
     implementation("org.springframework.boot:spring-boot-starter-restclient")
     implementation("org.springframework.boot:spring-boot-starter-webmvc")
     implementation("org.springframework.ai:spring-ai-starter-model-anthropic")
@@ -61,6 +62,7 @@ dependencies {
     testImplementation("org.testcontainers:testcontainers-solr")
     testImplementation("org.testcontainers:testcontainers-postgresql")
     testImplementation("org.testcontainers:testcontainers-ollama")
+    testImplementation("org.testcontainers:testcontainers-grafana")
     testImplementation("org.awaitility:awaitility:4.2.0")
     testImplementation("io.micrometer:micrometer-observation-test")
     testImplementation("org.springframework.boot:spring-boot-devtools")
