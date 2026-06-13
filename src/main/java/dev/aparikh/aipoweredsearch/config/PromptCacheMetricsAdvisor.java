@@ -1,13 +1,12 @@
 package dev.aparikh.aipoweredsearch.config;
 
+import com.anthropic.models.messages.Usage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.ai.anthropic.api.AnthropicApi;
 import org.springframework.ai.chat.client.ChatClientRequest;
 import org.springframework.ai.chat.client.ChatClientResponse;
 import org.springframework.ai.chat.client.advisor.api.AdvisorChain;
 import org.springframework.ai.chat.client.advisor.api.BaseAdvisor;
-import org.springframework.ai.chat.metadata.Usage;
 import org.springframework.ai.chat.model.ChatResponse;
 
 /**
@@ -33,7 +32,7 @@ import org.springframework.ai.chat.model.ChatResponse;
  * </pre>
  *
  * @author Aditya Parikh
- * @see AnthropicApi.Usage
+ * @see com.anthropic.models.messages.Usage
  */
 public class PromptCacheMetricsAdvisor implements BaseAdvisor {
 
@@ -123,23 +122,26 @@ public class PromptCacheMetricsAdvisor implements BaseAdvisor {
      * @param response the chat response from Anthropic API
      */
     private void logCacheMetrics(ChatResponse response) {
-        Usage usage = response.getMetadata().getUsage();
+        org.springframework.ai.chat.metadata.Usage usage = response.getMetadata().getUsage();
         if (usage == null || usage.getNativeUsage() == null) {
             log.debug("[Prompt Caching] No usage metadata available");
             return;
         }
 
         Object nativeUsage = usage.getNativeUsage();
-        if (!(nativeUsage instanceof AnthropicApi.Usage anthropicUsage)) {
-            log.debug("[Prompt Caching] Native usage is not AnthropicApi.Usage: {}",
+        // Spring AI 2.0 exposes the native usage as the official Anthropic SDK type
+        // (com.anthropic.models.messages.Usage) rather than the removed AnthropicApi.Usage.
+        if (!(nativeUsage instanceof Usage anthropicUsage)) {
+            log.debug("[Prompt Caching] Native usage is not com.anthropic.models.messages.Usage: {}",
                     nativeUsage != null ? nativeUsage.getClass().getName() : "null");
             return;
         }
 
-        Integer cacheCreationTokens = anthropicUsage.cacheCreationInputTokens();
-        Integer cacheReadTokens = anthropicUsage.cacheReadInputTokens();
-        Integer regularInputTokens = anthropicUsage.inputTokens();
-        Integer outputTokens = anthropicUsage.outputTokens();
+        // The Anthropic SDK returns cache token counts as Optional<Long> and base token counts as long.
+        Integer cacheCreationTokens = anthropicUsage.cacheCreationInputTokens().map(Long::intValue).orElse(null);
+        Integer cacheReadTokens = anthropicUsage.cacheReadInputTokens().map(Long::intValue).orElse(null);
+        Integer regularInputTokens = Math.toIntExact(anthropicUsage.inputTokens());
+        Integer outputTokens = Math.toIntExact(anthropicUsage.outputTokens());
 
         log.debug("[Prompt Caching] Token metrics - Creation: {}, Read: {}, Regular: {}, Output: {}",
                 cacheCreationTokens, cacheReadTokens, regularInputTokens, outputTokens);

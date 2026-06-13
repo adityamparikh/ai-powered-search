@@ -1,10 +1,10 @@
 package dev.aparikh.aipoweredsearch.config;
 
+import com.anthropic.models.messages.Model;
+import org.springframework.ai.anthropic.AnthropicCacheOptions;
+import org.springframework.ai.anthropic.AnthropicCacheStrategy;
+import org.springframework.ai.anthropic.AnthropicCacheTtl;
 import org.springframework.ai.anthropic.AnthropicChatOptions;
-import org.springframework.ai.anthropic.api.AnthropicApi;
-import org.springframework.ai.anthropic.api.AnthropicCacheOptions;
-import org.springframework.ai.anthropic.api.AnthropicCacheStrategy;
-import org.springframework.ai.anthropic.api.AnthropicCacheTtl;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
 import org.springframework.ai.chat.client.advisor.SimpleLoggerAdvisor;
@@ -14,7 +14,7 @@ import org.springframework.ai.chat.messages.MessageType;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.openai.OpenAiEmbeddingModel;
-import org.springframework.ai.openai.api.OpenAiApi;
+import org.springframework.ai.openai.OpenAiEmbeddingOptions;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -23,8 +23,6 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-
-import static org.springframework.web.client.RestClient.Builder;
 
 /**
  * Spring AI configuration for multiple LLM providers.
@@ -81,7 +79,7 @@ public class AiConfig {
         AnthropicCacheStrategy cacheStrategy = AnthropicCacheStrategy.valueOf(cacheStrategyStr);
 
         return AnthropicChatOptions.builder()
-                .model(AnthropicApi.ChatModel.CLAUDE_SONNET_4_5)
+                .model(Model.CLAUDE_SONNET_4_5)
                 .cacheOptions(AnthropicCacheOptions.builder()
                         .strategy(cacheStrategy)
                         .messageTypeTtl(MessageType.SYSTEM, AnthropicCacheTtl.ONE_HOUR)
@@ -116,14 +114,16 @@ public class AiConfig {
      */
     @Bean
     @ConditionalOnMissingBean(EmbeddingModel.class)
-    public EmbeddingModel embeddingModel(@Value("${spring.ai.openai.api-key:${OPENAI_API_KEY:}}") String apiKey,
-                                         Builder restClientBuilder) {
-        OpenAiApi openAiApi = OpenAiApi.builder()
+    public EmbeddingModel embeddingModel(@Value("${spring.ai.openai.api-key:${OPENAI_API_KEY:}}") String apiKey) {
+        // Spring AI 2.0 wraps the official OpenAI Java SDK (com.openai.client). The API key is now
+        // supplied via OpenAiEmbeddingOptions; the previous OpenAiApi/RestClient builder API was removed.
+        // The SDK uses its own (OkHttp) HTTP client, so the former Jetty-avoidance workaround is no longer needed.
+        OpenAiEmbeddingOptions options = OpenAiEmbeddingOptions.builder()
                 .apiKey(apiKey)
-                // Ensure Spring AI uses JDK HttpClient-based RestClient (not Jetty)
-                .restClientBuilder(restClientBuilder)
                 .build();
-        return new OpenAiEmbeddingModel(openAiApi);
+        return OpenAiEmbeddingModel.builder()
+                .options(options)
+                .build();
     }
 
     /**
@@ -157,7 +157,8 @@ public class AiConfig {
 
         // Set default options if caching is enabled
         if (cachingEnabled && chatOptions != null) {
-            builder.defaultOptions(chatOptions);
+            // Spring AI 2.0 changed defaultOptions(ChatOptions) to defaultOptions(ChatOptions.Builder).
+            builder.defaultOptions(chatOptions.mutate());
         }
 
         return builder.defaultAdvisors(
@@ -204,7 +205,8 @@ public class AiConfig {
 
         // Set default options if caching is enabled
         if (cachingEnabled && chatOptions != null) {
-            builder.defaultOptions(chatOptions);
+            // Spring AI 2.0 changed defaultOptions(ChatOptions) to defaultOptions(ChatOptions.Builder).
+            builder.defaultOptions(chatOptions.mutate());
         }
 
         return builder.defaultAdvisors(

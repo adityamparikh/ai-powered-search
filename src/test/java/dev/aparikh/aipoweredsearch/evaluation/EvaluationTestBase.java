@@ -73,7 +73,8 @@ public abstract class EvaluationTestBase {
 
         OllamaChatModel chatModel = OllamaChatModel.builder()
                 .ollamaApi(ollamaApi)
-                .defaultOptions(options)
+                // Spring AI 2.0 renamed OllamaChatModel.Builder.defaultOptions(...) to options(...).
+                .options(options)
                 .build();
 
         // 4. Create evaluators

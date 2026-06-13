@@ -10,7 +10,7 @@ import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.openai.OpenAiEmbeddingModel;
-import org.springframework.ai.openai.api.OpenAiApi;
+import org.springframework.ai.openai.OpenAiEmbeddingOptions;
 import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -128,12 +128,11 @@ class SolrVectorStoreDebugTest {
 
     private void testWithRealEmbeddings(String apiKey) {
         try {
-            // Use RestClient.Builder to ensure JDK HttpClient is used instead of Jetty
-            OpenAiApi openAiApi = OpenAiApi.builder()
+            // Spring AI 2.0: API key is supplied via OpenAiEmbeddingOptions; OpenAiApi/RestClient builder removed.
+            OpenAiEmbeddingOptions options = OpenAiEmbeddingOptions.builder()
                     .apiKey(apiKey)
-                    .restClientBuilder(restClientBuilder)
                     .build();
-            EmbeddingModel embeddingModel = new OpenAiEmbeddingModel(openAiApi);
+            EmbeddingModel embeddingModel = OpenAiEmbeddingModel.builder().options(options).build();
 
             VectorStore vectorStore = SolrVectorStore.builder(solrClient, COLLECTION_NAME, embeddingModel)
                     .options(SolrVectorStoreOptions.defaults())
