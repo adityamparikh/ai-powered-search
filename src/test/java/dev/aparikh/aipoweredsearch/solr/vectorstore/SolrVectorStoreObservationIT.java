@@ -14,7 +14,7 @@ import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.openai.OpenAiEmbeddingModel;
-import org.springframework.ai.openai.api.OpenAiApi;
+import org.springframework.ai.openai.OpenAiEmbeddingOptions;
 import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.ai.vectorstore.observation.DefaultVectorStoreObservationConvention;
@@ -278,12 +278,12 @@ class SolrVectorStoreObservationIT {
         }
 
         @Bean
-        EmbeddingModel embeddingModel(org.springframework.web.client.RestClient.Builder restClientBuilder) {
-            var api = OpenAiApi.builder()
+        EmbeddingModel embeddingModel() {
+            // Spring AI 2.0: API key is supplied via OpenAiEmbeddingOptions; OpenAiApi/RestClient builder removed.
+            OpenAiEmbeddingOptions options = OpenAiEmbeddingOptions.builder()
                     .apiKey(System.getenv("OPENAI_API_KEY"))
-                    .restClientBuilder(restClientBuilder)
                     .build();
-            return new OpenAiEmbeddingModel(api);
+            return OpenAiEmbeddingModel.builder().options(options).build();
         }
 
         @Bean
