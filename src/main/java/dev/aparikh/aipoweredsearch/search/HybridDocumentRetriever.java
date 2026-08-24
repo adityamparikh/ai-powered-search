@@ -54,14 +54,21 @@ public class HybridDocumentRetriever implements DocumentRetriever {
     private static final String VERSION_FIELD = "_version_";
 
     /**
-     * Fields requested from Solr. Deliberately excludes the raw {@code vector} field: at 1536
-     * dimensions per document it would dominate the response payload while contributing nothing to
-     * the generated answer. Mirrors the projection {@code SolrVectorStore} uses.
+     * Builds the Solr field projection from the configured field names.
+     *
+     * <p>Deliberately excludes the raw {@code vector} field: at 1536 dimensions per document it
+     * would dominate the response payload while contributing nothing to the generated answer.
+     * Mirrors the projection {@code SolrVectorStore} uses.</p>
+     *
+     * <p>Derived rather than hardcoded so that overriding {@code idFieldName} or
+     * {@code contentFieldName} keeps asking Solr for the fields the retriever will actually read.
+     * A fixed projection would return documents with no text under the configured content field,
+     * and every one of them would be silently dropped.</p>
      */
-    private static final String DEFAULT_FIELDS_CSV =
-            SolrVectorStoreOptions.DEFAULT_ID_FIELD
-                    + "," + SolrVectorStoreOptions.DEFAULT_CONTENT_FIELD
-                    + "," + SolrVectorStoreOptions.DEFAULT_METADATA_PREFIX + "*";
+    private static String defaultFieldsCsv(String idFieldName, String contentFieldName) {
+        return idFieldName + "," + contentFieldName
+                + "," + SolrVectorStoreOptions.DEFAULT_METADATA_PREFIX + "*";
+    }
 
     private final SearchRepository searchRepository;
     private final String collection;
@@ -88,7 +95,11 @@ public class HybridDocumentRetriever implements DocumentRetriever {
         this.topK = builder.topK;
         this.similarityThreshold = builder.similarityThreshold;
         this.filterExpression = builder.filterExpression;
-        this.fieldsCsv = builder.fieldsCsv;
+        // Fall back to a projection derived from the configured field names, so overriding
+        // contentFieldName/idFieldName without also overriding fieldsCsv still works.
+        this.fieldsCsv = builder.fieldsCsv != null
+                ? builder.fieldsCsv
+                : defaultFieldsCsv(builder.idFieldName, builder.contentFieldName);
     }
 
     /**
@@ -223,7 +234,8 @@ public class HybridDocumentRetriever implements DocumentRetriever {
         private int topK = DEFAULT_TOP_K;
         private Double similarityThreshold;
         private String filterExpression;
-        private String fieldsCsv = DEFAULT_FIELDS_CSV;
+        // Null means "derive from the configured field names at build time".
+        private String fieldsCsv;
 
         private Builder(SearchRepository searchRepository) {
             this.searchRepository = searchRepository;
@@ -274,7 +286,15 @@ public class HybridDocumentRetriever implements DocumentRetriever {
             return this;
         }
 
-        /** Overrides the Solr field projection. Defaults to id, content and metadata fields. */
+        /**
+         * Overrides the Solr field projection.
+         *
+         * <p>By default the projection is derived from the configured id and content field names
+         * plus the metadata prefix, so it stays in step with them. Setting it explicitly takes that
+         * responsibility on: the projection must include whichever fields
+         * {@link #idFieldName(String)} and {@link #contentFieldName(String)} name, or retrieved
+         * documents will have no text and be dropped.</p>
+         */
         public Builder fieldsCsv(String fieldsCsv) {
             this.fieldsCsv = fieldsCsv;
             return this;

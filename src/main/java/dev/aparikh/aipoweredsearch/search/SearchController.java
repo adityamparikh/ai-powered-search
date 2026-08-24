@@ -236,8 +236,10 @@ class SearchController {
     @Operation(
             summary = "Ask a question with RAG (Retrieval-Augmented Generation)",
             description = "Performs conversational question-answering using RAG. " +
-                    "The QuestionAnswerAdvisor automatically retrieves relevant documents from the VectorStore, " +
+                    "The RetrievalAugmentationAdvisor retrieves relevant documents via hybrid search, " +
+                    "fusing keyword (BM25) and vector (KNN) results with Reciprocal Rank Fusion, " +
                     "and Claude AI generates a natural language answer based on the retrieved context. " +
+                    "The response reports the IDs of the documents the answer was grounded in. " +
                     "Maintains conversation history for follow-up questions using the conversationId."
     )
     @ApiResponses(value = {

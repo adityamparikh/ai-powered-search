@@ -37,6 +37,10 @@ dependencies {
     implementation("org.springframework.ai:spring-ai-vector-store-advisor")
     // Modular RAG: DocumentRetriever / RetrievalAugmentationAdvisor used for hybrid RAG retrieval
     implementation("org.springframework.ai:spring-ai-rag")
+    // Bean Validation for request-body constraints (e.g. AskRequest.question). Hibernate Validator
+    // already arrives transitively via springdoc, but @Valid silently does nothing without a
+    // provider on the classpath, so depend on it explicitly rather than by accident.
+    implementation("org.springframework.boot:spring-boot-starter-validation")
     implementation("org.postgresql:postgresql")
     // Apache Solr client with HTTP/2 support
     implementation("org.apache.solr:solr-solrj:9.10.0")

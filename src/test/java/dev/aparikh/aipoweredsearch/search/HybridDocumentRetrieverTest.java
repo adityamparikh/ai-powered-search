@@ -222,6 +222,47 @@ class HybridDocumentRetrieverTest {
         }
 
         @Test
+        void shouldDeriveFieldProjectionFromConfiguredFieldNames() {
+            // A fixed projection would ask Solr only for the default `content`/`id`, so a caller
+            // overriding the field names would get documents with no text — silently dropped.
+            stubHybridSearch(List.of());
+
+            HybridDocumentRetriever renamed = HybridDocumentRetriever.builder(searchRepository)
+                    .collection(COLLECTION)
+                    .idFieldName("doc_id")
+                    .contentFieldName("body")
+                    .build();
+            renamed.retrieve(new Query("anything"));
+
+            ArgumentCaptor<String> fields = ArgumentCaptor.forClass(String.class);
+            org.mockito.Mockito.verify(searchRepository).executeHybridRerankSearch(
+                    anyString(), anyString(), anyInt(), any(), fields.capture(), any());
+
+            assertThat(fields.getValue()).contains("doc_id", "body", "metadata_*");
+        }
+
+        @Test
+        void shouldRetrieveDocumentsUsingOverriddenFieldNames() {
+            Map<String, Object> hit = new LinkedHashMap<>();
+            hit.put("doc_id", "doc-1");
+            hit.put("body", "renamed field content");
+            hit.put("rrf_score", 0.03);
+            stubHybridSearch(List.of(hit));
+
+            HybridDocumentRetriever renamed = HybridDocumentRetriever.builder(searchRepository)
+                    .collection(COLLECTION)
+                    .idFieldName("doc_id")
+                    .contentFieldName("body")
+                    .build();
+
+            List<Document> documents = renamed.retrieve(new Query("anything"));
+
+            assertThat(documents).hasSize(1);
+            assertThat(documents.get(0).getId()).isEqualTo("doc-1");
+            assertThat(documents.get(0).getText()).isEqualTo("renamed field content");
+        }
+
+        @Test
         void shouldDefaultTopKWhenNotConfigured() {
             stubHybridSearch(List.of());
 

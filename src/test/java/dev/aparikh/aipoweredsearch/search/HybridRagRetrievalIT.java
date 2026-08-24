@@ -6,6 +6,8 @@ import dev.aparikh.aipoweredsearch.embedding.EmbeddingService;
 import dev.aparikh.aipoweredsearch.search.model.AskRequest;
 import dev.aparikh.aipoweredsearch.search.model.AskResponse;
 import org.apache.solr.client.solrj.SolrClient;
+import org.apache.solr.client.solrj.SolrQuery;
+import org.apache.solr.client.solrj.request.schema.SchemaRequest;
 import org.apache.solr.common.SolrInputDocument;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -27,12 +29,14 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.solr.SolrContainer;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
@@ -184,7 +188,11 @@ class HybridRagRetrievalIT {
     private void createCollectionWithVectorField() throws Exception {
         solrContainer.execInContainer("/opt/solr/bin/solr", "create_collection",
                 "-c", COLLECTION, "-d", "_default", "-shards", "1", "-replicationFactor", "1");
-        Thread.sleep(3000);
+
+        // Poll rather than sleeping a fixed interval: collection creation and schema propagation
+        // take an unpredictable amount of time, and Awaitility is the project's convention here.
+        await().atMost(Duration.ofSeconds(60)).ignoreExceptions().untilAsserted(() ->
+                assertThat(solrClient.query(COLLECTION, new SolrQuery("*:*").setRows(0))).isNotNull());
 
         solrContainer.execInContainer("curl", "-X", "POST",
                 "-H", "Content-type:application/json",
@@ -202,7 +210,11 @@ class HybridRagRetrievalIT {
                         {"add-field":{"name":"vector","type":"knn_vector","indexed":true,"stored":true}}
                         """.strip(),
                 "http://localhost:8983/solr/" + COLLECTION + "/schema");
-        Thread.sleep(2000);
+
+        // Wait for the vector field to appear in the schema rather than guessing at a delay.
+        await().atMost(Duration.ofSeconds(60)).ignoreExceptions().untilAsserted(() ->
+                assertThat(new SchemaRequest.Field("vector").process(solrClient, COLLECTION).getField())
+                        .isNotNull());
     }
 
     /**
