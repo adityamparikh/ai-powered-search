@@ -78,6 +78,32 @@ class HybridDocumentRetrieverTest {
         }
 
         @Test
+        void shouldFallBackToPlainScoreWhenFusionWasBypassed() {
+            // Hybrid search's keyword-only / vector-only cascade returns raw Solr hits with no
+            // rrf_score. Those documents must still carry their score.
+            Map<String, Object> fallbackHit = new LinkedHashMap<>();
+            fallbackHit.put("id", "doc-1");
+            fallbackHit.put("content", "content");
+            fallbackHit.put("score", 7.5);
+            stubHybridSearch(List.of(fallbackHit));
+
+            List<Document> documents = retriever.retrieve(new Query("anything"));
+
+            assertThat(documents.get(0).getScore()).isEqualTo(7.5);
+        }
+
+        @Test
+        void shouldNotDuplicateScoreIntoMetadata() {
+            // RrfMerger sets `score` as a copy of `rrf_score`; it is already the document's score.
+            stubHybridSearch(List.of(result("doc-1", "content", 0.0328)));
+
+            Map<String, Object> metadata = retriever.retrieve(new Query("anything")).get(0).getMetadata();
+
+            assertThat(metadata).doesNotContainKey("score");
+            assertThat(metadata).containsEntry("rrf_score", 0.0328);
+        }
+
+        @Test
         void shouldPreserveRrfProvenanceInMetadata() {
             Map<String, Object> hit = result("doc-1", "content", 0.0328);
             hit.put("keyword_rank", 1);
@@ -244,14 +270,17 @@ class HybridDocumentRetrieverTest {
         }
 
         @Test
-        void shouldRejectBlankQueryText() {
-            assertThatThrownBy(() -> retriever.retrieve(new Query("  ")))
+        void shouldRejectNullQuery() {
+            assertThatThrownBy(() -> retriever.retrieve(null))
                     .isInstanceOf(IllegalArgumentException.class);
         }
 
         @Test
-        void shouldRejectNullQuery() {
-            assertThatThrownBy(() -> retriever.retrieve(null))
+        void blankQueryTextCannotReachTheRetriever() {
+            // Documents why retrieve() carries no blank-text guard: Spring AI's Query asserts
+            // non-blank text in its constructor, so no Query instance can hold blank text. Blank
+            // input is rejected at the API boundary instead (see AskRequest's @NotBlank).
+            assertThatThrownBy(() -> new Query("   "))
                     .isInstanceOf(IllegalArgumentException.class);
         }
     }

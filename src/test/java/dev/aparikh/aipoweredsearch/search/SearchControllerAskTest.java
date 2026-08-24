@@ -13,6 +13,8 @@ import tools.jackson.databind.ObjectMapper;
 import java.util.List;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
@@ -238,5 +240,27 @@ class SearchControllerAskTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.answer").exists())
                 .andExpect(jsonPath("$.sources.length()").value(5));
+    }
+
+    @Test
+    void shouldRejectBlankQuestionWithBadRequest() throws Exception {
+        // A blank question would otherwise reach RetrievalAugmentationAdvisor, whose Query type
+        // asserts non-blank text, surfacing as an unhandled 500. Validation makes it a 400.
+        mockMvc.perform(post("/api/v1/search/ask")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"question\": \"   \"}"))
+                .andExpect(status().isBadRequest());
+
+        verify(searchService, never()).ask(any(AskRequest.class));
+    }
+
+    @Test
+    void shouldRejectMissingQuestionWithBadRequest() throws Exception {
+        mockMvc.perform(post("/api/v1/search/ask")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"conversationId\": \"c-1\"}"))
+                .andExpect(status().isBadRequest());
+
+        verify(searchService, never()).ask(any(AskRequest.class));
     }
 }

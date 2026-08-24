@@ -10,6 +10,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -251,7 +252,7 @@ class SearchController {
     @PostMapping("/ask")
     public AskResponse ask(
             @Parameter(description = "Question request with optional conversation ID", required = true)
-            @RequestBody AskRequest askRequest) {
+            @Valid @RequestBody AskRequest askRequest) {
         return searchService.ask(askRequest);
     }
 }

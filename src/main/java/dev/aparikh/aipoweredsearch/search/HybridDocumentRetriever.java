@@ -103,8 +103,10 @@ public class HybridDocumentRetriever implements DocumentRetriever {
      */
     @Override
     public List<Document> retrieve(Query query) {
+        // No blank-text guard is needed: Query's constructor asserts non-blank text, so a Query
+        // instance carrying blank text cannot exist. Blank input is rejected at the API boundary
+        // (see AskRequest) before the advisor chain builds a Query at all.
         Assert.notNull(query, "query must not be null");
-        Assert.hasText(query.text(), "query text must not be null or empty");
 
         log.debug("Hybrid RAG retrieval from collection '{}' for query: {}", collection, query.text());
 
@@ -157,7 +159,13 @@ public class HybridDocumentRetriever implements DocumentRetriever {
             builder.id(id.toString());
         }
 
+        // Prefer the fused RRF score, falling back to the plain score: when hybrid search degrades
+        // to its keyword-only or vector-only cascade the results carry no rrf_score, and the
+        // document would otherwise arrive with no score at all.
         Object score = result.get(RrfMerger.RRF_SCORE_FIELD);
+        if (!(score instanceof Number)) {
+            score = result.get(RrfMerger.SCORE_FIELD);
+        }
         if (score instanceof Number number) {
             builder.score(number.doubleValue());
         }
@@ -171,12 +179,15 @@ public class HybridDocumentRetriever implements DocumentRetriever {
      *
      * <p>The RRF provenance fields ({@code rrf_score}, {@code keyword_rank}, {@code vector_rank}
      * and the per-leg scores) are kept: they are small, and they are what lets a caller see whether
-     * a given piece of context arrived through the keyword leg, the vector leg or both.</p>
+     * a given piece of context arrived through the keyword leg, the vector leg or both. The generic
+     * {@code score} field is dropped — {@link RrfMerger} sets it as a duplicate of {@code rrf_score},
+     * and it has already been promoted to the document's own score.</p>
      */
     private Map<String, Object> extractMetadata(Map<String, Object> result) {
         Set<String> excluded = Set.of(
                 contentFieldName,
                 idFieldName,
+                RrfMerger.SCORE_FIELD,
                 SolrVectorStoreOptions.DEFAULT_VECTOR_FIELD,
                 VERSION_FIELD);
 
