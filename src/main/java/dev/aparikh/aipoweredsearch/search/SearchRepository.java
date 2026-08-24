@@ -93,15 +93,24 @@ public class SearchRepository {
     }
 
     /**
-     * Filters documents by minimum score threshold.
+     * Filters a vector-search document by a similarity threshold.
+     *
+     * <p>This is only meaningful for results produced by a KNN query, where {@code score} is
+     * Solr's cosine similarity in the {@code [0..1]} range. It must not be applied to keyword
+     * (BM25) scores, which are unbounded and query-dependent, nor to fused RRF scores, which
+     * are derived from ranks rather than similarity.</p>
+     *
+     * @param doc          a document from a vector search, expected to carry a {@code score} field
+     * @param minSimilarity the minimum cosine similarity, or null to disable filtering
+     * @return true if the document should be kept
      */
-    private boolean passesMinScore(Map<String, Object> doc, Double minScore) {
-        if (minScore == null) {
+    private boolean passesSimilarityThreshold(Map<String, Object> doc, Double minSimilarity) {
+        if (minSimilarity == null) {
             return true;
         }
         Object scoreObj = doc.get(FIELD_SCORE);
-        if (scoreObj instanceof Number) {
-            return ((Number) scoreObj).doubleValue() >= minScore;
+        if (scoreObj instanceof Number number) {
+            return number.doubleValue() >= minSimilarity;
         }
         return true;
     }
@@ -203,25 +212,36 @@ public class SearchRepository {
      * Executes hybrid search combining keyword and vector search using client-side RRF
      * (Reciprocal Rank Fusion).
      *
-     * <p>This method runs keyword and vector searches <strong>concurrently</strong> and then
-     * merges the results using the RRF algorithm. If the merged results are empty, it falls
-     * back through a cascade: keyword-only, then vector-only.</p>
+     * <p>This method runs a keyword search and a vector search, then merges the results using
+     * the RRF algorithm. If the merged results are empty, it falls back through a cascade:
+     * keyword-only, then vector-only.</p>
      *
      * <p>Execution flow:
      * <ol>
-     *   <li>Launch keyword search (edismax) and vector search (KNN) in parallel</li>
-     *   <li>Await both results</li>
+     *   <li>Run keyword search (edismax)</li>
+     *   <li>Run vector search (KNN), discarding hits below {@code minScore}</li>
      *   <li>Merge using {@link RrfMerger}</li>
-     *   <li>Apply minScore filter and limit to topK</li>
+     *   <li>Limit to topK</li>
      *   <li>If empty, try keyword-only fallback, then vector-only fallback</li>
      * </ol>
+     *
+     * <h3>Meaning of {@code minScore}</h3>
+     * <p>{@code minScore} is a <strong>cosine similarity threshold in {@code [0..1]}</strong> and is
+     * applied only to the vector leg, before fusion. It is deliberately <em>not</em> applied to the
+     * fused RRF scores: RRF scores are computed from ranks ({@code 1/(k+rank)}, so roughly
+     * {@code [0..0.033]} for the default k=60) and are not comparable to a similarity. Applying a
+     * similarity-scaled threshold to them would discard every result for any ordinary value such as
+     * {@code 0.5}. It is also not applied to keyword results, whose BM25 scores are unbounded and
+     * query-dependent. Filtering the vector candidates before fusion is the one place the threshold
+     * has a well-defined meaning, and it matches how {@code SolrVectorStore} applies
+     * {@code similarityThreshold}.</p>
      *
      * @param collection       the Solr collection to search
      * @param query            the text query for keyword search
      * @param topK             number of results to return
      * @param filterExpression optional filter query
      * @param fieldsCsv        optional comma-separated list of fields to return
-     * @param minScore         optional minimum RRF score threshold
+     * @param minScore         optional minimum cosine similarity [0..1] for the vector leg
      * @return search response with hybrid-ranked documents
      */
     public SearchResponse executeHybridRerankSearch(String collection,
@@ -235,9 +255,8 @@ public class SearchRepository {
         int fetchSize = topK * OVER_FETCH_MULTIPLIER;
 
         try {
-            // Virtual threads handle blocking I/O efficiently — no need for CompletableFuture
             List<Map<String, Object>> keywordResults = executeKeywordSearch(collection, query, fetchSize, filterExpression, fieldsCsv);
-            List<Map<String, Object>> vectorResults = executeVectorSearch(collection, query, fetchSize, filterExpression, fieldsCsv);
+            List<Map<String, Object>> vectorResults = executeVectorSearch(collection, query, fetchSize, filterExpression, fieldsCsv, minScore);
 
             log.debug("Keyword search returned {} results, vector search returned {} results",
                     keywordResults.size(), vectorResults.size());
@@ -248,13 +267,13 @@ public class SearchRepository {
             List<Map<String, Object>> mergedResults = rrfMerger.merge(keywordResults, vectorResults);
             log.debug("RRF merged results: {} unique documents", mergedResults.size());
 
-            // Apply minScore filter and limit to topK
+            // Limit to topK. The fused RRF score is rank-derived, so minScore is not applied here —
+            // it has already been applied to the vector leg above.
             List<Map<String, Object>> finalResults = mergedResults.stream()
-                    .filter(doc -> passesMinScore(doc, minScore))
                     .limit(topK)
                     .collect(Collectors.toList());
 
-            log.debug("Final hybrid results after filtering and limiting: {} documents", finalResults.size());
+            log.debug("Final hybrid results after limiting: {} documents", finalResults.size());
 
             if (!finalResults.isEmpty()) {
                 return new SearchResponse(finalResults, Map.of(), Map.of(), null);
@@ -310,13 +329,15 @@ public class SearchRepository {
      * @param rows             number of results to return
      * @param filterExpression optional filter query
      * @param fieldsCsv        optional comma-separated list of fields to return
+     * @param minSimilarity    optional minimum cosine similarity [0..1]; hits below it are discarded
      * @return list of documents with similarity scores
      */
     List<Map<String, Object>> executeVectorSearch(String collection,
                                                   String query,
                                                   int rows,
                                                   String filterExpression,
-                                                  String fieldsCsv) throws Exception {
+                                                  String fieldsCsv,
+                                                  Double minSimilarity) throws Exception {
         String vectorString = embeddingService.embedAndFormatForSolr(query);
 
         ModifiableSolrParams params = new ModifiableSolrParams();
@@ -330,12 +351,17 @@ public class SearchRepository {
 
         return response.getResults().stream()
                 .map(this::convertSolrDocumentToMap)
+                .filter(doc -> passesSimilarityThreshold(doc, minSimilarity))
                 .collect(Collectors.toList());
     }
 
     /**
      * Fallback strategy when hybrid search produces no results.
      * Tries keyword-only first, then vector-only as a last resort.
+     *
+     * <p>{@code minScore} is applied only to the vector-only attempt, where {@code score} is a
+     * cosine similarity. Keyword results are returned unfiltered because BM25 scores are unbounded
+     * and not comparable to a {@code [0..1]} threshold.</p>
      */
     private SearchResponse fallbackSearch(String collection,
                                           String query,
@@ -348,13 +374,9 @@ public class SearchRepository {
             List<Map<String, Object>> keywordResults = executeKeywordSearch(
                     collection, query, topK, filterExpression, fieldsCsv);
 
-            List<Map<String, Object>> filtered = keywordResults.stream()
-                    .filter(doc -> passesMinScore(doc, minScore))
-                    .collect(Collectors.toList());
-
-            if (!filtered.isEmpty()) {
-                log.info("Keyword-only fallback returned {} results", filtered.size());
-                return new SearchResponse(filtered, Map.of(), Map.of(), null);
+            if (!keywordResults.isEmpty()) {
+                log.info("Keyword-only fallback returned {} results", keywordResults.size());
+                return new SearchResponse(keywordResults, Map.of(), Map.of(), null);
             }
         } catch (Exception e) {
             log.error("Keyword fallback failed", e);
@@ -363,15 +385,11 @@ public class SearchRepository {
         // Try vector-only as last resort
         try {
             List<Map<String, Object>> vectorResults = executeVectorSearch(
-                    collection, query, topK, filterExpression, fieldsCsv);
+                    collection, query, topK, filterExpression, fieldsCsv, minScore);
 
-            List<Map<String, Object>> filtered = vectorResults.stream()
-                    .filter(doc -> passesMinScore(doc, minScore))
-                    .collect(Collectors.toList());
-
-            if (!filtered.isEmpty()) {
-                log.info("Vector-only fallback returned {} results", filtered.size());
-                return new SearchResponse(filtered, Map.of(), Map.of(), null);
+            if (!vectorResults.isEmpty()) {
+                log.info("Vector-only fallback returned {} results", vectorResults.size());
+                return new SearchResponse(vectorResults, Map.of(), Map.of(), null);
             }
         } catch (Exception e) {
             log.error("Vector fallback failed", e);

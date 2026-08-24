@@ -10,8 +10,10 @@ import dev.aparikh.aipoweredsearch.solr.vectorstore.VectorStoreFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.client.ChatClientResponse;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.document.Document;
+import org.springframework.ai.rag.advisor.RetrievalAugmentationAdvisor;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
@@ -21,6 +23,7 @@ import org.springframework.stereotype.Service;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 /**
@@ -66,7 +69,7 @@ public class SearchService {
      * @param systemResource the system prompt template for traditional search query generation
      * @param searchRepository the repository for low-level Solr operations
      * @param chatClient the ChatClient configured for search query generation
-     * @param ragChatClient the ChatClient configured with QuestionAnswerAdvisor for RAG
+     * @param ragChatClient the ChatClient configured with hybrid retrieval-augmented generation
      * @param vectorStoreFactory the factory to obtain per-collection VectorStore instances
      */
     public SearchService(@Value("classpath:/prompts/system-message.st") Resource systemResource,
@@ -192,7 +195,10 @@ public class SearchService {
      * @param collection    the Solr collection to search
      * @param freeTextQuery the natural language search query
      * @param k             optional topK results for vector search (defaults to 100)
-     * @param minScore      optional minimum similarity score threshold [0..1]
+     * @param minScore      optional minimum cosine similarity [0..1] applied to the vector leg
+     *                      before RRF fusion; see
+     *                      {@link SearchRepository#executeHybridRerankSearch} for why it is not
+     *                      applied to the fused scores
      * @param fieldsCsv     optional comma-separated list of fields to include in the response
      * @return search response with hybrid-ranked documents
      */
@@ -231,7 +237,8 @@ public class SearchService {
      *
      * <p>This method:
      * <ol>
-     *   <li>Uses QuestionAnswerAdvisor to automatically retrieve relevant context from VectorStore</li>
+     *   <li>Uses RetrievalAugmentationAdvisor with a {@link HybridDocumentRetriever} to retrieve
+     *       relevant context using fused keyword and vector search</li>
      *   <li>Passes the question and retrieved context to Claude AI</li>
      *   <li>Returns a natural language answer based on the indexed documents</li>
      *   <li>Maintains conversation history for follow-up questions</li>
@@ -242,7 +249,7 @@ public class SearchService {
      * a conversational answer synthesized from the retrieved documents.</p>
      *
      * @param askRequest the question and conversation context
-     * @return conversational answer with source document IDs
+     * @return conversational answer with the IDs of the documents used as context
      */
     public AskResponse ask(AskRequest askRequest) {
         log.debug("RAG question answering for: {}", askRequest.question());
@@ -250,25 +257,52 @@ public class SearchService {
         String conversationId = askRequest.conversationId() != null ?
                 askRequest.conversationId() : "default";
 
-        // The QuestionAnswerAdvisor automatically:
-        // 1. Searches the VectorStore for relevant documents
-        // 2. Adds them as context to the prompt
+        // The RetrievalAugmentationAdvisor automatically:
+        // 1. Runs hybrid (keyword + vector) retrieval for the question
+        // 2. Adds the fused documents as context to the prompt
         // 3. Claude generates an answer based on that context
-        String answer = ragChatClient.prompt()
+        ChatClientResponse response = ragChatClient.prompt()
                 .user(askRequest.question())
                 .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, conversationId))
                 .call()
-                .content();
+                .chatClientResponse();
+
+        String answer = response != null && response.chatResponse() != null
+                && response.chatResponse().getResult() != null
+                ? response.chatResponse().getResult().getOutput().getText()
+                : null;
 
         log.debug("RAG answer generated: {}", answer);
 
-        // Note: We don't have direct access to which documents were retrieved by QuestionAnswerAdvisor
-        // In a production system, you might want to:
-        // 1. Manually retrieve documents first
-        // 2. Pass them to Claude
-        // 3. Return the document IDs as sources
-        // For now, we return an empty sources list
-        return new AskResponse(answer, conversationId, List.of());
+        return new AskResponse(answer, conversationId, extractSources(response));
+    }
+
+    /**
+     * Extracts the IDs of the documents the advisor retrieved as context.
+     *
+     * <p>{@link RetrievalAugmentationAdvisor} publishes the retrieved documents in the response
+     * context under {@link RetrievalAugmentationAdvisor#DOCUMENT_CONTEXT}, which lets the API tell
+     * a caller which indexed documents an answer was grounded in.</p>
+     *
+     * @param response the advisor response, may be null
+     * @return the source document IDs, never null
+     */
+    private List<String> extractSources(ChatClientResponse response) {
+        if (response == null || response.context() == null) {
+            return List.of();
+        }
+
+        Object documentContext = response.context().get(RetrievalAugmentationAdvisor.DOCUMENT_CONTEXT);
+        if (!(documentContext instanceof List<?> documents)) {
+            return List.of();
+        }
+
+        return documents.stream()
+                .filter(Document.class::isInstance)
+                .map(Document.class::cast)
+                .map(Document::getId)
+                .filter(Objects::nonNull)
+                .toList();
     }
 
     // ============== Helper Methods ==============

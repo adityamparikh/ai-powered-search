@@ -295,36 +295,163 @@ class SearchRepositoryTest {
     @Nested
     class MinScoreFiltering {
 
+        /**
+         * minScore is a cosine similarity in [0..1]. Fused RRF scores are rank-derived and top out
+         * near 2/61 with the default k=60, so applying minScore to them discarded every result for
+         * any ordinary threshold and silently dropped the request into the fallback cascade.
+         * Fusion output must survive a similarity-scaled threshold.
+         */
         @Test
-        void shouldFilterResultsBelowMinScore() throws Exception {
+        void shouldNotDiscardFusedResultsForSimilarityScaledMinScore() throws Exception {
             String collection = "test-collection";
             String query = "score filter test";
-            String vectorString = "[0.1, 0.2, 0.3]";
 
-            when(embeddingService.embedAndFormatForSolr(query)).thenReturn(vectorString);
+            when(embeddingService.embedAndFormatForSolr(query)).thenReturn("[0.1, 0.2, 0.3]");
 
+            QueryResponse keywordResponse = keywordResponse();
+            QueryResponse vectorResponse = vectorResponse();
+            when(solrClient.query(eq(collection), any(SolrParams.class), eq(SolrRequest.METHOD.POST)))
+                    .thenReturn(keywordResponse, vectorResponse);
+
+            SearchResponse response = searchRepository.executeHybridRerankSearch(
+                    collection, query, 10, null, null, 0.5);
+
+            // Both documents survive: RRF scores (~0.033 and ~0.016) are never compared to 0.5.
+            assertEquals(2, response.documents().size());
+
+            Map<String, Object> first = response.documents().get(0);
+            Map<String, Object> second = response.documents().get(1);
+            assertEquals("alpha", first.get("id"));
+            assertEquals("beta", second.get("id"));
+
+            // Presence of RRF bookkeeping proves these came from fusion, not the fallback cascade.
+            assertNotNull(first.get("rrf_score"));
+            assertNotNull(second.get("rrf_score"));
+        }
+
+        /**
+         * The threshold still has to do something: it is the vector leg's similarity cutoff, so a
+         * low-similarity hit must be excluded from the vector candidates before fusion.
+         */
+        @Test
+        void shouldApplyMinScoreToVectorLegOnly() throws Exception {
+            String collection = "test-collection";
+            String query = "score filter test";
+
+            when(embeddingService.embedAndFormatForSolr(query)).thenReturn("[0.1, 0.2, 0.3]");
+
+            // Build the stubs before entering when(...) so their own stubbing completes first.
+            QueryResponse keywordResponse = keywordResponse();
+            QueryResponse vectorResponse = vectorResponse();
+            when(solrClient.query(eq(collection), any(SolrParams.class), eq(SolrRequest.METHOD.POST)))
+                    .thenReturn(keywordResponse, vectorResponse);
+
+            SearchResponse response = searchRepository.executeHybridRerankSearch(
+                    collection, query, 10, null, null, 0.5);
+
+            Map<String, Object> alpha = response.documents().get(0);
+            Map<String, Object> beta = response.documents().get(1);
+
+            // alpha (vector similarity 0.9) clears the threshold and contributes from both legs.
+            assertEquals(1, alpha.get("keyword_rank"));
+            assertEquals(1, alpha.get("vector_rank"));
+
+            // beta (vector similarity 0.2) is dropped from the vector leg but kept by BM25, whose
+            // unbounded scores are not comparable to a [0..1] threshold.
+            assertEquals(2, beta.get("keyword_rank"));
+            assertNull(beta.get("vector_rank"));
+        }
+
+        /** BM25 scores are unbounded, so a similarity threshold must not filter keyword fallback. */
+        @Test
+        void shouldNotFilterKeywordFallbackByMinScore() throws Exception {
+            String collection = "test-collection";
+            String query = "fallback keeps low bm25";
+
+            when(embeddingService.embedAndFormatForSolr(query)).thenReturn("[0.1, 0.2, 0.3]");
+
+            QueryResponse emptyResponse = org.mockito.Mockito.mock(QueryResponse.class);
+            when(emptyResponse.getResults()).thenReturn(emptyDocs());
+
+            SolrDocumentList fallbackDocs = new SolrDocumentList();
+            fallbackDocs.add(solrDoc("weak-but-relevant", 0.2f));
+            fallbackDocs.setNumFound(1L);
+            QueryResponse fallbackResponse = org.mockito.Mockito.mock(QueryResponse.class);
+            when(fallbackResponse.getResults()).thenReturn(fallbackDocs);
+
+            // hybrid keyword (empty), hybrid vector (empty), keyword fallback (low BM25 score)
+            when(solrClient.query(eq(collection), any(SolrParams.class), eq(SolrRequest.METHOD.POST)))
+                    .thenReturn(emptyResponse, emptyResponse, fallbackResponse);
+
+            SearchResponse response = searchRepository.executeHybridRerankSearch(
+                    collection, query, 10, null, null, 0.5);
+
+            assertEquals(1, response.documents().size());
+            assertEquals("weak-but-relevant", response.documents().get(0).get("id"));
+        }
+
+        /** The vector-only fallback is the one place the threshold keeps its filtering role. */
+        @Test
+        void shouldStillFilterVectorFallbackByMinScore() throws Exception {
+            String collection = "test-collection";
+            String query = "vector fallback below threshold";
+
+            when(embeddingService.embedAndFormatForSolr(query)).thenReturn("[0.1, 0.2, 0.3]");
+
+            QueryResponse emptyResponse = org.mockito.Mockito.mock(QueryResponse.class);
+            when(emptyResponse.getResults()).thenReturn(emptyDocs());
+
+            SolrDocumentList vectorDocs = new SolrDocumentList();
+            vectorDocs.add(solrDoc("dissimilar", 0.2f));
+            vectorDocs.setNumFound(1L);
+            QueryResponse vectorFallback = org.mockito.Mockito.mock(QueryResponse.class);
+            when(vectorFallback.getResults()).thenReturn(vectorDocs);
+
+            // hybrid keyword, hybrid vector, keyword fallback all empty; vector fallback too weak
+            when(solrClient.query(eq(collection), any(SolrParams.class), eq(SolrRequest.METHOD.POST)))
+                    .thenReturn(emptyResponse, emptyResponse, emptyResponse, vectorFallback);
+
+            SearchResponse response = searchRepository.executeHybridRerankSearch(
+                    collection, query, 10, null, null, 0.5);
+
+            assertTrue(response.documents().isEmpty());
+        }
+
+        private SolrDocument solrDoc(String id, float score) {
+            SolrDocument doc = new SolrDocument();
+            doc.setField("id", id);
+            doc.setField("score", score);
+            return doc;
+        }
+
+        private SolrDocumentList emptyDocs() {
             SolrDocumentList docs = new SolrDocumentList();
-            SolrDocument doc1 = new SolrDocument();
-            doc1.setField("id", "high");
-            doc1.setField("score", 10.0f);
-            docs.add(doc1);
-            SolrDocument doc2 = new SolrDocument();
-            doc2.setField("id", "low");
-            doc2.setField("score", 0.001f);
-            docs.add(doc2);
+            docs.setNumFound(0L);
+            return docs;
+        }
+
+        /** Two hits with unbounded BM25 scores, alpha ranked first. */
+        private QueryResponse keywordResponse() {
+            SolrDocumentList docs = new SolrDocumentList();
+            docs.add(solrDoc("alpha", 8.0f));
+            docs.add(solrDoc("beta", 3.0f));
             docs.setNumFound(2L);
 
-            when(queryResponse.getResults()).thenReturn(docs);
-            when(solrClient.query(eq(collection), any(SolrParams.class), eq(SolrRequest.METHOD.POST)))
-                    .thenReturn(queryResponse);
+            QueryResponse response = org.mockito.Mockito.mock(QueryResponse.class);
+            when(response.getResults()).thenReturn(docs);
+            return response;
+        }
 
-            // Use a high minScore to filter out low-scoring documents
-            SearchResponse response = searchRepository.executeHybridRerankSearch(
-                    collection, query, 10, null, null, 0.02);
+        /** The same two hits with cosine similarities straddling a 0.5 threshold. */
+        private QueryResponse vectorResponse() {
+            SolrDocumentList docs = new SolrDocumentList();
+            docs.add(solrDoc("alpha", 0.9f));
+            docs.add(solrDoc("beta", 0.2f));
+            docs.setNumFound(2L);
 
-            // The RRF scores for these docs will be small (1/(60+rank)), but only the
-            // highest-scored ones should pass the threshold
-            assertNotNull(response);
+            QueryResponse response = org.mockito.Mockito.mock(QueryResponse.class);
+            when(response.getResults()).thenReturn(docs);
+            return response;
         }
 
         @Test

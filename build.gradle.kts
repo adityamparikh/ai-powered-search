@@ -35,6 +35,8 @@ dependencies {
     implementation("org.springframework.ai:spring-ai-starter-model-chat-memory-repository-jdbc")
     implementation("org.springframework.ai:spring-ai-vector-store")
     implementation("org.springframework.ai:spring-ai-vector-store-advisor")
+    // Modular RAG: DocumentRetriever / RetrievalAugmentationAdvisor used for hybrid RAG retrieval
+    implementation("org.springframework.ai:spring-ai-rag")
     implementation("org.postgresql:postgresql")
     // Apache Solr client with HTTP/2 support
     implementation("org.apache.solr:solr-solrj:9.10.0")

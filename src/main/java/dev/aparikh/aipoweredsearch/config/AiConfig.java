@@ -1,6 +1,8 @@
 package dev.aparikh.aipoweredsearch.config;
 
 import com.anthropic.models.messages.Model;
+import dev.aparikh.aipoweredsearch.search.HybridDocumentRetriever;
+import dev.aparikh.aipoweredsearch.search.SearchRepository;
 import org.springframework.ai.anthropic.AnthropicCacheOptions;
 import org.springframework.ai.anthropic.AnthropicCacheStrategy;
 import org.springframework.ai.anthropic.AnthropicCacheTtl;
@@ -8,13 +10,15 @@ import org.springframework.ai.anthropic.AnthropicChatOptions;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
 import org.springframework.ai.chat.client.advisor.SimpleLoggerAdvisor;
-import org.springframework.ai.chat.client.advisor.vectorstore.QuestionAnswerAdvisor;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.messages.MessageType;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.openai.OpenAiEmbeddingModel;
 import org.springframework.ai.openai.OpenAiEmbeddingOptions;
+import org.springframework.ai.rag.advisor.RetrievalAugmentationAdvisor;
+import org.springframework.ai.rag.generation.augmentation.ContextualQueryAugmenter;
+import org.springframework.ai.rag.retrieval.search.DocumentRetriever;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -172,15 +176,47 @@ public class AiConfig {
     }
 
     /**
-     * Creates a RAG-enabled ChatClient bean with QuestionAnswerAdvisor.
+     * Creates the {@link DocumentRetriever} used to gather RAG context.
+     *
+     * <p>This is a hybrid retriever rather than a vector-only one. Dense retrieval alone misses
+     * documents whose relevance is lexical — exact identifiers, error strings, rare proper nouns —
+     * so the retriever fuses BM25 and KNN results with Reciprocal Rank Fusion before handing the
+     * top hits to the model.</p>
+     *
+     * @param searchRepository    executes the hybrid search against Solr
+     * @param collectionName      the Solr collection holding indexed documents
+     * @param topK                how many fused documents to use as context
+     * @param similarityThreshold minimum cosine similarity [0..1] for the vector leg
+     * @return the hybrid document retriever
+     */
+    @Bean
+    public DocumentRetriever hybridDocumentRetriever(
+            SearchRepository searchRepository,
+            @Value("${solr.default.collection:books}") String collectionName,
+            @Value("${rag.retrieval.top-k:5}") int topK,
+            @Value("${rag.retrieval.min-score:0.3}") double similarityThreshold) {
+        return HybridDocumentRetriever.builder(searchRepository)
+                .collection(collectionName)
+                .topK(topK)
+                .similarityThreshold(similarityThreshold)
+                .build();
+    }
+
+    /**
+     * Creates a RAG-enabled ChatClient bean backed by hybrid retrieval.
      *
      * <p>This bean is used for conversational question-answering with retrieval-augmented
-     * generation (RAG). It automatically retrieves relevant context from the VectorStore
-     * and includes it in the conversation.</p>
+     * generation (RAG). It automatically retrieves relevant context for each question and includes
+     * it in the conversation.</p>
+     *
+     * <p>Retrieval goes through {@link RetrievalAugmentationAdvisor} with a
+     * {@link HybridDocumentRetriever} rather than through {@code QuestionAnswerAdvisor}. The
+     * latter is hardwired to a {@link VectorStore} and can only do dense similarity search, which
+     * is exactly the recall gap hybrid search exists to close.</p>
      *
      * <p>The ChatClient is configured with advisors:
      * <ul>
-     *   <li>QuestionAnswerAdvisor - Retrieves context from VectorStore for RAG</li>
+     *   <li>RetrievalAugmentationAdvisor - Retrieves hybrid (keyword + vector) context for RAG</li>
      *   <li>MessageChatMemoryAdvisor - Maintains conversational context across requests</li>
      *   <li>SimpleLoggerAdvisor - Logs chat interactions for debugging</li>
      *   <li>PromptCacheMetricsAdvisor - Logs cache metrics when prompt caching is enabled</li>
@@ -189,7 +225,7 @@ public class AiConfig {
      *
      * @param chatModel the ChatModel (Anthropic) auto-configured by Spring AI
      * @param chatMemory the ChatMemory for maintaining conversation history
-     * @param vectorStore the VectorStore for retrieving relevant context
+     * @param documentRetriever the retriever supplying RAG context
      * @param cachingEnabled whether prompt caching is enabled
      * @param chatOptions the chat options with caching configured (optional, may be null if caching disabled)
      * @return configured ChatClient instance with RAG capabilities
@@ -198,7 +234,7 @@ public class AiConfig {
     @Qualifier("ragChatClient")
     public ChatClient ragChatClient(ChatModel chatModel,
                                     ChatMemory chatMemory,
-                                    VectorStore vectorStore,
+                                    DocumentRetriever documentRetriever,
                                     @Value("${spring.ai.anthropic.prompt-caching.enabled:true}") boolean cachingEnabled,
                                     @Autowired(required = false) @Qualifier("anthropicChatOptionsWithCaching") AnthropicChatOptions chatOptions) {
         ChatClient.Builder builder = ChatClient.builder(chatModel);
@@ -210,12 +246,14 @@ public class AiConfig {
         }
 
         return builder.defaultAdvisors(
-                        QuestionAnswerAdvisor.builder(vectorStore)
-                                .searchRequest(org.springframework.ai.vectorstore.SearchRequest.builder()
-                                        .topK(5)
-                                        // Lower threshold to ensure relevant context is retrieved reliably
-                                        // across providers and embeddings in tests
-                                        .similarityThreshold(0.3)
+                        RetrievalAugmentationAdvisor.builder()
+                                .documentRetriever(documentRetriever)
+                                // RetrievalAugmentationAdvisor refuses to answer without context by
+                                // default. QuestionAnswerAdvisor did not, and follow-up questions in
+                                // an ongoing conversation are often answerable from chat memory
+                                // alone, so keep the previous behaviour.
+                                .queryAugmenter(ContextualQueryAugmenter.builder()
+                                        .allowEmptyContext(true)
                                         .build())
                                 .build(),
                         MessageChatMemoryAdvisor.builder(chatMemory).build(),

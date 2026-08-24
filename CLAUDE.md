@@ -400,7 +400,8 @@ Documents can be indexed with automatic embedding generation via REST endpoints:
 - Intelligent fallback: hybrid → keyword-only → vector-only if no results
 - Parameters:
     - `k`: topK results (defaults to 100)
-    - `minScore`: minimum RRF score threshold
+    - `minScore`: minimum cosine similarity [0..1] applied to the vector leg before fusion (not to
+      the fused RRF scores, which are rank-derived and on a different scale)
     - `fields`: comma-separated list of fields to return
 - Example: "machine learning frameworks" (finds both exact term matches and semantically similar content)
 
@@ -425,8 +426,10 @@ Response:
 }
 ```
 
-- Uses QuestionAnswerAdvisor to automatically retrieve relevant documents from VectorStore
+- Uses RetrievalAugmentationAdvisor with `HybridDocumentRetriever` to retrieve context via fused
+  keyword + vector search, so lexically-relevant documents dense retrieval would miss still reach the model
 - Claude generates conversational answers based on retrieved context
+- `sources` reports the IDs of the documents the answer was grounded in
 - Maintains conversation history for follow-up questions
 - Reduces hallucinations by grounding answers in indexed documents
 - Example: "How does dependency injection work in Spring?"
@@ -438,7 +441,7 @@ Response:
     - Traditional: BM25 keyword search
    - Semantic: KNN similarity search (topK=50 by default)
    - Hybrid: Client-side RRF merging keyword and vector results
-4. For RAG: QuestionAnswerAdvisor retrieves context and injects into prompt
+4. For RAG: RetrievalAugmentationAdvisor runs hybrid retrieval and injects the fused context into the prompt
 5. Returns documents with scores and enhanced features (highlighting, facets, spell check)
 
 **Implementation**:
@@ -447,7 +450,8 @@ Response:
 - `SearchRepository.executeHybridRerankSearch()` for hybrid search orchestration
 - `RrfMerger` for client-side RRF algorithm implementation
 - `SearchService.ask()` for RAG question answering
-- `AiConfig.ragChatClient` bean with QuestionAnswerAdvisor configuration
+- `HybridDocumentRetriever` adapting hybrid search to Spring AI's `DocumentRetriever` contract
+- `AiConfig.ragChatClient` bean with RetrievalAugmentationAdvisor configuration
 
 ## Testing Architecture
 
@@ -657,7 +661,7 @@ List<Map<String, Object>> mergedResults = rrfMerger.merge(keywordResults, vector
 - Fetches `topK * 2` results from each search for better fusion quality
 - Schema-agnostic using `_text_` catch-all field
 - Intelligent fallback: hybrid → keyword → vector if no results
-- Applies minScore filtering and topK limiting after fusion
+- Applies topK limiting after fusion; minScore filters the vector leg before fusion
 
 ### Observation and Metrics
 The `SolrVectorStore` extends `AbstractObservationVectorStore` for integration with Micrometer:
@@ -672,17 +676,29 @@ The RAG (Retrieval-Augmented Generation) feature uses a dedicated `ragChatClient
 ```java
 
 @Bean
+public DocumentRetriever hybridDocumentRetriever(SearchRepository searchRepository,
+                                                 @Value("${solr.default.collection:books}") String collectionName,
+                                                 @Value("${rag.retrieval.top-k:5}") int topK,
+                                                 @Value("${rag.retrieval.min-score:0.3}") double similarityThreshold) {
+    return HybridDocumentRetriever.builder(searchRepository)
+            .collection(collectionName)
+            .topK(topK)
+            .similarityThreshold(similarityThreshold)
+            .build();
+}
+
+@Bean
 @Qualifier("ragChatClient")
 public ChatClient ragChatClient(ChatModel chatModel,
                                 ChatMemory chatMemory,
-                                VectorStore vectorStore,
+                                DocumentRetriever documentRetriever,
                                 ...) {
     return ChatClient.builder(chatModel)
             .defaultAdvisors(
-                    QuestionAnswerAdvisor.builder(vectorStore)
-                            .searchRequest(SearchRequest.builder()
-                                    .topK(5)
-                                    .similarityThreshold(0.3)
+                    RetrievalAugmentationAdvisor.builder()
+                            .documentRetriever(documentRetriever)
+                            .queryAugmenter(ContextualQueryAugmenter.builder()
+                                    .allowEmptyContext(true)
                                     .build())
                             .build(),
                     MessageChatMemoryAdvisor.builder(chatMemory).build(),
@@ -697,12 +713,17 @@ public ChatClient ragChatClient(ChatModel chatModel,
 
 **Key components**:
 
-- **QuestionAnswerAdvisor**: Automatically retrieves relevant documents from VectorStore based on question
+- **RetrievalAugmentationAdvisor**: Spring AI's Modular RAG advisor; unlike `QuestionAnswerAdvisor` it accepts
+  any `DocumentRetriever` rather than being hardwired to a `VectorStore`
+- **HybridDocumentRetriever**: Retrieves context via `SearchRepository.executeHybridRerankSearch()`, fusing BM25
+  and KNN results with RRF so lexically-relevant documents dense retrieval ranks low still reach the model
+- **ContextualQueryAugmenter** with `allowEmptyContext(true)`: lets follow-up questions be answered from chat
+  memory when retrieval finds nothing, matching the previous `QuestionAnswerAdvisor` behaviour
 - **MessageChatMemoryAdvisor**: Maintains conversation context across multiple questions
 - **SimpleLoggerAdvisor**: Logs prompts and responses for debugging
 - **PromptCacheMetricsAdvisor**: Tracks Anthropic prompt caching metrics
-- **VectorStore**: Default collection configured via `solr.default.collection` property (defaults to "books")
-- **Search parameters**: topK=5, similarityThreshold=0.3 (lower threshold for better recall)
+- **Retrieval parameters**: `rag.retrieval.top-k` (default 5) and `rag.retrieval.min-score` (default 0.3, a cosine
+  similarity applied to the vector leg); collection from `solr.default.collection` (defaults to "books")
 
 ### Chat Memory
 

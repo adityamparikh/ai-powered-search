@@ -13,7 +13,12 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.client.ChatClientResponse;
+import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.document.Document;
+import org.springframework.ai.rag.advisor.RetrievalAugmentationAdvisor;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.core.io.Resource;
@@ -433,7 +438,7 @@ class SearchServiceTest {
         AskRequest request = new AskRequest(question);
 
         // Mock RAG ChatClient to return answer
-        when(ragCallResponseSpec.content()).thenReturn(expectedAnswer);
+        when(ragCallResponseSpec.chatClientResponse()).thenReturn(ragResponse(expectedAnswer, List.of()));
 
         // When
         AskResponse response = searchService.ask(request);
@@ -443,7 +448,7 @@ class SearchServiceTest {
         assertEquals(expectedAnswer, response.answer());
         assertEquals("default", response.conversationId());
         assertNotNull(response.sources());
-        assertEquals(0, response.sources().size()); // Sources not tracked in current implementation
+        assertEquals(0, response.sources().size());
     }
 
     @Test
@@ -459,7 +464,7 @@ class SearchServiceTest {
         AskRequest request = new AskRequest(question, conversationId);
 
         // Mock RAG ChatClient to return answer
-        when(ragCallResponseSpec.content()).thenReturn(expectedAnswer);
+        when(ragCallResponseSpec.chatClientResponse()).thenReturn(ragResponse(expectedAnswer, List.of()));
 
         // When
         AskResponse response = searchService.ask(request);
@@ -483,7 +488,7 @@ class SearchServiceTest {
         AskRequest request = new AskRequest(question, null);
 
         // Mock RAG ChatClient to return answer
-        when(ragCallResponseSpec.content()).thenReturn(expectedAnswer);
+        when(ragCallResponseSpec.chatClientResponse()).thenReturn(ragResponse(expectedAnswer, List.of()));
 
         // When
         AskResponse response = searchService.ask(request);
@@ -686,5 +691,70 @@ class SearchServiceTest {
         // Verify year is converted from Long to Integer
         assertTrue(docMap.containsKey("year"));
         assertEquals(2024, docMap.get("year"));
+    }
+
+    // ============== RAG Source Attribution Tests ==============
+
+    @Test
+    void shouldReportRetrievedDocumentIdsAsSources() {
+        // Given: the advisor published the documents it retrieved into the response context
+        String question = "What is RRF?";
+        List<Document> retrieved = List.of(
+                Document.builder().id("doc-1").text("Reciprocal Rank Fusion combines rankings.").build(),
+                Document.builder().id("doc-2").text("RRF uses 1/(k+rank).").build());
+
+        when(ragCallResponseSpec.chatClientResponse())
+                .thenReturn(ragResponse("RRF fuses ranked lists.", retrieved));
+
+        // When
+        AskResponse response = searchService.ask(new AskRequest(question));
+
+        // Then
+        assertEquals(List.of("doc-1", "doc-2"), response.sources());
+    }
+
+    @Test
+    void shouldReturnEmptySourcesWhenNoDocumentsWereRetrieved() {
+        // Given: an answer produced without any retrieved context
+        when(ragCallResponseSpec.chatClientResponse())
+                .thenReturn(ragResponse("I don't have information about that.", null));
+
+        // When
+        AskResponse response = searchService.ask(new AskRequest("Unknown topic?"));
+
+        // Then
+        assertNotNull(response.sources());
+        assertTrue(response.sources().isEmpty());
+    }
+
+    @Test
+    void shouldReturnEmptySourcesWhenAdvisorResponseIsUnavailable() {
+        // Given: the chat client yields no response object at all
+        when(ragCallResponseSpec.chatClientResponse()).thenReturn(null);
+
+        // When
+        AskResponse response = searchService.ask(new AskRequest("Anything?"));
+
+        // Then: the call still produces a well-formed response rather than throwing
+        assertNotNull(response);
+        assertEquals("default", response.conversationId());
+        assertNotNull(response.sources());
+        assertTrue(response.sources().isEmpty());
+    }
+
+    /**
+     * Builds a ChatClientResponse shaped the way RetrievalAugmentationAdvisor produces one:
+     * an assistant message plus the retrieved documents under DOCUMENT_CONTEXT.
+     *
+     * @param answer    the assistant's answer text
+     * @param documents the retrieved documents, or null to simulate a response with no context key
+     */
+    private ChatClientResponse ragResponse(String answer, List<Document> documents) {
+        ChatResponse chatResponse = new ChatResponse(List.of(new Generation(new AssistantMessage(answer))));
+        ChatClientResponse.Builder builder = ChatClientResponse.builder().chatResponse(chatResponse);
+        if (documents != null) {
+            builder.context(Map.of(RetrievalAugmentationAdvisor.DOCUMENT_CONTEXT, documents));
+        }
+        return builder.build();
     }
 }
