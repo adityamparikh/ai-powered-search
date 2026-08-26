@@ -421,11 +421,12 @@ Response:
 {
   "answer": "Generated answer based on retrieved context",
   "conversationId": "session-id",
-  "sources": []
+  "sources": ["doc-1", "doc-2"]
 }
 ```
 
-- Uses QuestionAnswerAdvisor to automatically retrieve relevant documents from VectorStore
+- Uses RetrievalAugmentationAdvisor with HybridDocumentRetriever to retrieve relevant documents
+  via hybrid search (keyword + vector, RRF-fused)
 - Claude generates conversational answers based on retrieved context
 - Maintains conversation history for follow-up questions
 - Reduces hallucinations by grounding answers in indexed documents
@@ -438,7 +439,7 @@ Response:
     - Traditional: BM25 keyword search
    - Semantic: KNN similarity search (topK=50 by default)
    - Hybrid: Client-side RRF merging keyword and vector results
-4. For RAG: QuestionAnswerAdvisor retrieves context and injects into prompt
+4. For RAG: RetrievalAugmentationAdvisor retrieves hybrid context and injects into prompt
 5. Returns documents with scores and enhanced features (highlighting, facets, spell check)
 
 **Implementation**:
@@ -447,7 +448,8 @@ Response:
 - `SearchRepository.executeHybridRerankSearch()` for hybrid search orchestration
 - `RrfMerger` for client-side RRF algorithm implementation
 - `SearchService.ask()` for RAG question answering
-- `AiConfig.ragChatClient` bean with QuestionAnswerAdvisor configuration
+- `AiConfig.ragChatClient` bean with RetrievalAugmentationAdvisor configuration
+- `HybridDocumentRetriever` adapting hybrid search to Spring AI's `DocumentRetriever` SPI
 
 ## Testing Architecture
 
@@ -651,6 +653,8 @@ List<Map<String, Object>> mergedResults = rrfMerger.merge(keywordResults, vector
 
 **Key features**:
 
+- Keyword and vector legs execute **concurrently** on virtual threads, so a hybrid query
+  costs roughly one Solr round-trip instead of two
 - Uses client-side RRF merging via `RrfMerger` class
 - RRF formula: `score = sum(1 / (k + rank))` with configurable k parameter (default: 60)
 - Executes keyword (edismax) and vector (KNN) searches independently
@@ -669,21 +673,31 @@ The `SolrVectorStore` extends `AbstractObservationVectorStore` for integration w
 
 The RAG (Retrieval-Augmented Generation) feature uses a dedicated `ragChatClient` bean configured in `AiConfig`:
 
+RAG retrieval uses **hybrid search** (keyword + vector, fused with RRF), not vector similarity
+alone. This requires the `spring-ai-rag` dependency:
+
+```kotlin
+implementation("org.springframework.ai:spring-ai-rag")
+```
+
 ```java
 
 @Bean
 @Qualifier("ragChatClient")
 public ChatClient ragChatClient(ChatModel chatModel,
                                 ChatMemory chatMemory,
-                                VectorStore vectorStore,
+                                HybridDocumentRetriever hybridDocumentRetriever,
                                 ...) {
     return ChatClient.builder(chatModel)
             .defaultAdvisors(
-                    QuestionAnswerAdvisor.builder(vectorStore)
-                            .searchRequest(SearchRequest.builder()
-                                    .topK(5)
-                                    .similarityThreshold(0.3)
-                                    .build())
+                    RetrievalAugmentationAdvisor.builder()
+                            .documentRetriever(hybridDocumentRetriever)
+                            // Pass-through joiner: the default ConcatenationDocumentJoiner
+                            // re-sorts by score and would undo the RRF ranking.
+                            .documentJoiner(documentsForQuery -> documentsForQuery.values().stream()
+                                    .flatMap(List::stream)
+                                    .flatMap(List::stream)
+                                    .toList())
                             .build(),
                     MessageChatMemoryAdvisor.builder(chatMemory).build(),
                     SimpleLoggerAdvisor.builder().build(),
@@ -697,12 +711,26 @@ public ChatClient ragChatClient(ChatModel chatModel,
 
 **Key components**:
 
-- **QuestionAnswerAdvisor**: Automatically retrieves relevant documents from VectorStore based on question
+- **RetrievalAugmentationAdvisor**: Spring AI's modular RAG advisor; delegates retrieval to a
+  `DocumentRetriever` and injects the results into the prompt
+- **HybridDocumentRetriever**: Implements `DocumentRetriever` over
+  `SearchRepository.executeHybridRerankSearch()`. Calls the repository directly, deliberately
+  skipping `SearchService`'s Claude query-generation step — that is worth its latency for a
+  search API but not on a RAG turn, where the model already has the question.
+- **Pass-through DocumentJoiner**: Required. The default `ConcatenationDocumentJoiner` re-sorts
+  documents by their own score, which would discard the fused RRF ordering.
 - **MessageChatMemoryAdvisor**: Maintains conversation context across multiple questions
 - **SimpleLoggerAdvisor**: Logs prompts and responses for debugging
 - **PromptCacheMetricsAdvisor**: Tracks Anthropic prompt caching metrics
-- **VectorStore**: Default collection configured via `solr.default.collection` property (defaults to "books")
-- **Search parameters**: topK=5, similarityThreshold=0.3 (lower threshold for better recall)
+- **Collection**: `solr.default.collection` property (defaults to "books")
+- **Retrieval depth**: `search.rag.hybrid.top-k` (defaults to 5)
+- **Field projection**: `id,content,metadata_*` — excludes the 1536-dim `vector` field, which
+  Solr would otherwise return on every hit under the default `fl=*`
+
+**Sources**: `AskResponse.sources` reports the IDs of documents actually placed in the prompt
+context, read from `RetrievalAugmentationAdvisor.DOCUMENT_CONTEXT` in the response context.
+`SearchService.ask()` therefore requests `.call().chatClientResponse()` rather than
+`.call().content()`.
 
 ### Chat Memory
 

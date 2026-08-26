@@ -10,8 +10,11 @@ import dev.aparikh.aipoweredsearch.solr.vectorstore.VectorStoreFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.client.ChatClientResponse;
 import org.springframework.ai.chat.memory.ChatMemory;
+import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.document.Document;
+import org.springframework.ai.rag.advisor.RetrievalAugmentationAdvisor;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
@@ -192,7 +195,9 @@ public class SearchService {
      * @param collection    the Solr collection to search
      * @param freeTextQuery the natural language search query
      * @param k             optional topK results for vector search (defaults to 100)
-     * @param minScore      optional minimum similarity score threshold [0..1]
+     * @param minScore      optional minimum cosine similarity [0..1], applied to the vector
+     *                      leg before fusion; it does not threshold keyword hits or the
+     *                      fused RRF score
      * @param fieldsCsv     optional comma-separated list of fields to include in the response
      * @return search response with hybrid-ranked documents
      */
@@ -250,25 +255,62 @@ public class SearchService {
         String conversationId = askRequest.conversationId() != null ?
                 askRequest.conversationId() : "default";
 
-        // The QuestionAnswerAdvisor automatically:
-        // 1. Searches the VectorStore for relevant documents
+        // The RetrievalAugmentationAdvisor automatically:
+        // 1. Retrieves relevant documents via HybridDocumentRetriever (keyword + vector, RRF-fused)
         // 2. Adds them as context to the prompt
         // 3. Claude generates an answer based on that context
-        String answer = ragChatClient.prompt()
+        //
+        // We ask for the full ChatClientResponse rather than just content() because the advisor
+        // publishes the documents it retrieved into the response context, which lets us report
+        // them as sources.
+        ChatClientResponse chatClientResponse = ragChatClient.prompt()
                 .user(askRequest.question())
                 .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, conversationId))
                 .call()
-                .content();
+                .chatClientResponse();
 
-        log.debug("RAG answer generated: {}", answer);
+        String answer = extractAnswer(chatClientResponse);
+        List<String> sources = extractSources(chatClientResponse);
 
-        // Note: We don't have direct access to which documents were retrieved by QuestionAnswerAdvisor
-        // In a production system, you might want to:
-        // 1. Manually retrieve documents first
-        // 2. Pass them to Claude
-        // 3. Return the document IDs as sources
-        // For now, we return an empty sources list
-        return new AskResponse(answer, conversationId, List.of());
+        log.debug("RAG answer generated from {} retrieved document(s)", sources.size());
+
+        return new AskResponse(answer, conversationId, sources);
+    }
+
+    /**
+     * Extracts the generated text from a chat client response.
+     *
+     * @return the answer, or an empty string if the model produced no result
+     */
+    private String extractAnswer(ChatClientResponse chatClientResponse) {
+        ChatResponse chatResponse = chatClientResponse.chatResponse();
+        if (chatResponse == null || chatResponse.getResult() == null) {
+            log.warn("RAG chat response contained no result");
+            return "";
+        }
+        String text = chatResponse.getResult().getOutput().getText();
+        return text != null ? text : "";
+    }
+
+    /**
+     * Extracts the IDs of the documents the retrieval advisor placed in the prompt context.
+     *
+     * <p>{@link RetrievalAugmentationAdvisor} publishes the retrieved documents under
+     * {@link RetrievalAugmentationAdvisor#DOCUMENT_CONTEXT}. The list is absent when no
+     * retrieval ran, and empty when retrieval found nothing.</p>
+     *
+     * @return the source document IDs in retrieval order; never null
+     */
+    private List<String> extractSources(ChatClientResponse chatClientResponse) {
+        Object retrieved = chatClientResponse.context().get(RetrievalAugmentationAdvisor.DOCUMENT_CONTEXT);
+        if (!(retrieved instanceof List<?> documents)) {
+            return List.of();
+        }
+        return documents.stream()
+                .filter(Document.class::isInstance)
+                .map(document -> ((Document) document).getId())
+                .filter(java.util.Objects::nonNull)
+                .toList();
     }
 
     // ============== Helper Methods ==============

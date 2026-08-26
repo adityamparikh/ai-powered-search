@@ -13,7 +13,12 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.client.ChatClientResponse;
+import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.document.Document;
+import org.springframework.ai.rag.advisor.RetrievalAugmentationAdvisor;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.core.io.Resource;
@@ -422,6 +427,45 @@ class SearchServiceTest {
         assertEquals(0, response.documents().size());
     }
 
+    /**
+     * Stubs the RAG ChatClient to return the given answer, with the retrieved documents
+     * placed in the advisor context exactly as RetrievalAugmentationAdvisor does.
+     */
+    private void stubRagResponse(String answer, List<Document> retrieved) {
+        ChatClientResponse response = ChatClientResponse.builder()
+                .chatResponse(new ChatResponse(List.of(new Generation(new AssistantMessage(answer)))))
+                .context(Map.of(RetrievalAugmentationAdvisor.DOCUMENT_CONTEXT, retrieved))
+                .build();
+        when(ragCallResponseSpec.chatClientResponse()).thenReturn(response);
+    }
+
+    @Test
+    void shouldReturnRetrievedDocumentIdsAsSources() {
+        String question = "How do I bind configuration properties?";
+        stubRagResponse("You use @ConfigurationProperties.", List.of(
+                new Document("doc-1", "binding docs", Map.of()),
+                new Document("doc-2", "validation docs", Map.of())));
+
+        AskResponse response = searchService.ask(new AskRequest(question));
+
+        assertEquals(List.of("doc-1", "doc-2"), response.sources(),
+                "Sources should report the IDs of documents the retriever put in the prompt context");
+    }
+
+    @Test
+    void shouldReturnEmptySourcesWhenAdvisorContextHasNoDocuments() {
+        ChatClientResponse response = ChatClientResponse.builder()
+                .chatResponse(new ChatResponse(List.of(new Generation(new AssistantMessage("answer")))))
+                .context(Map.of())
+                .build();
+        when(ragCallResponseSpec.chatClientResponse()).thenReturn(response);
+
+        AskResponse askResponse = searchService.ask(new AskRequest("q"));
+
+        assertNotNull(askResponse.sources());
+        assertEquals(0, askResponse.sources().size());
+    }
+
     @Test
     void shouldPerformRagQuestionAnsweringWithDefaultConversationId() {
         // Given
@@ -432,8 +476,8 @@ class SearchServiceTest {
 
         AskRequest request = new AskRequest(question);
 
-        // Mock RAG ChatClient to return answer
-        when(ragCallResponseSpec.content()).thenReturn(expectedAnswer);
+        // Mock RAG ChatClient to return answer with no retrieved documents
+        stubRagResponse(expectedAnswer, List.of());
 
         // When
         AskResponse response = searchService.ask(request);
@@ -458,8 +502,8 @@ class SearchServiceTest {
 
         AskRequest request = new AskRequest(question, conversationId);
 
-        // Mock RAG ChatClient to return answer
-        when(ragCallResponseSpec.content()).thenReturn(expectedAnswer);
+        // Mock RAG ChatClient to return answer with no retrieved documents
+        stubRagResponse(expectedAnswer, List.of());
 
         // When
         AskResponse response = searchService.ask(request);
@@ -482,8 +526,8 @@ class SearchServiceTest {
 
         AskRequest request = new AskRequest(question, null);
 
-        // Mock RAG ChatClient to return answer
-        when(ragCallResponseSpec.content()).thenReturn(expectedAnswer);
+        // Mock RAG ChatClient to return answer with no retrieved documents
+        stubRagResponse(expectedAnswer, List.of());
 
         // When
         AskResponse response = searchService.ask(request);

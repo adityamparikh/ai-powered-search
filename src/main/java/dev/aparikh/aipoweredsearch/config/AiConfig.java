@@ -1,6 +1,7 @@
 package dev.aparikh.aipoweredsearch.config;
 
 import com.anthropic.models.messages.Model;
+import dev.aparikh.aipoweredsearch.search.HybridDocumentRetriever;
 import org.springframework.ai.anthropic.AnthropicCacheOptions;
 import org.springframework.ai.anthropic.AnthropicCacheStrategy;
 import org.springframework.ai.anthropic.AnthropicCacheTtl;
@@ -8,14 +9,13 @@ import org.springframework.ai.anthropic.AnthropicChatOptions;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
 import org.springframework.ai.chat.client.advisor.SimpleLoggerAdvisor;
-import org.springframework.ai.chat.client.advisor.vectorstore.QuestionAnswerAdvisor;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.messages.MessageType;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.openai.OpenAiEmbeddingModel;
 import org.springframework.ai.openai.OpenAiEmbeddingOptions;
-import org.springframework.ai.vectorstore.VectorStore;
+import org.springframework.ai.rag.advisor.RetrievalAugmentationAdvisor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
@@ -23,6 +23,8 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+
+import java.util.List;
 
 /**
  * Spring AI configuration for multiple LLM providers.
@@ -172,15 +174,20 @@ public class AiConfig {
     }
 
     /**
-     * Creates a RAG-enabled ChatClient bean with QuestionAnswerAdvisor.
+     * Creates a RAG-enabled ChatClient bean backed by hybrid retrieval.
      *
      * <p>This bean is used for conversational question-answering with retrieval-augmented
      * generation (RAG). It automatically retrieves relevant context from the VectorStore
      * and includes it in the conversation.</p>
      *
+     * <p>Retrieval goes through {@link HybridDocumentRetriever}, so distinctive terminology in
+     * the question is matched lexically by BM25 while its meaning is matched by vector
+     * similarity, with the two rankings fused by Reciprocal Rank Fusion.</p>
+     *
      * <p>The ChatClient is configured with advisors:
      * <ul>
-     *   <li>QuestionAnswerAdvisor - Retrieves context from VectorStore for RAG</li>
+     *   <li>RetrievalAugmentationAdvisor - Retrieves context via hybrid search (keyword +
+     *       vector, fused with RRF) rather than vector similarity alone</li>
      *   <li>MessageChatMemoryAdvisor - Maintains conversational context across requests</li>
      *   <li>SimpleLoggerAdvisor - Logs chat interactions for debugging</li>
      *   <li>PromptCacheMetricsAdvisor - Logs cache metrics when prompt caching is enabled</li>
@@ -189,7 +196,7 @@ public class AiConfig {
      *
      * @param chatModel the ChatModel (Anthropic) auto-configured by Spring AI
      * @param chatMemory the ChatMemory for maintaining conversation history
-     * @param vectorStore the VectorStore for retrieving relevant context
+     * @param hybridDocumentRetriever retrieves RAG context using RRF-fused hybrid search
      * @param cachingEnabled whether prompt caching is enabled
      * @param chatOptions the chat options with caching configured (optional, may be null if caching disabled)
      * @return configured ChatClient instance with RAG capabilities
@@ -198,7 +205,7 @@ public class AiConfig {
     @Qualifier("ragChatClient")
     public ChatClient ragChatClient(ChatModel chatModel,
                                     ChatMemory chatMemory,
-                                    VectorStore vectorStore,
+                                    HybridDocumentRetriever hybridDocumentRetriever,
                                     @Value("${spring.ai.anthropic.prompt-caching.enabled:true}") boolean cachingEnabled,
                                     @Autowired(required = false) @Qualifier("anthropicChatOptionsWithCaching") AnthropicChatOptions chatOptions) {
         ChatClient.Builder builder = ChatClient.builder(chatModel);
@@ -210,13 +217,16 @@ public class AiConfig {
         }
 
         return builder.defaultAdvisors(
-                        QuestionAnswerAdvisor.builder(vectorStore)
-                                .searchRequest(org.springframework.ai.vectorstore.SearchRequest.builder()
-                                        .topK(5)
-                                        // Lower threshold to ensure relevant context is retrieved reliably
-                                        // across providers and embeddings in tests
-                                        .similarityThreshold(0.3)
-                                        .build())
+                        RetrievalAugmentationAdvisor.builder()
+                                .documentRetriever(hybridDocumentRetriever)
+                                // Pass-through joiner. The default ConcatenationDocumentJoiner
+                                // re-sorts documents by their individual score, which would undo
+                                // the RRF ranking the retriever just computed — our score IS the
+                                // fused RRF value and is not comparable across retrieval strategies.
+                                .documentJoiner(documentsForQuery -> documentsForQuery.values().stream()
+                                        .flatMap(List::stream)
+                                        .flatMap(List::stream)
+                                        .toList())
                                 .build(),
                         MessageChatMemoryAdvisor.builder(chatMemory).build(),
                         SimpleLoggerAdvisor.builder().build(),
