@@ -1,10 +1,9 @@
 package dev.aparikh.aipoweredsearch.config;
 
+import org.springframework.ai.anthropic.AnthropicCacheOptions;
+import org.springframework.ai.anthropic.AnthropicCacheStrategy;
+import org.springframework.ai.anthropic.AnthropicCacheTtl;
 import org.springframework.ai.anthropic.AnthropicChatOptions;
-import org.springframework.ai.anthropic.api.AnthropicApi;
-import org.springframework.ai.anthropic.api.AnthropicCacheOptions;
-import org.springframework.ai.anthropic.api.AnthropicCacheStrategy;
-import org.springframework.ai.anthropic.api.AnthropicCacheTtl;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
 import org.springframework.ai.chat.client.advisor.SimpleLoggerAdvisor;
@@ -14,7 +13,7 @@ import org.springframework.ai.chat.messages.MessageType;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.openai.OpenAiEmbeddingModel;
-import org.springframework.ai.openai.api.OpenAiApi;
+import org.springframework.ai.openai.OpenAiEmbeddingOptions;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -24,7 +23,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
-import static org.springframework.web.client.RestClient.Builder;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Spring AI configuration for multiple LLM providers.
@@ -45,6 +44,14 @@ import static org.springframework.web.client.RestClient.Builder;
  */
 @Configuration
 public class AiConfig {
+
+    /**
+     * Anthropic chat model id used for query generation and RAG.
+     *
+     * <p>Spring AI 2.x removed the {@code AnthropicApi.ChatModel} enum when it moved to the
+     * official Anthropic Java SDK, so the model is now identified by its string id.</p>
+     */
+    private static final String ANTHROPIC_CHAT_MODEL = "claude-sonnet-4-5";
 
     /**
      * Creates default AnthropicChatOptions with prompt caching enabled.
@@ -68,25 +75,30 @@ public class AiConfig {
      *   <li>CONVERSATION_HISTORY - Caches entire conversation history (best for multi-turn chats)</li>
      * </ul>
      *
+     * <p>Spring AI 2.x changed {@code ChatClient.Builder#defaultOptions} to accept a
+     * {@link org.springframework.ai.chat.prompt.ChatOptions.Builder} rather than a fully built
+     * options instance, so this bean exposes the builder. Deferring the build lets Spring AI merge
+     * per-request options over these defaults instead of replacing them wholesale.</p>
+     *
      * @param cachingEnabled whether prompt caching is enabled
      * @param cacheStrategyStr the cache strategy to use
-     * @return configured AnthropicChatOptions instance
+     * @return configured AnthropicChatOptions builder
      */
     @Bean
     @ConditionalOnProperty(name = "spring.ai.anthropic.prompt-caching.enabled", havingValue = "true", matchIfMissing = true)
-    public AnthropicChatOptions anthropicChatOptionsWithCaching(
+    public AnthropicChatOptions.Builder anthropicChatOptionsWithCaching(
             @Value("${spring.ai.anthropic.prompt-caching.enabled:true}") boolean cachingEnabled,
             @Value("${spring.ai.anthropic.prompt-caching.strategy:SYSTEM_AND_TOOLS}") String cacheStrategyStr) {
 
         AnthropicCacheStrategy cacheStrategy = AnthropicCacheStrategy.valueOf(cacheStrategyStr);
 
-        return AnthropicChatOptions.builder()
-                .model(AnthropicApi.ChatModel.CLAUDE_SONNET_4_5)
-                .cacheOptions(AnthropicCacheOptions.builder()
-                        .strategy(cacheStrategy)
-                        .messageTypeTtl(MessageType.SYSTEM, AnthropicCacheTtl.ONE_HOUR)
-                        .build())
-                .build();
+        AnthropicChatOptions.Builder builder = AnthropicChatOptions.builder();
+        builder.model(ANTHROPIC_CHAT_MODEL);
+        builder.cacheOptions(AnthropicCacheOptions.builder()
+                .strategy(cacheStrategy)
+                .messageTypeTtl(MessageType.SYSTEM, AnthropicCacheTtl.ONE_HOUR)
+                .build());
+        return builder;
     }
 
     /**
@@ -94,36 +106,32 @@ public class AiConfig {
      *
      * <p>This bean is used for generating vector embeddings for semantic search.</p>
      *
-     * <h3>Known Issue - Jetty Authentication Error:</h3>
-     * <p>When using this with actual OpenAI API calls, you may encounter:</p>
-     * <pre>
-     * org.eclipse.jetty.client.HttpResponseException:
-     *   HTTP protocol violation: Authentication challenge without WWW-Authenticate header
-     * </pre>
+     * <p>Spring AI 2.x replaced the hand-rolled {@code OpenAiApi} client with the official OpenAI
+     * Java SDK, so the model is configured through {@link OpenAiEmbeddingOptions} instead. The
+     * previous {@code restClientBuilder} workaround, which forced a JDK-HttpClient-backed
+     * {@code RestClient} to avoid Jetty's strict HTTP protocol handling, is no longer needed: the
+     * official SDK does not use Jetty at all.</p>
      *
-     * <p><b>Root Cause:</b> Jetty 12.x enforces strict HTTP protocol compliance. When OpenAI API
-     * returns 401 status without proper WWW-Authenticate header, Jetty throws an exception.</p>
-     *
-     * <p><b>Solutions:</b></p>
-     * <ul>
-     *   <li><b>Use Valid API Key:</b> Ensure OPENAI_API_KEY environment variable contains a valid key</li>
-     *   <li><b>For Tests:</b> Vector store tests automatically skip if OPENAI_API_KEY is not set</li>
-     *   <li><b>Workaround:</b> The error typically occurs only with invalid/test API keys</li>
-     * </ul>
+     * <p>This project depends on the plain {@code spring-ai-openai} module rather than the OpenAI
+     * starter, so no OpenAI autoconfiguration runs and the
+     * {@code spring.ai.openai.embedding.options.*} properties are bound explicitly here.</p>
      *
      * @param apiKey the OpenAI API key from properties
+     * @param model the embedding model id
+     * @param dimensions the embedding vector dimensionality, which must match the Solr vector field
      * @return configured OpenAiEmbeddingModel instance
      */
     @Bean
     @ConditionalOnMissingBean(EmbeddingModel.class)
-    public EmbeddingModel embeddingModel(@Value("${spring.ai.openai.api-key:${OPENAI_API_KEY:}}") String apiKey,
-                                         Builder restClientBuilder) {
-        OpenAiApi openAiApi = OpenAiApi.builder()
+    public EmbeddingModel embeddingModel(
+            @Value("${spring.ai.openai.api-key:${OPENAI_API_KEY:}}") String apiKey,
+            @Value("${spring.ai.openai.embedding.options.model:text-embedding-3-small}") String model,
+            @Value("${spring.ai.openai.embedding.options.dimensions:1536}") Integer dimensions) {
+        return new OpenAiEmbeddingModel(OpenAiEmbeddingOptions.builder()
                 .apiKey(apiKey)
-                // Ensure Spring AI uses JDK HttpClient-based RestClient (not Jetty)
-                .restClientBuilder(restClientBuilder)
-                .build();
-        return new OpenAiEmbeddingModel(openAiApi);
+                .model(model)
+                .dimensions(dimensions)
+                .build());
     }
 
     /**
@@ -152,7 +160,7 @@ public class AiConfig {
     public ChatClient chatClient(ChatModel chatModel,
                                  ChatMemory chatMemory,
                                  @Value("${spring.ai.anthropic.prompt-caching.enabled:true}") boolean cachingEnabled,
-                                 @Autowired(required = false) @Qualifier("anthropicChatOptionsWithCaching") AnthropicChatOptions chatOptions) {
+                                 @Autowired(required = false) @Qualifier("anthropicChatOptionsWithCaching") AnthropicChatOptions.@Nullable Builder chatOptions) {
         ChatClient.Builder builder = ChatClient.builder(chatModel);
 
         // Set default options if caching is enabled
@@ -199,7 +207,7 @@ public class AiConfig {
                                     ChatMemory chatMemory,
                                     VectorStore vectorStore,
                                     @Value("${spring.ai.anthropic.prompt-caching.enabled:true}") boolean cachingEnabled,
-                                    @Autowired(required = false) @Qualifier("anthropicChatOptionsWithCaching") AnthropicChatOptions chatOptions) {
+                                    @Autowired(required = false) @Qualifier("anthropicChatOptionsWithCaching") AnthropicChatOptions.@Nullable Builder chatOptions) {
         ChatClient.Builder builder = ChatClient.builder(chatModel);
 
         // Set default options if caching is enabled

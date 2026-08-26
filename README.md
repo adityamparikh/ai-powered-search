@@ -1,6 +1,6 @@
 # AI-Powered Search
 
-Apache Solr search with AI-driven query generation and semantic vector search. Built with Spring Boot 3.5.7, Spring AI, and Java 21.
+Apache Solr search with AI-driven query generation and semantic vector search. Built with Spring Boot 4.1.1, Spring AI 2.0.1, and Java 25.
 
 ## 🚀 Features
 
@@ -72,7 +72,7 @@ Apache Solr search with AI-driven query generation and semantic vector search. B
 
 ## 📋 Prerequisites
 
-- **Java 21** or higher
+- **Java 25** or higher
 - **Docker** and **Docker Desktop** (for Solr, ZooKeeper, and PostgreSQL)
 - **Apache Solr 9.9.0** (provided via Docker)
 - **ZooKeeper 3.9** (provided via Docker)

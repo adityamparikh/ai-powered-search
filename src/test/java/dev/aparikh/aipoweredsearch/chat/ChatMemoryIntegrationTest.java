@@ -11,6 +11,7 @@ import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
+import org.springframework.ai.chat.prompt.ChatOptions;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.embedding.Embedding;
 import org.springframework.ai.embedding.EmbeddingModel;
@@ -207,6 +208,10 @@ class ChatMemoryIntegrationTest {
         @Primary
         public ChatModel mockChatModel() {
             ChatModel chatModel = mock(ChatModel.class);
+
+            // Spring AI 2.x seeds a ChatClient's defaults from chatModel.getOptions().mutate(),
+            // so the mock must return real options rather than Mockito's default null.
+            when(chatModel.getOptions()).thenReturn(ChatOptions.builder().build());
 
             when(chatModel.call(any(Prompt.class))).thenAnswer(invocation -> {
                 Prompt prompt = invocation.getArgument(0);

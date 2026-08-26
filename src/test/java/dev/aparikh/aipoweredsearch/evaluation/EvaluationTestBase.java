@@ -3,7 +3,7 @@ package dev.aparikh.aipoweredsearch.evaluation;
 import dev.aparikh.aipoweredsearch.embedding.EmbeddingService;
 import dev.aparikh.aipoweredsearch.fixtures.BookDatasetGenerator;
 import org.apache.solr.client.solrj.SolrClient;
-import org.apache.solr.client.solrj.impl.Http2SolrClient;
+import org.apache.solr.client.solrj.impl.HttpJdkSolrClient;
 import org.apache.solr.common.SolrInputDocument;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.ai.chat.client.ChatClient;
@@ -73,7 +73,7 @@ public abstract class EvaluationTestBase {
 
         OllamaChatModel chatModel = OllamaChatModel.builder()
                 .ollamaApi(ollamaApi)
-                .defaultOptions(options)
+                .options(options)
                 .build();
 
         // 4. Create evaluators
@@ -82,7 +82,7 @@ public abstract class EvaluationTestBase {
 
         // 5. Create Solr client
         String solrUrl = "http://" + solr.getHost() + ":" + solr.getSolrPort() + "/solr";
-        solrClient = new Http2SolrClient.Builder(solrUrl).build();
+        solrClient = new HttpJdkSolrClient.Builder(solrUrl).build();
 
         // 6. Create Solr collection with vector fields
         createBooksCollection();

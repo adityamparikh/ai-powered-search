@@ -5,6 +5,7 @@ import dev.aparikh.aipoweredsearch.search.model.AskResponse;
 import dev.aparikh.aipoweredsearch.search.model.SearchResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
+import org.jspecify.annotations.Nullable;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
@@ -134,11 +135,11 @@ class SearchController {
                     example = "machine learning frameworks for Java")
             @RequestParam("query") String query,
             @Parameter(description = "Number of results to return (topK)", required = false, example = "10")
-            @RequestParam(name = "k", required = false) Integer k,
+            @RequestParam(name = "k", required = false) @Nullable Integer k,
             @Parameter(description = "Minimum similarity score threshold [0..1]", required = false, example = "0.7")
-            @RequestParam(name = "minScore", required = false) Double minScore,
+            @RequestParam(name = "minScore", required = false) @Nullable Double minScore,
             @Parameter(description = "Comma-separated list of fields to include in the response (e.g., 'content,author,year'). Id is always included.", required = false)
-            @RequestParam(name = "fields", required = false) String fields) {
+            @RequestParam(name = "fields", required = false) @Nullable String fields) {
         return searchService.semanticSearch(collection, query, k, minScore, fields);
     }
 
@@ -200,11 +201,11 @@ class SearchController {
                     example = "comfortable running shoes")
             @RequestParam(name = "query") String query,
             @Parameter(description = "Number of results to return from vector search (topK)", required = false, example = "100")
-            @RequestParam(name = "k", required = false) Integer k,
+            @RequestParam(name = "k", required = false) @Nullable Integer k,
             @Parameter(description = "Minimum similarity score threshold [0..1]", required = false, example = "0.5")
-            @RequestParam(name = "minScore", required = false) Double minScore,
+            @RequestParam(name = "minScore", required = false) @Nullable Double minScore,
             @Parameter(description = "Comma-separated list of fields to include in the response (e.g., 'content,author,year'). Id and score are always included.", required = false)
-            @RequestParam(name = "fields", required = false) String fields) {
+            @RequestParam(name = "fields", required = false) @Nullable String fields) {
         return searchService.hybridSearch(collection, query, k, minScore, fields);
     }
 

@@ -11,7 +11,7 @@ import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.openai.OpenAiEmbeddingModel;
-import org.springframework.ai.openai.api.OpenAiApi;
+import org.springframework.ai.openai.OpenAiEmbeddingOptions;
 import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -119,7 +119,7 @@ class SolrVectorStoreIT {
     @Test
     void addAndDeleteDocumentsTest() throws Exception {
         // Initially should have 0 documents
-        long initialCount = solrClient.query(COLLECTION_NAME, new org.apache.solr.client.solrj.SolrQuery("*:*"))
+        long initialCount = solrClient.query(COLLECTION_NAME, new org.apache.solr.client.solrj.request.SolrQuery("*:*"))
                 .getResults().getNumFound();
         assertThat(initialCount).isEqualTo(0);
 
@@ -128,7 +128,7 @@ class SolrVectorStoreIT {
 
         // Wait for indexing to complete
         await().untilAsserted(() -> {
-            long count = solrClient.query(COLLECTION_NAME, new org.apache.solr.client.solrj.SolrQuery("*:*"))
+            long count = solrClient.query(COLLECTION_NAME, new org.apache.solr.client.solrj.request.SolrQuery("*:*"))
                     .getResults().getNumFound();
             assertThat(count).isEqualTo(3);
         });
@@ -138,7 +138,7 @@ class SolrVectorStoreIT {
 
         // Wait for deletion to complete
         await().untilAsserted(() -> {
-            long count = solrClient.query(COLLECTION_NAME, new org.apache.solr.client.solrj.SolrQuery("*:*"))
+            long count = solrClient.query(COLLECTION_NAME, new org.apache.solr.client.solrj.request.SolrQuery("*:*"))
                     .getResults().getNumFound();
             assertThat(count).isEqualTo(0);
         });
@@ -370,12 +370,10 @@ class SolrVectorStoreIT {
     static class TestConfig {
 
         @Bean
-        EmbeddingModel embeddingModel(org.springframework.web.client.RestClient.Builder restClientBuilder) {
-            var api = OpenAiApi.builder()
+        EmbeddingModel embeddingModel() {
+            return new OpenAiEmbeddingModel(OpenAiEmbeddingOptions.builder()
                     .apiKey(System.getenv("OPENAI_API_KEY"))
-                    .restClientBuilder(restClientBuilder)
-                    .build();
-            return new OpenAiEmbeddingModel(api);
+                    .build());
         }
 
         @Bean

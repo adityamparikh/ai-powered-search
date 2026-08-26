@@ -1,6 +1,7 @@
 package dev.aparikh.aipoweredsearch.solr.vectorstore;
 
 import org.apache.solr.client.solrj.SolrClient;
+import org.jspecify.annotations.Nullable;
 import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.stereotype.Component;
@@ -96,7 +97,7 @@ public class VectorStoreFactory {
      * @param collection the name of the collection to remove
      * @return the removed VectorStore instance, or null if not cached
      */
-    public VectorStore evict(String collection) {
+    public @Nullable VectorStore evict(String collection) {
         return cache.remove(collection);
     }
 

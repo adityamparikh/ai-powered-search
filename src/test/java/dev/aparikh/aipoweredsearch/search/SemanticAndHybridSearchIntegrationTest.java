@@ -206,7 +206,7 @@ class SemanticAndHybridSearchIntegrationTest {
                 .pollInterval(1, TimeUnit.SECONDS)
                 .until(() -> {
                     try {
-                        var response = solrClient.query(collection, new org.apache.solr.client.solrj.SolrQuery("*:*"));
+                        var response = solrClient.query(collection, new org.apache.solr.client.solrj.request.SolrQuery("*:*"));
                         long numFound = response.getResults().getNumFound();
                         log.debug("Collection {} has {} documents (expecting {})", collection, numFound, expectedCount);
                         return numFound >= expectedCount;

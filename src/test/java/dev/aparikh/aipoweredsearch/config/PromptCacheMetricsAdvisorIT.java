@@ -10,7 +10,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariables;
 import org.slf4j.LoggerFactory;
-import org.springframework.ai.anthropic.api.AnthropicApi;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.metadata.Usage;
@@ -132,13 +131,13 @@ class PromptCacheMetricsAdvisorIT {
         Usage usage = response.getMetadata().getUsage();
         assertThat(usage).isNotNull();
 
-        AnthropicApi.Usage anthropicUsage = (AnthropicApi.Usage) usage.getNativeUsage();
+        com.anthropic.models.messages.Usage anthropicUsage = (com.anthropic.models.messages.Usage) usage.getNativeUsage();
         assertThat(anthropicUsage).isNotNull();
 
         // First request ideally creates cache (cache miss)
         // Note: Anthropic prompt caching only activates for sufficiently large prompts/tools.
         // In environments with short prompts, the provider may return 0 cache tokens.
-        Integer cacheCreationTokens = anthropicUsage.cacheCreationInputTokens();
+        Integer cacheCreationTokens = anthropicUsage.cacheCreationInputTokens().map(Math::toIntExact).orElse(null);
         boolean cachingActive = cacheCreationTokens != null && cacheCreationTokens > 0;
         if (cachingActive) {
             assertThat(cacheCreationTokens)
@@ -219,11 +218,11 @@ class PromptCacheMetricsAdvisorIT {
         Usage usage = response2.getMetadata().getUsage();
         assertThat(usage).isNotNull();
 
-        AnthropicApi.Usage anthropicUsage = (AnthropicApi.Usage) usage.getNativeUsage();
+        com.anthropic.models.messages.Usage anthropicUsage = (com.anthropic.models.messages.Usage) usage.getNativeUsage();
         assertThat(anthropicUsage).isNotNull();
 
         // Second request ideally reads from cache (cache hit)
-        Integer cacheReadTokens = anthropicUsage.cacheReadInputTokens();
+        Integer cacheReadTokens = anthropicUsage.cacheReadInputTokens().map(Math::toIntExact).orElse(null);
         boolean cachingActive = cacheReadTokens != null && cacheReadTokens > 0;
         if (cachingActive) {
             assertThat(cacheReadTokens)
@@ -290,9 +289,9 @@ class PromptCacheMetricsAdvisorIT {
                 .chatResponse();
 
         // Then - Extract usage metrics
-        AnthropicApi.Usage usage = (AnthropicApi.Usage) response.getMetadata().getUsage().getNativeUsage();
-        Integer cacheReadTokens = usage.cacheReadInputTokens();
-        Integer regularTokens = usage.inputTokens();
+        com.anthropic.models.messages.Usage usage = (com.anthropic.models.messages.Usage) response.getMetadata().getUsage().getNativeUsage();
+        Integer cacheReadTokens = usage.cacheReadInputTokens().map(Math::toIntExact).orElse(null);
+        Integer regularTokens = Math.toIntExact(usage.inputTokens());
 
         boolean cachingActive = cacheReadTokens != null && cacheReadTokens > 0;
         assertThat(regularTokens).isNotNull();
@@ -353,12 +352,12 @@ class PromptCacheMetricsAdvisorIT {
             assertThat(response).isNotNull();
             assertThat(response.getResult().getOutput().getText()).isNotBlank();
 
-            AnthropicApi.Usage usage = (AnthropicApi.Usage)
+            com.anthropic.models.messages.Usage usage = (com.anthropic.models.messages.Usage)
                     response.getMetadata().getUsage().getNativeUsage();
 
             if (i == 0) {
                 // First request may create cache if prompt size threshold is met
-                Integer created = usage.cacheCreationInputTokens();
+                Integer created = usage.cacheCreationInputTokens().map(Math::toIntExact).orElse(null);
                 boolean cachingActive = created != null && created > 0;
                 if (cachingActive) {
                     assertThat(created)
@@ -371,7 +370,7 @@ class PromptCacheMetricsAdvisorIT {
                 }
             } else {
                 // Subsequent requests may read from cache if activated
-                Integer read = usage.cacheReadInputTokens();
+                Integer read = usage.cacheReadInputTokens().map(Math::toIntExact).orElse(null);
                 boolean cachingActive = read != null && read > 0;
                 if (cachingActive) {
                     assertThat(read)
@@ -419,9 +418,9 @@ class PromptCacheMetricsAdvisorIT {
                 });
 
         Usage usage = response.getMetadata().getUsage();
-        AnthropicApi.Usage anthropicUsage = (AnthropicApi.Usage) usage.getNativeUsage();
-        Integer created = anthropicUsage.cacheCreationInputTokens();
-        Integer read = anthropicUsage.cacheReadInputTokens();
+        com.anthropic.models.messages.Usage anthropicUsage = (com.anthropic.models.messages.Usage) usage.getNativeUsage();
+        Integer created = anthropicUsage.cacheCreationInputTokens().map(Math::toIntExact).orElse(null);
+        Integer read = anthropicUsage.cacheReadInputTokens().map(Math::toIntExact).orElse(null);
         boolean cachingActive = (created != null && created > 0) || (read != null && read > 0);
 
         if (cachingActive) {
@@ -433,6 +432,6 @@ class PromptCacheMetricsAdvisorIT {
         // Verify response has usage metadata
         Usage usage2 = response.getMetadata().getUsage();
         assertThat(usage2).isNotNull();
-        assertThat(usage2.getNativeUsage()).isInstanceOf(AnthropicApi.Usage.class);
+        assertThat(usage2.getNativeUsage()).isInstanceOf(com.anthropic.models.messages.Usage.class);
     }
 }
