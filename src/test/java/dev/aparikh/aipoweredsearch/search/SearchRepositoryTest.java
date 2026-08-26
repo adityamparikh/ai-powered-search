@@ -19,6 +19,9 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -141,18 +144,21 @@ class SearchRepositoryTest {
             List<SolrParams> capturedQueries = queryCaptor.getAllValues();
             assertEquals(2, capturedQueries.size(), "Should make 2 queries: keyword and vector");
 
-            // First query should be keyword search using edismax with _text_ field
-            SolrParams keywordQuery = capturedQueries.get(0);
-            assertEquals("edismax", keywordQuery.get("defType"),
-                    "First query should use edismax");
+            // The legs run concurrently, so identify them by their parameters rather than by
+            // capture order — which leg lands first is not part of the contract.
+            SolrParams keywordQuery = capturedQueries.stream()
+                    .filter(p -> "edismax".equals(p.get("defType")))
+                    .findFirst()
+                    .orElseThrow(() -> new AssertionError("No edismax keyword query was issued"));
             assertEquals("_text_", keywordQuery.get("qf"),
                     "Should use _text_ catch-all field for schema-agnostic keyword search");
 
-            // Second query should be vector KNN search
-            SolrParams vectorQuery = capturedQueries.get(1);
-            String vectorQ = vectorQuery.get("q");
-            assertTrue(vectorQ.contains("{!knn"),
-                    "Second query should be KNN vector search: " + vectorQ);
+            SolrParams vectorQuery = capturedQueries.stream()
+                    .filter(p -> p.get("q") != null && p.get("q").contains("{!knn"))
+                    .findFirst()
+                    .orElseThrow(() -> new AssertionError("No KNN vector query was issued"));
+            assertTrue(vectorQuery.get("q").contains("{!knn"),
+                    "Vector leg should be a KNN search: " + vectorQuery.get("q"));
         }
     }
 
@@ -161,8 +167,55 @@ class SearchRepositoryTest {
     @Nested
     class ParallelExecution {
 
+        /**
+         * The keyword and vector legs are independent I/O calls on the critical path, so they
+         * must overlap rather than run one after the other.
+         *
+         * <p>A CyclicBarrier proves it: each leg parks at the barrier and proceeds only once
+         * the other arrives. Run sequentially, the first leg times out and breaks the barrier,
+         * so neither records a meeting.</p>
+         */
         @Test
-        void shouldExecuteBothSearchesConcurrently() throws Exception {
+        void shouldRunKeywordAndVectorLegsAtTheSameTime() throws Exception {
+            String collection = "test-collection";
+            String query = "concurrency test";
+
+            when(embeddingService.embedAndFormatForSolr(query)).thenReturn("[0.1, 0.2, 0.3]");
+
+            SolrDocumentList docs = new SolrDocumentList();
+            SolrDocument doc = new SolrDocument();
+            doc.setField("id", "1");
+            doc.setField("score", 1.0f);
+            docs.add(doc);
+            docs.setNumFound(1L);
+            when(queryResponse.getResults()).thenReturn(docs);
+
+            CyclicBarrier barrier = new CyclicBarrier(2);
+            AtomicInteger invocations = new AtomicInteger();
+            AtomicInteger metConcurrently = new AtomicInteger();
+
+            when(solrClient.query(eq(collection), any(SolrParams.class), eq(SolrRequest.METHOD.POST)))
+                    .thenAnswer(invocation -> {
+                        // Only the two hybrid legs participate; any fallback calls pass straight through.
+                        if (invocations.incrementAndGet() <= 2) {
+                            try {
+                                barrier.await(2, TimeUnit.SECONDS);
+                                metConcurrently.incrementAndGet();
+                            } catch (Exception timedOutOrBroken) {
+                                // Sequential execution lands here.
+                            }
+                        }
+                        return queryResponse;
+                    });
+
+            searchRepository.executeHybridRerankSearch(collection, query, 10, null, null, null);
+
+            assertEquals(2, metConcurrently.get(),
+                    "Keyword and vector searches must be in flight at the same time");
+        }
+
+        @Test
+        void shouldIssueBothKeywordAndVectorQueries() throws Exception {
             String collection = "test-collection";
             String query = "concurrent query";
             String vectorString = "[0.1, 0.2, 0.3]";
@@ -295,36 +348,98 @@ class SearchRepositoryTest {
     @Nested
     class MinScoreFiltering {
 
-        @Test
-        void shouldFilterResultsBelowMinScore() throws Exception {
-            String collection = "test-collection";
-            String query = "score filter test";
-            String vectorString = "[0.1, 0.2, 0.3]";
-
-            when(embeddingService.embedAndFormatForSolr(query)).thenReturn(vectorString);
-
+        /**
+         * Builds a SolrDocumentList from (id, score) pairs.
+         */
+        private SolrDocumentList docsWithScores(Object... idScorePairs) {
             SolrDocumentList docs = new SolrDocumentList();
-            SolrDocument doc1 = new SolrDocument();
-            doc1.setField("id", "high");
-            doc1.setField("score", 10.0f);
-            docs.add(doc1);
-            SolrDocument doc2 = new SolrDocument();
-            doc2.setField("id", "low");
-            doc2.setField("score", 0.001f);
-            docs.add(doc2);
-            docs.setNumFound(2L);
+            for (int i = 0; i < idScorePairs.length; i += 2) {
+                SolrDocument doc = new SolrDocument();
+                doc.setField("id", idScorePairs[i]);
+                doc.setField("score", idScorePairs[i + 1]);
+                docs.add(doc);
+            }
+            docs.setNumFound((long) (idScorePairs.length / 2));
+            return docs;
+        }
 
-            when(queryResponse.getResults()).thenReturn(docs);
+        private List<String> idsOf(SearchResponse response) {
+            return response.documents().stream()
+                    .map(d -> String.valueOf(d.get("id")))
+                    .toList();
+        }
+
+        private void stubLegs(String collection, String query,
+                             SolrDocumentList keywordDocs,
+                             SolrDocumentList vectorDocs) throws Exception {
+            when(embeddingService.embedAndFormatForSolr(query)).thenReturn("[0.1, 0.2, 0.3]");
+            QueryResponse kwResponse = org.mockito.Mockito.mock(QueryResponse.class);
+            QueryResponse vecResponse = org.mockito.Mockito.mock(QueryResponse.class);
+            when(kwResponse.getResults()).thenReturn(keywordDocs);
+            when(vecResponse.getResults()).thenReturn(vectorDocs);
+
+            // Dispatch on the actual query rather than call order: the fallback cascade
+            // issues extra calls, and an order-based stub would hand the keyword fallback
+            // the vector response.
             when(solrClient.query(eq(collection), any(SolrParams.class), eq(SolrRequest.METHOD.POST)))
-                    .thenReturn(queryResponse);
+                    .thenAnswer(invocation -> {
+                        SolrParams params = invocation.getArgument(1);
+                        return "edismax".equals(params.get("defType")) ? kwResponse : vecResponse;
+                    });
+        }
 
-            // Use a high minScore to filter out low-scoring documents
+        @Test
+        void appliesMinScoreToVectorLegBeforeFusion() throws Exception {
+            String collection = "test-collection";
+            String query = "vector leg filter";
+
+            // Vector scores are cosine similarity in [0..1]; 0.2 is below the threshold.
+            stubLegs(collection, query,
+                    docsWithScores("kwOnly", 3.0f),
+                    docsWithScores("vecHi", 0.9f, "vecLo", 0.2f));
+
             SearchResponse response = searchRepository.executeHybridRerankSearch(
-                    collection, query, 10, null, null, 0.02);
+                    collection, query, 10, null, null, 0.5);
 
-            // The RRF scores for these docs will be small (1/(60+rank)), but only the
-            // highest-scored ones should pass the threshold
-            assertNotNull(response);
+            assertFalse(idsOf(response).contains("vecLo"),
+                    "Vector hit below minScore must be dropped before fusion");
+            assertTrue(idsOf(response).contains("vecHi"),
+                    "Vector hit above minScore must survive");
+        }
+
+        @Test
+        void doesNotApplyMinScoreToKeywordLeg() throws Exception {
+            String collection = "test-collection";
+            String query = "keyword leg unfiltered";
+
+            // BM25 is unbounded, so a [0..1] threshold has no meaning for the keyword leg.
+            stubLegs(collection, query,
+                    docsWithScores("kwLow", 0.1f),
+                    docsWithScores("vecHi", 0.9f));
+
+            SearchResponse response = searchRepository.executeHybridRerankSearch(
+                    collection, query, 10, null, null, 0.5);
+
+            assertTrue(idsOf(response).contains("kwLow"),
+                    "Keyword hits must not be filtered by minScore; BM25 is not a [0..1] scale");
+        }
+
+        @Test
+        void doesNotThresholdTheFusedRrfScore() throws Exception {
+            String collection = "test-collection";
+            String query = "fused score not thresholded";
+
+            stubLegs(collection, query,
+                    docsWithScores("A", 5.0f),
+                    docsWithScores("B", 0.8f));
+
+            // Every RRF score here is ~1/(60+1) = 0.0164, far below minScore=0.5.
+            // Thresholding the fused score would wrongly empty the result set.
+            SearchResponse response = searchRepository.executeHybridRerankSearch(
+                    collection, query, 10, null, null, 0.5);
+
+            assertEquals(2, response.documents().size(),
+                    "RRF scores are rank-derived and must never be compared against minScore");
         }
 
         @Test

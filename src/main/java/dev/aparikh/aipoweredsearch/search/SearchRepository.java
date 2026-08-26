@@ -23,6 +23,9 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.stream.Collectors;
 
 
@@ -90,6 +93,28 @@ public class SearchRepository {
         if (filterExpression != null && !filterExpression.isEmpty()) {
             params.set("fq", filterExpression);
         }
+    }
+
+    /**
+     * Returns only those documents whose {@code score} meets the threshold.
+     *
+     * <p>Intended for result sets whose score is a cosine similarity in {@code [0..1]}
+     * (i.e. vector search). Do not apply this to keyword results, whose BM25 scores are
+     * unbounded, or to RRF-fused results, whose scores are rank-derived.</p>
+     *
+     * @param documents the documents to filter
+     * @param minScore  the threshold, or null to keep everything
+     * @return the surviving documents
+     */
+    private List<Map<String, Object>> filterByMinScore(List<Map<String, Object>> documents, Double minScore) {
+        if (minScore == null) {
+            return documents;
+        }
+        List<Map<String, Object>> filtered = documents.stream()
+                .filter(doc -> passesMinScore(doc, minScore))
+                .collect(Collectors.toList());
+        log.debug("minScore={} filtered {} documents down to {}", minScore, documents.size(), filtered.size());
+        return filtered;
     }
 
     /**
@@ -211,8 +236,10 @@ public class SearchRepository {
      * <ol>
      *   <li>Launch keyword search (edismax) and vector search (KNN) in parallel</li>
      *   <li>Await both results</li>
+     *   <li>Apply minScore to the vector results only, while their scores are still
+     *       cosine similarities</li>
      *   <li>Merge using {@link RrfMerger}</li>
-     *   <li>Apply minScore filter and limit to topK</li>
+     *   <li>Limit to topK</li>
      *   <li>If empty, try keyword-only fallback, then vector-only fallback</li>
      * </ol>
      *
@@ -221,7 +248,11 @@ public class SearchRepository {
      * @param topK             number of results to return
      * @param filterExpression optional filter query
      * @param fieldsCsv        optional comma-separated list of fields to return
-     * @param minScore         optional minimum RRF score threshold
+     * @param minScore         optional minimum cosine similarity in {@code [0..1]}, applied to
+     *                         the vector leg before fusion. It is deliberately not applied to
+     *                         keyword results (BM25 is unbounded) nor to the fused output (RRF
+     *                         scores are rank-derived, with a maximum of {@code 2/(k+1)}, so
+     *                         comparing them against a similarity threshold is meaningless).
      * @return search response with hybrid-ranked documents
      */
     public SearchResponse executeHybridRerankSearch(String collection,
@@ -235,22 +266,42 @@ public class SearchRepository {
         int fetchSize = topK * OVER_FETCH_MULTIPLIER;
 
         try {
-            // Virtual threads handle blocking I/O efficiently — no need for CompletableFuture
-            List<Map<String, Object>> keywordResults = executeKeywordSearch(collection, query, fetchSize, filterExpression, fieldsCsv);
-            List<Map<String, Object>> vectorResults = executeVectorSearch(collection, query, fetchSize, filterExpression, fieldsCsv);
+            // The two legs are independent network round-trips on the critical path, so they run
+            // concurrently: hybrid search then costs roughly one Solr round-trip instead of two.
+            //
+            // Virtual threads make blocking cheap, but cheap blocking is not concurrency — two
+            // sequential calls on a virtual thread are still sequential. The overlap has to be
+            // asked for explicitly.
+            List<Map<String, Object>> keywordResults;
+            List<Map<String, Object>> vectorResults;
+            try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
+                Future<List<Map<String, Object>>> keywordLeg = executor.submit(() ->
+                        executeKeywordSearch(collection, query, fetchSize, filterExpression, fieldsCsv));
+                Future<List<Map<String, Object>>> vectorLeg = executor.submit(() ->
+                        executeVectorSearch(collection, query, fetchSize, filterExpression, fieldsCsv));
+
+                // Either get() may throw ExecutionException; the surrounding catch degrades to
+                // the fallback cascade exactly as it did when these ran inline.
+                keywordResults = keywordLeg.get();
+                vectorResults = vectorLeg.get();
+            }
 
             log.debug("Keyword search returned {} results, vector search returned {} results",
                     keywordResults.size(), vectorResults.size());
 
+            // Apply minScore to the vector leg only, before fusion, while the score is still
+            // a cosine similarity in [0..1]. The keyword leg is left alone because BM25 is
+            // unbounded, and the fused score is never thresholded because RRF scores are
+            // rank-derived and carry no absolute meaning.
+            vectorResults = filterByMinScore(vectorResults, minScore);
 
             // Merge using RRF
             RrfMerger rrfMerger = new RrfMerger();
             List<Map<String, Object>> mergedResults = rrfMerger.merge(keywordResults, vectorResults);
             log.debug("RRF merged results: {} unique documents", mergedResults.size());
 
-            // Apply minScore filter and limit to topK
+            // Limit to topK (no score threshold — see above)
             List<Map<String, Object>> finalResults = mergedResults.stream()
-                    .filter(doc -> passesMinScore(doc, minScore))
                     .limit(topK)
                     .collect(Collectors.toList());
 
@@ -343,35 +394,28 @@ public class SearchRepository {
                                           String filterExpression,
                                           String fieldsCsv,
                                           Double minScore) {
-        // Try keyword-only first
+        // Try keyword-only first. minScore is NOT applied here: BM25 scores are unbounded,
+        // so a [0..1] threshold would silently discard perfectly good keyword matches.
         try {
             List<Map<String, Object>> keywordResults = executeKeywordSearch(
                     collection, query, topK, filterExpression, fieldsCsv);
 
-            List<Map<String, Object>> filtered = keywordResults.stream()
-                    .filter(doc -> passesMinScore(doc, minScore))
-                    .collect(Collectors.toList());
-
-            if (!filtered.isEmpty()) {
-                log.info("Keyword-only fallback returned {} results", filtered.size());
-                return new SearchResponse(filtered, Map.of(), Map.of(), null);
+            if (!keywordResults.isEmpty()) {
+                log.info("Keyword-only fallback returned {} results", keywordResults.size());
+                return new SearchResponse(keywordResults, Map.of(), Map.of(), null);
             }
         } catch (Exception e) {
             log.error("Keyword fallback failed", e);
         }
 
-        // Try vector-only as last resort
+        // Try vector-only as last resort. minScore applies here — these are cosine similarities.
         try {
-            List<Map<String, Object>> vectorResults = executeVectorSearch(
-                    collection, query, topK, filterExpression, fieldsCsv);
+            List<Map<String, Object>> vectorResults = filterByMinScore(executeVectorSearch(
+                    collection, query, topK, filterExpression, fieldsCsv), minScore);
 
-            List<Map<String, Object>> filtered = vectorResults.stream()
-                    .filter(doc -> passesMinScore(doc, minScore))
-                    .collect(Collectors.toList());
-
-            if (!filtered.isEmpty()) {
-                log.info("Vector-only fallback returned {} results", filtered.size());
-                return new SearchResponse(filtered, Map.of(), Map.of(), null);
+            if (!vectorResults.isEmpty()) {
+                log.info("Vector-only fallback returned {} results", vectorResults.size());
+                return new SearchResponse(vectorResults, Map.of(), Map.of(), null);
             }
         } catch (Exception e) {
             log.error("Vector fallback failed", e);
