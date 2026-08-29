@@ -156,8 +156,7 @@ public class AiConfig {
      * @return configured ChatClient instance
      */
     @Bean
-    @Qualifier("searchChatClient")
-    public ChatClient chatClient(ChatModel chatModel,
+    public ChatClient searchChatClient(ChatModel chatModel,
                                  ChatMemory chatMemory,
                                  @Value("${spring.ai.anthropic.prompt-caching.enabled:true}") boolean cachingEnabled,
                                  @Autowired(required = false) @Qualifier("anthropicChatOptionsWithCaching") AnthropicChatOptions.@Nullable Builder chatOptions) {
@@ -202,7 +201,6 @@ public class AiConfig {
      * @return configured ChatClient instance with RAG capabilities
      */
     @Bean
-    @Qualifier("ragChatClient")
     public ChatClient ragChatClient(ChatModel chatModel,
                                     ChatMemory chatMemory,
                                     VectorStore vectorStore,
