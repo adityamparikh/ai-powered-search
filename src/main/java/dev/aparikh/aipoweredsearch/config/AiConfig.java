@@ -2,6 +2,7 @@ package dev.aparikh.aipoweredsearch.config;
 
 import com.anthropic.models.messages.Model;
 import dev.aparikh.aipoweredsearch.search.HybridDocumentRetriever;
+import dev.aparikh.aipoweredsearch.search.RerankingDocumentPostProcessor;
 import org.springframework.ai.anthropic.AnthropicCacheOptions;
 import org.springframework.ai.anthropic.AnthropicCacheStrategy;
 import org.springframework.ai.anthropic.AnthropicCacheTtl;
@@ -214,7 +215,8 @@ public class AiConfig {
                                     ChatMemory chatMemory,
                                     HybridDocumentRetriever hybridDocumentRetriever,
                                     @Value("${spring.ai.anthropic.prompt-caching.enabled:true}") boolean cachingEnabled,
-                                    @Autowired(required = false) @Qualifier("anthropicChatOptionsWithCaching") AnthropicChatOptions.@Nullable Builder chatOptions) {
+                                    @Autowired(required = false) @Qualifier("anthropicChatOptionsWithCaching") AnthropicChatOptions.@Nullable Builder chatOptions,
+                                    @Autowired(required = false) @Nullable RerankingDocumentPostProcessor reranker) {
         ChatClient.Builder builder = ChatClient.builder(chatModel);
 
         // Set default options if caching is enabled
@@ -222,8 +224,8 @@ public class AiConfig {
             builder.defaultOptions(chatOptions);
         }
 
-        return builder.defaultAdvisors(
-                        RetrievalAugmentationAdvisor.builder()
+        RetrievalAugmentationAdvisor.Builder ragAdvisor =
+                RetrievalAugmentationAdvisor.builder()
                                 .documentRetriever(hybridDocumentRetriever)
                                 // RetrievalAugmentationAdvisor refuses to answer when retrieval
                                 // returns nothing; QuestionAnswerAdvisor did not. Follow-up turns
@@ -239,8 +241,17 @@ public class AiConfig {
                                 .documentJoiner(documentsForQuery -> documentsForQuery.values().stream()
                                         .flatMap(List::stream)
                                         .flatMap(List::stream)
-                                        .toList())
-                                .build(),
+                                        .toList());
+
+        // Reranking is the third and last place the pipeline can improve context quality:
+        // the retriever decides what is a candidate, and this decides what actually reaches
+        // the prompt. Absent when search.rag.rerank.enabled=false.
+        if (reranker != null) {
+            ragAdvisor.documentPostProcessors(reranker);
+        }
+
+        return builder.defaultAdvisors(
+                        ragAdvisor.build(),
                         MessageChatMemoryAdvisor.builder(chatMemory).build(),
                         SimpleLoggerAdvisor.builder().build(),
                         PromptCacheMetricsAdvisor.builder()
@@ -248,5 +259,26 @@ public class AiConfig {
                                 .build()
                 )
                 .build();
+    }
+
+    /**
+     * Creates the LLM-based reranker that trims retrieved context down to the most relevant
+     * documents.
+     *
+     * <p>Disable with {@code search.rag.rerank.enabled=false} to avoid the extra model call.
+     * If you do, consider lowering {@code search.rag.hybrid.top-k} as well — retrieval
+     * over-fetches on the assumption that reranking will discard the surplus, and without a
+     * reranker every retrieved chunk goes straight into the prompt.</p>
+     *
+     * @param chatModel the ChatModel used to judge relevance
+     * @param topK      how many documents survive reranking
+     * @return the reranking post-processor
+     */
+    @Bean
+    @ConditionalOnProperty(name = "search.rag.rerank.enabled", havingValue = "true", matchIfMissing = true)
+    public RerankingDocumentPostProcessor rerankingDocumentPostProcessor(
+            ChatModel chatModel,
+            @Value("${search.rag.rerank.top-k:5}") int topK) {
+        return new RerankingDocumentPostProcessor(ChatClient.builder(chatModel).build(), topK);
     }
 }
