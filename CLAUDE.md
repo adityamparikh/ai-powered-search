@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is an AI-powered search application built with Spring Boot 3.5.7 and Java 21. The application integrates Apache Solr for both traditional keyword search and semantic vector search, with Anthropic Claude for intelligent query generation and OpenAI for vector embeddings.
+This is an AI-powered search application built with Spring Boot 4.1.1 and Java 25. The application integrates Apache Solr for both traditional keyword search and semantic vector search, with Anthropic Claude for intelligent query generation and OpenAI for vector embeddings.
 
 ### Core Architecture
 
@@ -36,16 +36,16 @@ The application follows a **package-by-feature** structure organized around main
 
 - **Configuration** (`dev.aparikh.aipoweredsearch.config`):
     - `AiConfig`: Multi-LLM configuration for Anthropic (chat) and OpenAI (embeddings)
-  - `SolrConfig`: Solr client configuration with Http2SolrClient
+  - `SolrConfig`: Solr client configuration with HttpJdkSolrClient
     - `PromptCacheMetricsAdvisor`: Logs Anthropic prompt caching metrics
   - Chat Memory: PostgreSQL-backed conversational context with conversation ID "007"
 
 ### Key Dependencies
 
-- **Spring Boot 3.5.7** with Spring AI 1.1.0
+- **Spring Boot 4.1.1** with Spring AI 2.0.1
 - **Anthropic Claude AI** (claude-sonnet-4-5) for query generation and chat
 - **OpenAI** (text-embedding-3-small) for vector embeddings (1536 dimensions)
-- **Apache Solr 9.10.0** for search and vector storage with dense vector support
+- **SolrJ 10.0.0** client against **Apache Solr 9.10.0** server, with dense vector support
 - **ZooKeeper 3.9** for SolrCloud coordination
 - **PostgreSQL 16** for chat memory persistence
 - **Testcontainers** for integration testing with Solr, PostgreSQL, and Ollama
@@ -299,7 +299,7 @@ docker-compose logs solr  # View Solr logs
 
 The `SolrVectorStore` is a custom implementation that:
 
-- Extends `AbstractObservationVectorStore` from Spring AI 1.1.0
+- Extends `AbstractObservationVectorStore` from Spring AI 2.0.1
 - Implements the `VectorStore` interface for document storage and similarity search
 - Uses Solr's `DenseVectorField` type for KNN (K-Nearest Neighbors) search with HNSW algorithm
 - Supports cosine similarity metric for vector comparison
@@ -625,10 +625,12 @@ dev.aparikh.aipoweredsearch/
 ## Important Implementation Details
 
 ### Solr Client Configuration
-The project uses `Http2SolrClient` for improved performance with HTTP/2 features including multiplexing, header compression, and better connection management. The client is configured with appropriate timeouts for production use.
+The project uses `HttpJdkSolrClient` for improved performance with HTTP/2 features including multiplexing, header
+compression, and better connection management. The client is configured with appropriate timeouts for production use.
 
-**Important**: Jetty is pinned to version 11.x to ensure compatibility with SolrJ's Http2SolrClient and avoid conflicts
-with Jetty 12.x.
+**Note**: SolrJ 10 removed the Jetty-backed `Http2SolrClient` and replaced it with `HttpJdkSolrClient`, which is built on
+the JDK's `java.net.http.HttpClient`. SolrJ therefore no longer pulls in Jetty, and the previous Jetty 11.x version
+pinning and exclusions have been removed from `build.gradle.kts`.
 
 ### Vector Search POST Method
 Vector searches use POST method to avoid "URI too long" errors when sending large embedding arrays (1536 dimensions).
@@ -775,12 +777,13 @@ If vector store tests fail with "Cannot invoke EmbeddingResponse.getResults() be
 - Tests use real embeddings, not mocks
 - Use `./run-vector-tests.sh` helper script
 
-### Jetty HTTP Protocol Violations
-If you see "HTTP protocol violation: Authentication challenge without WWW-Authenticate header":
-- This is a known Jetty 12.x issue with invalid API keys
-- Verify your OpenAI API key is valid
-- The error occurs when Jetty's HTTP/2 client encounters invalid auth
-- The project pins Jetty to 11.x to avoid this issue
+### Jetty HTTP Protocol Violations (no longer applicable)
+Earlier versions of this project could fail with "HTTP protocol violation: Authentication challenge without
+WWW-Authenticate header" when an invalid OpenAI API key was used, because both SolrJ and Spring AI routed HTTP traffic
+through Jetty.
+
+Jetty is no longer on the classpath: SolrJ 10 uses the JDK `HttpClient` and Spring AI 2.x uses the official vendor SDKs.
+If OpenAI calls fail, verify that `OPENAI_API_KEY` contains a valid key.
 
 ### Filter Expression Handling
 

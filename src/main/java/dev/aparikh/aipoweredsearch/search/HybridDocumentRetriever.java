@@ -3,6 +3,7 @@ package dev.aparikh.aipoweredsearch.search;
 import dev.aparikh.aipoweredsearch.search.model.SearchResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.jspecify.annotations.Nullable;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.rag.Query;
 import org.springframework.ai.rag.retrieval.search.DocumentRetriever;
@@ -99,7 +100,7 @@ public class HybridDocumentRetriever implements DocumentRetriever {
      *
      * @return the converted document, or null if it carries no usable context
      */
-    private Document toDocument(Map<String, Object> row) {
+    private @Nullable Document toDocument(Map<String, Object> row) {
         Object id = row.get(ID_FIELD);
         Object content = row.get(CONTENT_FIELD);
         if (id == null || content == null) {

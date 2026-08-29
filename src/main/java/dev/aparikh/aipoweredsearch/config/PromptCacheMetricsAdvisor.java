@@ -1,12 +1,13 @@
 package dev.aparikh.aipoweredsearch.config;
 
-import com.anthropic.models.messages.Usage;
+import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClientRequest;
 import org.springframework.ai.chat.client.ChatClientResponse;
 import org.springframework.ai.chat.client.advisor.api.AdvisorChain;
 import org.springframework.ai.chat.client.advisor.api.BaseAdvisor;
+import org.springframework.ai.chat.metadata.Usage;
 import org.springframework.ai.chat.model.ChatResponse;
 
 /**
@@ -32,7 +33,7 @@ import org.springframework.ai.chat.model.ChatResponse;
  * </pre>
  *
  * @author Aditya Parikh
- * @see com.anthropic.models.messages.Usage
+ * @see AnthropicApi.Usage
  */
 public class PromptCacheMetricsAdvisor implements BaseAdvisor {
 
@@ -122,24 +123,25 @@ public class PromptCacheMetricsAdvisor implements BaseAdvisor {
      * @param response the chat response from Anthropic API
      */
     private void logCacheMetrics(ChatResponse response) {
-        org.springframework.ai.chat.metadata.Usage usage = response.getMetadata().getUsage();
+        Usage usage = response.getMetadata().getUsage();
         if (usage == null || usage.getNativeUsage() == null) {
             log.debug("[Prompt Caching] No usage metadata available");
             return;
         }
 
         Object nativeUsage = usage.getNativeUsage();
-        // Spring AI 2.0 exposes the native usage as the official Anthropic SDK type
-        // (com.anthropic.models.messages.Usage) rather than the removed AnthropicApi.Usage.
-        if (!(nativeUsage instanceof Usage anthropicUsage)) {
-            log.debug("[Prompt Caching] Native usage is not com.anthropic.models.messages.Usage: {}",
+        // Spring AI 2.x reports native usage using the official Anthropic SDK type rather than its
+        // own AnthropicApi.Usage. Cache counters are optional there and token counts are longs.
+        if (!(nativeUsage instanceof com.anthropic.models.messages.Usage anthropicUsage)) {
+            log.debug("[Prompt Caching] Native usage is not an Anthropic Usage: {}",
                     nativeUsage != null ? nativeUsage.getClass().getName() : "null");
             return;
         }
 
-        // The Anthropic SDK returns cache token counts as Optional<Long> and base token counts as long.
-        Integer cacheCreationTokens = anthropicUsage.cacheCreationInputTokens().map(Long::intValue).orElse(null);
-        Integer cacheReadTokens = anthropicUsage.cacheReadInputTokens().map(Long::intValue).orElse(null);
+        Integer cacheCreationTokens = anthropicUsage.cacheCreationInputTokens()
+                .map(Math::toIntExact).orElse(null);
+        Integer cacheReadTokens = anthropicUsage.cacheReadInputTokens()
+                .map(Math::toIntExact).orElse(null);
         Integer regularInputTokens = Math.toIntExact(anthropicUsage.inputTokens());
         Integer outputTokens = Math.toIntExact(anthropicUsage.outputTokens());
 
@@ -165,13 +167,10 @@ public class PromptCacheMetricsAdvisor implements BaseAdvisor {
      * @param regularInputTokens  regular input tokens not cached
      * @param outputTokens        output tokens generated
      */
-    private void logCacheActivity(Integer cacheCreationTokens, Integer cacheReadTokens,
-                                  Integer regularInputTokens, Integer outputTokens) {
+    private void logCacheActivity(@Nullable Integer cacheCreationTokens, @Nullable Integer cacheReadTokens,
+                                  @Nullable Integer regularInputTokens, @Nullable Integer outputTokens) {
 
-        boolean isCacheHit = cacheReadTokens != null && cacheReadTokens > 0;
-        boolean isCacheMiss = cacheCreationTokens != null && cacheCreationTokens > 0;
-
-        if (isCacheHit) {
+        if (cacheReadTokens != null && cacheReadTokens > 0) {
             log.info("[Prompt Caching] Cache HIT - Read: {} tokens, Regular input: {} tokens, Output: {} tokens",
                     cacheReadTokens, regularInputTokens != null ? regularInputTokens : 0, outputTokens != null ? outputTokens : 0);
 
@@ -182,7 +181,7 @@ public class PromptCacheMetricsAdvisor implements BaseAdvisor {
             log.info("[Prompt Caching] Cost savings: ~{}%",
                     String.format("%.1f", savingsPercentage));
 
-        } else if (isCacheMiss) {
+        } else if (cacheCreationTokens != null && cacheCreationTokens > 0) {
             log.info("[Prompt Caching] Cache MISS - Created: {} tokens, Regular input: {} tokens, Output: {} tokens",
                     cacheCreationTokens, regularInputTokens != null ? regularInputTokens : 0, outputTokens != null ? outputTokens : 0);
             log.info("[Prompt Caching] Cache created. Subsequent requests with identical prompts will benefit from ~90% cost reduction");
@@ -233,7 +232,7 @@ public class PromptCacheMetricsAdvisor implements BaseAdvisor {
      * @param regularInputTokens number of regular input tokens
      * @return percentage of cost savings due to prompt caching
      */
-    private double calculateSavings(Integer cacheReadTokens, Integer regularInputTokens) {
+    private double calculateSavings(Integer cacheReadTokens, @Nullable Integer regularInputTokens) {
         if (cacheReadTokens == null || cacheReadTokens == 0) {
             return 0.0;
         }

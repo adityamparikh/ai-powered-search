@@ -232,8 +232,7 @@ class SearchRepositoryIT extends SolrTestBase {
         // Then
         assertNotNull(response, "Response should not be null even with no results");
         assertNotNull(response.documents(), "Documents list should not be null");
-        // With high minScore threshold, we may get no results
-        assertTrue(response.documents().size() >= 0, "Documents size should be >= 0");
+        // With high minScore threshold, we may get 0 or more results (both are valid)
     }
 
     @Test

@@ -129,7 +129,7 @@ public abstract class SolrTestBase {
     protected void clearCollection(String collection) throws Exception {
         try {
             // Test if collection exists first by doing a simple query
-            solrClient.query(collection, new org.apache.solr.client.solrj.SolrQuery("*:*").setRows(0));
+            solrClient.query(collection, new org.apache.solr.client.solrj.request.SolrQuery("*:*").setRows(0));
             
             // If we get here, collection exists, so clear it
             solrClient.deleteByQuery(collection, "*:*");
@@ -143,7 +143,7 @@ public abstract class SolrTestBase {
     protected void populateTestData(String collection) throws Exception {
         try {
             // Test if collection is ready by doing a simple query
-            solrClient.query(collection, new org.apache.solr.client.solrj.SolrQuery("*:*").setRows(0));
+            solrClient.query(collection, new org.apache.solr.client.solrj.request.SolrQuery("*:*").setRows(0));
             
             // Add multiple test documents for comprehensive testing
             SolrInputDocument doc1 = new SolrInputDocument();

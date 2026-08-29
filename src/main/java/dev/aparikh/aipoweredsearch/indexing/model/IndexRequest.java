@@ -1,6 +1,7 @@
 package dev.aparikh.aipoweredsearch.indexing.model;
 
 import io.swagger.v3.oas.annotations.media.Schema;
+import org.jspecify.annotations.Nullable;
 
 import java.util.Map;
 
@@ -14,12 +15,12 @@ import java.util.Map;
 @Schema(description = "Request to index a single document with vector embeddings")
 public record IndexRequest(
         @Schema(description = "Unique document identifier (auto-generated if not provided)", example = "doc-001")
-        String id,
+        @Nullable String id,
 
         @Schema(description = "Text content to be embedded and indexed", example = "Spring Boot is a powerful framework for building Java applications", requiredMode = Schema.RequiredMode.REQUIRED)
         String content,
 
         @Schema(description = "Additional metadata fields", example = "{\"category\": \"framework\", \"tags\": [\"java\", \"spring\"]}")
-        Map<String, Object> metadata
+        @Nullable Map<String, Object> metadata
 ) {
 }

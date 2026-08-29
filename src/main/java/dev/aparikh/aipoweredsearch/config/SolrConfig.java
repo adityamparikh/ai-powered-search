@@ -1,7 +1,7 @@
 package dev.aparikh.aipoweredsearch.config;
 
 import org.apache.solr.client.solrj.SolrClient;
-import org.apache.solr.client.solrj.impl.Http2SolrClient;
+import org.apache.solr.client.solrj.impl.HttpJdkSolrClient;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -19,7 +19,7 @@ import java.util.concurrent.TimeUnit;
  * <p><strong>Configuration Features:</strong>
  *
  * <ul>
- *   <li><strong>HTTP/2 Protocol</strong>: Uses Http2SolrClient for better performance</li>
+ *   <li><strong>HTTP/2 Protocol</strong>: Uses HttpJdkSolrClient for better performance</li>
  *   <li><strong>Automatic URL Normalization</strong>: Ensures proper Solr URL formatting</li>
  *   <li><strong>Connection Management</strong>: Stable HTTP/2 connection handling</li>
  *   <li><strong>Property Integration</strong>: Uses externalized configuration through properties</li>
@@ -38,7 +38,10 @@ import java.util.concurrent.TimeUnit;
  *
  * <p><strong>Compatibility Note:</strong>
  *
- * <p>This configuration uses Http2SolrClient (HTTP/2) for improved performance and modern HTTP features.
+ * <p>This configuration uses HttpJdkSolrClient (HTTP/2) for improved performance and modern HTTP
+ * features. SolrJ 10 removed the Jetty-backed {@code Http2SolrClient}; {@code HttpJdkSolrClient} is
+ * its replacement and is built on the JDK's {@code java.net.http.HttpClient}, so no Jetty
+ * dependencies are required.
  *
  * <p><strong>Configuration Example:</strong>
  *
@@ -97,9 +100,10 @@ public class SolrConfig {
      *
      * <p><strong>Client Type:</strong>
      *
-     * <p>Creates an {@code Http2SolrClient} configured for HTTP/2-based communication with
-     * Solr servers. Http2SolrClient offers better performance with modern HTTP/2 features
-     * including multiplexing, header compression, and improved connection management.
+     * <p>Creates an {@code HttpJdkSolrClient} configured for HTTP/2-based communication with
+     * Solr servers. HttpJdkSolrClient wraps the JDK's built-in {@code java.net.http.HttpClient}
+     * and offers modern HTTP/2 features including multiplexing, header compression, and improved
+     * connection management, without pulling in an external HTTP stack.
      *
      * <p><strong>Error Handling:</strong>
      *
@@ -117,8 +121,8 @@ public class SolrConfig {
      * </ul>
      *
      * @param properties the injected Solr configuration properties containing connection URL
-     * @return configured Http2SolrClient instance ready for use in application services
-     * @see Http2SolrClient.Builder
+     * @return configured HttpJdkSolrClient instance ready for use in application services
+     * @see HttpJdkSolrClient.Builder
      * @see SolrConfigurationProperties#url()
      */
     @Bean
@@ -140,8 +144,8 @@ public class SolrConfig {
             }
         }
 
-        // Use Http2SolrClient (HTTP/2) with configured timeouts
-        Http2SolrClient.Builder builder = new Http2SolrClient.Builder(url)
+        // Use HttpJdkSolrClient (JDK HttpClient, HTTP/2) with configured timeouts
+        HttpJdkSolrClient.Builder builder = new HttpJdkSolrClient.Builder(url)
                 .withConnectionTimeout(CONNECTION_TIMEOUT_MS, TimeUnit.MILLISECONDS)
                 .withIdleTimeout(IDLE_TIMEOUT_MS, TimeUnit.MILLISECONDS)
                 .withRequestTimeout(REQUEST_TIMEOUT_MS, TimeUnit.MILLISECONDS);

@@ -6,8 +6,8 @@ import dev.aparikh.aipoweredsearch.search.model.SearchRequest;
 import dev.aparikh.aipoweredsearch.search.model.SearchResponse;
 import dev.aparikh.aipoweredsearch.solr.SolrQueryUtils;
 import org.apache.solr.client.solrj.SolrClient;
-import org.apache.solr.client.solrj.SolrQuery;
 import org.apache.solr.client.solrj.SolrRequest;
+import org.apache.solr.client.solrj.request.SolrQuery;
 import org.apache.solr.client.solrj.request.schema.SchemaRequest;
 import org.apache.solr.client.solrj.response.QueryResponse;
 import org.apache.solr.client.solrj.response.schema.SchemaResponse;
@@ -16,6 +16,8 @@ import org.apache.solr.common.params.ModifiableSolrParams;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Repository;
+
+import org.jspecify.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -78,7 +80,7 @@ public class SearchRepository {
     /**
      * Sets up field list parameter, automatically adding score field if not already present.
      */
-    private void setupFieldList(ModifiableSolrParams params, String fieldsCsv) {
+    private void setupFieldList(ModifiableSolrParams params, @Nullable String fieldsCsv) {
         if (fieldsCsv != null && !fieldsCsv.isEmpty()) {
             params.set("fl", fieldsCsv + "," + FIELD_SCORE);
         } else {
@@ -89,7 +91,7 @@ public class SearchRepository {
     /**
      * Sets up filter query parameter if provided.
      */
-    private void setupFilterQuery(ModifiableSolrParams params, String filterExpression) {
+    private void setupFilterQuery(ModifiableSolrParams params, @Nullable String filterExpression) {
         if (filterExpression != null && !filterExpression.isEmpty()) {
             params.set("fq", filterExpression);
         }
@@ -106,7 +108,7 @@ public class SearchRepository {
      * @param minScore  the threshold, or null to keep everything
      * @return the surviving documents
      */
-    private List<Map<String, Object>> filterByMinScore(List<Map<String, Object>> documents, Double minScore) {
+    private List<Map<String, Object>> filterByMinScore(List<Map<String, Object>> documents, @Nullable Double minScore) {
         if (minScore == null) {
             return documents;
         }
@@ -120,7 +122,7 @@ public class SearchRepository {
     /**
      * Filters documents by minimum score threshold.
      */
-    private boolean passesMinScore(Map<String, Object> doc, Double minScore) {
+    private boolean passesMinScore(Map<String, Object> doc, @Nullable Double minScore) {
         if (minScore == null) {
             return true;
         }
@@ -155,10 +157,13 @@ public class SearchRepository {
         }
 
         if (searchRequest.hasFacets()) {
-            query.setFacet(true);
-            searchRequest.facet().fields().forEach(query::addFacetField);
-            if (searchRequest.facet().query() != null) {
-                query.addFacetQuery(searchRequest.facet().query());
+            SearchRequest.Facet facet = searchRequest.facet();
+            if (facet != null && facet.fields() != null) {
+                query.setFacet(true);
+                facet.fields().forEach(query::addFacetField);
+                if (facet.query() != null) {
+                    query.addFacetQuery(facet.query());
+                }
             }
         }
 
@@ -258,9 +263,9 @@ public class SearchRepository {
     public SearchResponse executeHybridRerankSearch(String collection,
                                                     String query,
                                                     int topK,
-                                                    String filterExpression,
-                                                    String fieldsCsv,
-                                                    Double minScore) {
+                                                    @Nullable String filterExpression,
+                                                    @Nullable String fieldsCsv,
+                                                    @Nullable Double minScore) {
         log.debug("Performing hybrid search (client-side RRF) in collection: {} with query: {}", collection, query);
 
         int fetchSize = topK * OVER_FETCH_MULTIPLIER;
@@ -342,8 +347,8 @@ public class SearchRepository {
     List<Map<String, Object>> executeKeywordSearch(String collection,
                                                    String query,
                                                    int rows,
-                                                   String filterExpression,
-                                                   String fieldsCsv) throws Exception {
+                                                   @Nullable String filterExpression,
+                                                   @Nullable String fieldsCsv) throws Exception {
         ModifiableSolrParams params = new ModifiableSolrParams();
         params.set("q", query);
         params.set("defType", QUERY_TYPE_EDISMAX);
@@ -373,8 +378,8 @@ public class SearchRepository {
     List<Map<String, Object>> executeVectorSearch(String collection,
                                                   String query,
                                                   int rows,
-                                                  String filterExpression,
-                                                  String fieldsCsv) throws Exception {
+                                                  @Nullable String filterExpression,
+                                                  @Nullable String fieldsCsv) throws Exception {
         String vectorString = embeddingService.embedAndFormatForSolr(query);
 
         ModifiableSolrParams params = new ModifiableSolrParams();
@@ -398,9 +403,9 @@ public class SearchRepository {
     private SearchResponse fallbackSearch(String collection,
                                           String query,
                                           int topK,
-                                          String filterExpression,
-                                          String fieldsCsv,
-                                          Double minScore) {
+                                          @Nullable String filterExpression,
+                                          @Nullable String fieldsCsv,
+                                          @Nullable Double minScore) {
         // Try keyword-only first. minScore is NOT applied here: BM25 scores are unbounded,
         // so a [0..1] threshold would silently discard perfectly good keyword matches.
         try {
@@ -465,7 +470,7 @@ public class SearchRepository {
 
                 Map<String, Object> schemaField = explicitByName.get(fieldName);
                 if (schemaField != null) {
-                    String type = (String) schemaField.get("type");
+                    String type = schemaField.get("type") instanceof String s ? s : "unknown";
                     boolean multiValued = Boolean.TRUE.equals(schemaField.get("multiValued"));
                     boolean stored = !Boolean.FALSE.equals(schemaField.get("stored")); // default true
                     boolean docValues = Boolean.TRUE.equals(schemaField.get("docValues"));
@@ -489,7 +494,7 @@ public class SearchRepository {
                 }
 
                 if (bestMatch != null) {
-                    String type = (String) bestMatch.get("type");
+                    String type = bestMatch.get("type") instanceof String s ? s : "unknown";
                     boolean multiValued = Boolean.TRUE.equals(bestMatch.get("multiValued"));
                     boolean stored = !Boolean.FALSE.equals(bestMatch.get("stored")); // default true
                     boolean docValues = Boolean.TRUE.equals(bestMatch.get("docValues"));

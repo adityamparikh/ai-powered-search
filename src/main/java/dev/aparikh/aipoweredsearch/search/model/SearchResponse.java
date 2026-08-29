@@ -1,5 +1,7 @@
 package dev.aparikh.aipoweredsearch.search.model;
 
+import org.jspecify.annotations.Nullable;
+
 import java.util.List;
 import java.util.Map;
 
@@ -7,7 +9,7 @@ public record SearchResponse(
         List<Map<String, Object>> documents,
         Map<String, List<FacetCount>> facetCounts,
         Map<String, List<String>> highlighting,
-        SpellCheckSuggestion spellCheckSuggestion
+        @Nullable SpellCheckSuggestion spellCheckSuggestion
 ) {
 
     public record FacetCount(String value, long count) {

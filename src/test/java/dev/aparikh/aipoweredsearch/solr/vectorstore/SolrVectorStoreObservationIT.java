@@ -279,11 +279,9 @@ class SolrVectorStoreObservationIT {
 
         @Bean
         EmbeddingModel embeddingModel() {
-            // Spring AI 2.0: API key is supplied via OpenAiEmbeddingOptions; OpenAiApi/RestClient builder removed.
-            OpenAiEmbeddingOptions options = OpenAiEmbeddingOptions.builder()
+            return new OpenAiEmbeddingModel(OpenAiEmbeddingOptions.builder()
                     .apiKey(System.getenv("OPENAI_API_KEY"))
-                    .build();
-            return OpenAiEmbeddingModel.builder().options(options).build();
+                    .build());
         }
 
         @Bean

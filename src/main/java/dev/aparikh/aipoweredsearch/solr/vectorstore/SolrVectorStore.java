@@ -3,9 +3,9 @@ package dev.aparikh.aipoweredsearch.solr.vectorstore;
 import dev.aparikh.aipoweredsearch.embedding.VectorFormatUtils;
 import dev.aparikh.aipoweredsearch.solr.SolrQueryUtils;
 import org.apache.solr.client.solrj.SolrClient;
-import org.apache.solr.client.solrj.SolrQuery;
 import org.apache.solr.client.solrj.SolrRequest;
 import org.apache.solr.client.solrj.SolrServerException;
+import org.apache.solr.client.solrj.request.SolrQuery;
 import org.apache.solr.client.solrj.response.QueryResponse;
 import org.apache.solr.client.solrj.response.UpdateResponse;
 import org.apache.solr.common.SolrDocument;
@@ -17,6 +17,7 @@ import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.embedding.EmbeddingResponse;
 import org.springframework.ai.vectorstore.AbstractVectorStoreBuilder;
 import org.springframework.ai.vectorstore.SearchRequest;
+import org.jspecify.annotations.Nullable;
 import org.springframework.ai.vectorstore.filter.Filter;
 import org.springframework.ai.vectorstore.observation.AbstractObservationVectorStore;
 import org.springframework.ai.vectorstore.observation.VectorStoreObservationContext;
@@ -320,14 +321,18 @@ public class SolrVectorStore extends AbstractObservationVectorStore {
     /**
      * Converts Spring AI filter expressions to Solr query syntax.
      */
-    private String convertFilterToSolrQuery(Filter.Expression filterExpression) {
+    private @Nullable String convertFilterToSolrQuery(Filter.@Nullable Expression filterExpression) {
         if (filterExpression == null) {
             return null;
         }
         return convertOperand(filterExpression);
     }
 
-    private String convertOperand(Filter.Operand operand) {
+    private String convertOperand(Filter.@Nullable Operand operand) {
+        if (operand == null) {
+            // Unary operators (for example NOT) carry no right-hand operand.
+            return "";
+        }
         if (operand instanceof Filter.Expression expression) {
             return convertExpression(expression);
         } else if (operand instanceof Filter.Group group) {
@@ -406,10 +411,10 @@ public class SolrVectorStore extends AbstractObservationVectorStore {
         return solrDoc;
     }
 
-    private Document toDocument(SolrDocument solrDoc, double similarityThreshold) {
+    private @Nullable Document toDocument(SolrDocument solrDoc, double similarityThreshold) {
         // Handle potential multi-valued fields from Solr
         Object idObj = solrDoc.getFieldValue(options.idFieldName());
-        String id = null;
+        @Nullable String id = null;
         if (idObj instanceof List) {
             List<?> idList = (List<?>) idObj;
             if (!idList.isEmpty()) {
@@ -419,8 +424,13 @@ public class SolrVectorStore extends AbstractObservationVectorStore {
             id = idObj.toString();
         }
 
+        // A document without an id cannot be represented as a Spring AI Document; skip it.
+        if (id == null) {
+            return null;
+        }
+
         Object contentObj = solrDoc.getFieldValue(options.contentFieldName());
-        String content = null;
+        @Nullable String content = null;
         if (contentObj instanceof List) {
             List<?> contentList = (List<?>) contentObj;
             if (!contentList.isEmpty()) {
@@ -432,7 +442,7 @@ public class SolrVectorStore extends AbstractObservationVectorStore {
 
         // Extract score and normalize for cosine similarity
         Number scoreNum = (Number) solrDoc.getFieldValue("score");
-        Double score = scoreNum != null ? scoreNum.doubleValue() : null;
+        @Nullable Double score = scoreNum != null ? scoreNum.doubleValue() : null;
 
         // Apply similarity threshold if score is available
         if (score != null && similarityThreshold >= 0) {
@@ -492,7 +502,7 @@ public class SolrVectorStore extends AbstractObservationVectorStore {
     public static final class Builder extends AbstractVectorStoreBuilder<Builder> {
         private final SolrClient solrClient;
         private final String collection;
-        private SolrVectorStoreOptions options;
+        private @Nullable SolrVectorStoreOptions options;
         private boolean initializeSchema = false;
 
         private Builder(SolrClient solrClient, String collection, EmbeddingModel embeddingModel) {
