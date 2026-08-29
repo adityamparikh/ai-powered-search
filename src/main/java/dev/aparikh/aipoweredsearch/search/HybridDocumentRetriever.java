@@ -67,11 +67,14 @@ public class HybridDocumentRetriever implements DocumentRetriever {
      *
      * @param searchRepository executes the hybrid search
      * @param collection       the Solr collection holding the indexed corpus
-     * @param topK             how many fused documents to place in the prompt context
+     * @param topK             how many fused documents to hand downstream. This is a
+     *                         candidate count, not a context size: reranking is expected
+     *                         to trim it. With reranking disabled, every one of these
+     *                         goes into the prompt, so lower it accordingly.
      */
     public HybridDocumentRetriever(SearchRepository searchRepository,
                                    @Value("${solr.default.collection:books}") String collection,
-                                   @Value("${search.rag.hybrid.top-k:5}") int topK) {
+                                   @Value("${search.rag.hybrid.top-k:20}") int topK) {
         this.searchRepository = searchRepository;
         this.collection = collection;
         this.topK = topK;

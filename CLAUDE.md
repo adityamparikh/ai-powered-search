@@ -725,7 +725,19 @@ public ChatClient ragChatClient(ChatModel chatModel,
 - **SimpleLoggerAdvisor**: Logs prompts and responses for debugging
 - **PromptCacheMetricsAdvisor**: Tracks Anthropic prompt caching metrics
 - **Collection**: `solr.default.collection` property (defaults to "books")
-- **Retrieval depth**: `search.rag.hybrid.top-k` (defaults to 5)
+- **RerankingDocumentPostProcessor**: Asks Claude to judge the retrieved candidates against the
+  question, reorder them, and discard the rest. This is the third and last place the pipeline can
+  improve context quality — the retriever decides what is a *candidate*, reranking decides what
+  actually reaches the prompt.
+- **Retrieval depth**: `search.rag.hybrid.top-k` (defaults to 20). This is a *candidate* count,
+  not a context size: reranking is expected to trim it. Reranking earns its keep by discarding,
+  so retrieval must over-fetch — reranking N documents down to N only reorders them.
+- **Reranking**: `search.rag.rerank.enabled` (defaults to true), `search.rag.rerank.top-k`
+  (defaults to 5). Disabling it avoids a second model call per RAG turn, but then every
+  retrieved chunk goes straight into the prompt — lower `search.rag.hybrid.top-k` if you do.
+  The reranking prompt is unique per question, so it does not benefit from prompt caching.
+  Failures are never fatal: an unavailable model, a malformed ranking, or indexes pointing
+  nowhere all degrade to the retriever's RRF order.
 - **Field projection**: `id,content,metadata_*` — excludes the 1536-dim `vector` field, which
   Solr would otherwise return on every hit under the default `fl=*`
 
