@@ -128,11 +128,9 @@ class SolrVectorStoreDebugTest {
 
     private void testWithRealEmbeddings(String apiKey) {
         try {
-            // Spring AI 2.0: API key is supplied via OpenAiEmbeddingOptions; OpenAiApi/RestClient builder removed.
-            OpenAiEmbeddingOptions options = OpenAiEmbeddingOptions.builder()
+            EmbeddingModel embeddingModel = new OpenAiEmbeddingModel(OpenAiEmbeddingOptions.builder()
                     .apiKey(apiKey)
-                    .build();
-            EmbeddingModel embeddingModel = OpenAiEmbeddingModel.builder().options(options).build();
+                    .build());
 
             VectorStore vectorStore = SolrVectorStore.builder(solrClient, COLLECTION_NAME, embeddingModel)
                     .options(SolrVectorStoreOptions.defaults())

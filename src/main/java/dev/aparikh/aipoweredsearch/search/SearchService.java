@@ -18,9 +18,12 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Service;
 
+import org.jspecify.annotations.Nullable;
+
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 /**
@@ -139,7 +142,7 @@ public class SearchService {
      * @param fieldsCsv     optional comma-separated list of fields to include in the response (metadata keys or 'content')
      * @return search response with semantically similar documents
      */
-    public SearchResponse semanticSearch(String collection, String freeTextQuery, Integer k, Double minScore, String fieldsCsv) {
+    public SearchResponse semanticSearch(String collection, String freeTextQuery, @Nullable Integer k, @Nullable Double minScore, @Nullable String fieldsCsv) {
         validateSearchInputs(collection, freeTextQuery);
         log.debug("Semantic search for collection: {}, query: {}, k: {}, minScore: {}, fields: {}", collection, freeTextQuery, k, minScore, fieldsCsv);
 
@@ -198,9 +201,9 @@ public class SearchService {
      */
     public SearchResponse hybridSearch(String collection,
                                        String freeTextQuery,
-                                       Integer k,
-                                       Double minScore,
-                                       String fieldsCsv) {
+                                       @Nullable Integer k,
+                                       @Nullable Double minScore,
+                                       @Nullable String fieldsCsv) {
         validateSearchInputs(collection, freeTextQuery);
         log.debug("Hybrid search for collection: {}, query: {}, k: {}, minScore: {}, fields: {}",
                 collection, freeTextQuery, k, minScore, fieldsCsv);
@@ -319,7 +322,7 @@ public class SearchService {
                 .call()
                 .entity(QueryGenerationResponse.class);
 
-        assert response != null;
+        Objects.requireNonNull(response, "AI did not return a query generation response");
         log.debug("Query generation response: {}", response);
         return response;
     }
@@ -330,7 +333,7 @@ public class SearchService {
      * @param filterQueries list of filter query strings
      * @return combined filter expression or null if no filters
      */
-    private String buildFilterExpression(List<String> filterQueries) {
+    private @Nullable String buildFilterExpression(@Nullable List<String> filterQueries) {
         if (filterQueries != null && !filterQueries.isEmpty()) {
             return String.join(" AND ", filterQueries);
         }
@@ -347,9 +350,9 @@ public class SearchService {
      * @param fieldsCsv optional comma-separated list of fields to include (null = all fields)
      * @return SearchResponse with converted documents
      */
-    private SearchResponse toSearchResponse(List<Document> documents, String fieldsCsv) {
+    private SearchResponse toSearchResponse(List<Document> documents, @Nullable String fieldsCsv) {
         // Parse requested fields if provided
-        List<String> requestedFields = null;
+        @Nullable List<String> requestedFields = null;
         if (fieldsCsv != null && !fieldsCsv.isBlank()) {
             requestedFields = List.of(fieldsCsv.split(","));
         }

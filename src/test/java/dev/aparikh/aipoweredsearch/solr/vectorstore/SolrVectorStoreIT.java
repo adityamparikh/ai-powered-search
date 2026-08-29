@@ -119,7 +119,7 @@ class SolrVectorStoreIT {
     @Test
     void addAndDeleteDocumentsTest() throws Exception {
         // Initially should have 0 documents
-        long initialCount = solrClient.query(COLLECTION_NAME, new org.apache.solr.client.solrj.SolrQuery("*:*"))
+        long initialCount = solrClient.query(COLLECTION_NAME, new org.apache.solr.client.solrj.request.SolrQuery("*:*"))
                 .getResults().getNumFound();
         assertThat(initialCount).isEqualTo(0);
 
@@ -128,7 +128,7 @@ class SolrVectorStoreIT {
 
         // Wait for indexing to complete
         await().untilAsserted(() -> {
-            long count = solrClient.query(COLLECTION_NAME, new org.apache.solr.client.solrj.SolrQuery("*:*"))
+            long count = solrClient.query(COLLECTION_NAME, new org.apache.solr.client.solrj.request.SolrQuery("*:*"))
                     .getResults().getNumFound();
             assertThat(count).isEqualTo(3);
         });
@@ -138,7 +138,7 @@ class SolrVectorStoreIT {
 
         // Wait for deletion to complete
         await().untilAsserted(() -> {
-            long count = solrClient.query(COLLECTION_NAME, new org.apache.solr.client.solrj.SolrQuery("*:*"))
+            long count = solrClient.query(COLLECTION_NAME, new org.apache.solr.client.solrj.request.SolrQuery("*:*"))
                     .getResults().getNumFound();
             assertThat(count).isEqualTo(0);
         });
@@ -371,11 +371,9 @@ class SolrVectorStoreIT {
 
         @Bean
         EmbeddingModel embeddingModel() {
-            // Spring AI 2.0: API key is supplied via OpenAiEmbeddingOptions; OpenAiApi/RestClient builder removed.
-            OpenAiEmbeddingOptions options = OpenAiEmbeddingOptions.builder()
+            return new OpenAiEmbeddingModel(OpenAiEmbeddingOptions.builder()
                     .apiKey(System.getenv("OPENAI_API_KEY"))
-                    .build();
-            return OpenAiEmbeddingModel.builder().options(options).build();
+                    .build());
         }
 
         @Bean

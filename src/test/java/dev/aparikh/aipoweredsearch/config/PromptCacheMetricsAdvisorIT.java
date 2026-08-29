@@ -9,10 +9,10 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariables;
-import com.anthropic.models.messages.Usage;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.memory.ChatMemory;
+import org.springframework.ai.chat.metadata.Usage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -128,17 +128,16 @@ class PromptCacheMetricsAdvisorIT {
         assertThat(response.getResult().getOutput().getText()).isNotBlank();
 
         // Verify cache metrics
-        org.springframework.ai.chat.metadata.Usage usage = response.getMetadata().getUsage();
+        Usage usage = response.getMetadata().getUsage();
         assertThat(usage).isNotNull();
 
-        Usage anthropicUsage = (Usage) usage.getNativeUsage();
+        com.anthropic.models.messages.Usage anthropicUsage = (com.anthropic.models.messages.Usage) usage.getNativeUsage();
         assertThat(anthropicUsage).isNotNull();
 
         // First request ideally creates cache (cache miss)
         // Note: Anthropic prompt caching only activates for sufficiently large prompts/tools.
         // In environments with short prompts, the provider may return 0 cache tokens.
-        // Spring AI 2.0 returns the official SDK Usage whose cache token counts are Optional<Long>.
-        Integer cacheCreationTokens = anthropicUsage.cacheCreationInputTokens().map(Long::intValue).orElse(null);
+        Integer cacheCreationTokens = anthropicUsage.cacheCreationInputTokens().map(Math::toIntExact).orElse(null);
         boolean cachingActive = cacheCreationTokens != null && cacheCreationTokens > 0;
         if (cachingActive) {
             assertThat(cacheCreationTokens)
@@ -216,14 +215,14 @@ class PromptCacheMetricsAdvisorIT {
         assertThat(response2.getResult()).isNotNull();
 
         // Verify cache hit metrics
-        org.springframework.ai.chat.metadata.Usage usage = response2.getMetadata().getUsage();
+        Usage usage = response2.getMetadata().getUsage();
         assertThat(usage).isNotNull();
 
-        Usage anthropicUsage = (Usage) usage.getNativeUsage();
+        com.anthropic.models.messages.Usage anthropicUsage = (com.anthropic.models.messages.Usage) usage.getNativeUsage();
         assertThat(anthropicUsage).isNotNull();
 
         // Second request ideally reads from cache (cache hit)
-        Integer cacheReadTokens = anthropicUsage.cacheReadInputTokens().map(Long::intValue).orElse(null);
+        Integer cacheReadTokens = anthropicUsage.cacheReadInputTokens().map(Math::toIntExact).orElse(null);
         boolean cachingActive = cacheReadTokens != null && cacheReadTokens > 0;
         if (cachingActive) {
             assertThat(cacheReadTokens)
@@ -290,8 +289,8 @@ class PromptCacheMetricsAdvisorIT {
                 .chatResponse();
 
         // Then - Extract usage metrics
-        Usage usage = (Usage) response.getMetadata().getUsage().getNativeUsage();
-        Integer cacheReadTokens = usage.cacheReadInputTokens().map(Long::intValue).orElse(null);
+        com.anthropic.models.messages.Usage usage = (com.anthropic.models.messages.Usage) response.getMetadata().getUsage().getNativeUsage();
+        Integer cacheReadTokens = usage.cacheReadInputTokens().map(Math::toIntExact).orElse(null);
         Integer regularTokens = Math.toIntExact(usage.inputTokens());
 
         boolean cachingActive = cacheReadTokens != null && cacheReadTokens > 0;
@@ -353,12 +352,12 @@ class PromptCacheMetricsAdvisorIT {
             assertThat(response).isNotNull();
             assertThat(response.getResult().getOutput().getText()).isNotBlank();
 
-            Usage usage = (Usage)
+            com.anthropic.models.messages.Usage usage = (com.anthropic.models.messages.Usage)
                     response.getMetadata().getUsage().getNativeUsage();
 
             if (i == 0) {
                 // First request may create cache if prompt size threshold is met
-                Integer created = usage.cacheCreationInputTokens().map(Long::intValue).orElse(null);
+                Integer created = usage.cacheCreationInputTokens().map(Math::toIntExact).orElse(null);
                 boolean cachingActive = created != null && created > 0;
                 if (cachingActive) {
                     assertThat(created)
@@ -371,7 +370,7 @@ class PromptCacheMetricsAdvisorIT {
                 }
             } else {
                 // Subsequent requests may read from cache if activated
-                Integer read = usage.cacheReadInputTokens().map(Long::intValue).orElse(null);
+                Integer read = usage.cacheReadInputTokens().map(Math::toIntExact).orElse(null);
                 boolean cachingActive = read != null && read > 0;
                 if (cachingActive) {
                     assertThat(read)
@@ -418,10 +417,10 @@ class PromptCacheMetricsAdvisorIT {
                             && message.contains("tokens");
                 });
 
-        org.springframework.ai.chat.metadata.Usage usage = response.getMetadata().getUsage();
-        Usage anthropicUsage = (Usage) usage.getNativeUsage();
-        Integer created = anthropicUsage.cacheCreationInputTokens().map(Long::intValue).orElse(null);
-        Integer read = anthropicUsage.cacheReadInputTokens().map(Long::intValue).orElse(null);
+        Usage usage = response.getMetadata().getUsage();
+        com.anthropic.models.messages.Usage anthropicUsage = (com.anthropic.models.messages.Usage) usage.getNativeUsage();
+        Integer created = anthropicUsage.cacheCreationInputTokens().map(Math::toIntExact).orElse(null);
+        Integer read = anthropicUsage.cacheReadInputTokens().map(Math::toIntExact).orElse(null);
         boolean cachingActive = (created != null && created > 0) || (read != null && read > 0);
 
         if (cachingActive) {
@@ -431,8 +430,8 @@ class PromptCacheMetricsAdvisorIT {
         }
 
         // Verify response has usage metadata
-        org.springframework.ai.chat.metadata.Usage usage2 = response.getMetadata().getUsage();
+        Usage usage2 = response.getMetadata().getUsage();
         assertThat(usage2).isNotNull();
-        assertThat(usage2.getNativeUsage()).isInstanceOf(Usage.class);
+        assertThat(usage2.getNativeUsage()).isInstanceOf(com.anthropic.models.messages.Usage.class);
     }
 }

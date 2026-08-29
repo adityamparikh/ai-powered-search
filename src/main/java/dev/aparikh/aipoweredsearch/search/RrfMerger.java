@@ -1,5 +1,6 @@
 package dev.aparikh.aipoweredsearch.search;
 
+import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -9,6 +10,7 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * Merges search results from multiple retrieval strategies using Reciprocal Rank Fusion (RRF).
@@ -101,8 +103,8 @@ public class RrfMerger {
      * @return merged results sorted by RRF score descending; never null
      * @throws IllegalArgumentException if any document is missing an {@code id} field
      */
-    public List<Map<String, Object>> merge(List<Map<String, Object>> keywordResults,
-                                           List<Map<String, Object>> vectorResults) {
+    public List<Map<String, Object>> merge(@Nullable List<Map<String, Object>> keywordResults,
+                                           @Nullable List<Map<String, Object>> vectorResults) {
         List<Map<String, Object>> safeKeyword = keywordResults != null ? keywordResults : Collections.emptyList();
         List<Map<String, Object>> safeVector = vectorResults != null ? vectorResults : Collections.emptyList();
 
@@ -157,9 +159,9 @@ public class RrfMerger {
             mergedResults.add(merged.toDocument());
         }
 
-        // Sort by RRF score descending
+        // Sort by RRF score descending (RRF_SCORE_FIELD is always set by toDocument())
         mergedResults.sort(Comparator.comparingDouble(
-                (Map<String, Object> d) -> ((Number) d.get(RRF_SCORE_FIELD)).doubleValue()).reversed());
+                (Map<String, Object> d) -> ((Number) Objects.requireNonNull(d.get(RRF_SCORE_FIELD))).doubleValue()).reversed());
 
         log.debug("RRF merge complete: {} unique documents after fusion", mergedResults.size());
         return mergedResults;
@@ -181,7 +183,7 @@ public class RrfMerger {
     /**
      * Extracts the score from a document as a Double, returning null if absent or non-numeric.
      */
-    Double extractScore(Map<String, Object> document) {
+    @Nullable Double extractScore(Map<String, Object> document) {
         Object score = document.get(SCORE_FIELD);
         if (score instanceof Number number) {
             return number.doubleValue();
@@ -196,10 +198,10 @@ public class RrfMerger {
         final String id;
         final Map<String, Object> fields;
         double rrfScore;
-        Double keywordOriginalScore;
-        Double vectorOriginalScore;
-        Integer keywordRank;
-        Integer vectorRank;
+        @Nullable Double keywordOriginalScore;
+        @Nullable Double vectorOriginalScore;
+        @Nullable Integer keywordRank;
+        @Nullable Integer vectorRank;
 
         MergedDocument(String id, Map<String, Object> sourceDocument) {
             this.id = id;
@@ -208,13 +210,13 @@ public class RrfMerger {
             this.rrfScore = 0.0;
         }
 
-        void addKeywordScore(double rrfContribution, int rank, Double originalScore) {
+        void addKeywordScore(double rrfContribution, int rank, @Nullable Double originalScore) {
             this.rrfScore += rrfContribution;
             this.keywordRank = rank;
             this.keywordOriginalScore = originalScore;
         }
 
-        void addVectorScore(double rrfContribution, int rank, Double originalScore) {
+        void addVectorScore(double rrfContribution, int rank, @Nullable Double originalScore) {
             this.rrfScore += rrfContribution;
             this.vectorRank = rank;
             this.vectorOriginalScore = originalScore;
