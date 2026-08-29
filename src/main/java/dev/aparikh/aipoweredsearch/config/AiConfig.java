@@ -16,6 +16,7 @@ import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.openai.OpenAiEmbeddingModel;
 import org.springframework.ai.openai.OpenAiEmbeddingOptions;
 import org.springframework.ai.rag.advisor.RetrievalAugmentationAdvisor;
+import org.springframework.ai.rag.generation.augmentation.ContextualQueryAugmenter;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
@@ -217,6 +218,13 @@ public class AiConfig {
         return builder.defaultAdvisors(
                         RetrievalAugmentationAdvisor.builder()
                                 .documentRetriever(hybridDocumentRetriever)
+                                // RetrievalAugmentationAdvisor refuses to answer when retrieval
+                                // returns nothing; QuestionAnswerAdvisor did not. Follow-up turns
+                                // in an ongoing conversation are often answerable from chat memory
+                                // alone, so preserve the previous behaviour.
+                                .queryAugmenter(ContextualQueryAugmenter.builder()
+                                        .allowEmptyContext(true)
+                                        .build())
                                 // Pass-through joiner. The default ConcatenationDocumentJoiner
                                 // re-sorts documents by their individual score, which would undo
                                 // the RRF ranking the retriever just computed — our score IS the

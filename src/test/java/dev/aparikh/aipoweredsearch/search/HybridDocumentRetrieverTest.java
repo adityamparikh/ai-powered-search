@@ -85,6 +85,26 @@ class HybridDocumentRetrieverTest {
     }
 
     @Test
+    void carriesRrfProvenanceIntoDocumentMetadata() {
+        stubHybridResults(List.of(
+                solrDoc("doc-1", "content", Map.of(
+                        "rrf_score", 0.032,
+                        "keyword_rank", 1,
+                        "vector_rank", 2,
+                        "keyword_score", 8.4,
+                        "vector_score", 0.91))));
+
+        List<Document> documents = retriever.retrieve(Query.builder().text("q").build());
+
+        // RRF discards raw scores by construction; keeping the provenance is what makes
+        // "why was this chunk in the prompt?" answerable after the fact.
+        assertThat(documents.get(0).getMetadata())
+                .containsEntry("rrf_score", 0.032)
+                .containsEntry("keyword_rank", 1)
+                .containsEntry("vector_rank", 2);
+    }
+
+    @Test
     void preservesRrfRankingOrder() {
         // The repository returns documents already ordered by fused RRF score.
         stubHybridResults(List.of(
