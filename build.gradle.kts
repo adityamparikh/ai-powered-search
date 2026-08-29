@@ -37,6 +37,8 @@ dependencies {
     implementation("org.springframework.ai:spring-ai-starter-model-chat-memory-repository-jdbc")
     implementation("org.springframework.ai:spring-ai-vector-store")
     implementation("org.springframework.ai:spring-ai-vector-store-advisor")
+    // Modular RAG: RetrievalAugmentationAdvisor, DocumentRetriever, DocumentJoiner
+    implementation("org.springframework.ai:spring-ai-rag")
     implementation("org.postgresql:postgresql")
     // Apache Solr client. SolrJ 10 dropped Jetty in favour of the JDK HttpClient
     // (HttpJdkSolrClient), so no Jetty artifacts or version pinning are needed.

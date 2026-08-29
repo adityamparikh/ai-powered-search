@@ -171,7 +171,8 @@ class SearchController {
      * @param collection the name of the Solr collection to search
      * @param query      the natural language search query
      * @param k          optional topK results for vector search (defaults to 100)
-     * @param minScore   optional minimum similarity score threshold [0..1]
+     * @param minScore   optional minimum cosine similarity [0..1], applied to the vector leg
+     *                   before fusion only
      * @param fields     optional comma-separated list of fields to include in the response
      * @return a {@link SearchResponse} containing RRF-ranked documents combining both search strategies
      * @throws IllegalArgumentException if collection or query is null or empty
@@ -202,7 +203,9 @@ class SearchController {
             @RequestParam(name = "query") String query,
             @Parameter(description = "Number of results to return from vector search (topK)", required = false, example = "100")
             @RequestParam(name = "k", required = false) @Nullable Integer k,
-            @Parameter(description = "Minimum similarity score threshold [0..1]", required = false, example = "0.5")
+            @Parameter(description = "Minimum cosine similarity [0..1] applied to the vector half of the "
+                    + "search before fusion. Keyword (BM25) hits are not filtered by it, and it is not "
+                    + "applied to the fused RRF score.", required = false, example = "0.5")
             @RequestParam(name = "minScore", required = false) @Nullable Double minScore,
             @Parameter(description = "Comma-separated list of fields to include in the response (e.g., 'content,author,year'). Id and score are always included.", required = false)
             @RequestParam(name = "fields", required = false) @Nullable String fields) {
