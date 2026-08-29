@@ -315,6 +315,13 @@ public class SearchRepository {
             log.warn("Hybrid search returned no results, attempting fallback");
             return fallbackSearch(collection, query, topK, filterExpression, fieldsCsv, minScore);
 
+        } catch (InterruptedException e) {
+            // An interrupt means this caller is being cancelled. Falling back would issue more
+            // Solr queries on a thread that has been asked to stop, and would swallow the
+            // interrupt for everyone above us. Restore the flag and propagate instead.
+            Thread.currentThread().interrupt();
+            log.warn("Hybrid search interrupted for collection: {}", collection);
+            throw new IllegalStateException("Hybrid search was interrupted", e);
         } catch (Exception e) {
             log.error("Error performing hybrid search with RRF in collection: {}", collection, e);
             log.warn("Hybrid search failed, attempting fallback");

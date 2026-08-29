@@ -27,9 +27,11 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -212,6 +214,36 @@ class SearchRepositoryTest {
 
             assertEquals(2, metConcurrently.get(),
                     "Keyword and vector searches must be in flight at the same time");
+        }
+
+        /**
+         * An interrupt means the caller is being cancelled. Swallowing it and running the
+         * fallback cascade would issue further Solr queries on a thread that has been asked
+         * to stop, and would lose the interrupt for every caller above us.
+         */
+        @Test
+        void propagatesInterruptionRatherThanFallingBack() throws Exception {
+            String collection = "test-collection";
+            String query = "interrupted query";
+
+            when(embeddingService.embedAndFormatForSolr(query)).thenReturn("[0.1, 0.2, 0.3]");
+            SolrDocumentList docs = new SolrDocumentList();
+            docs.setNumFound(0L);
+            lenient().when(queryResponse.getResults()).thenReturn(docs);
+            lenient().when(solrClient.query(eq(collection), any(SolrParams.class), eq(SolrRequest.METHOD.POST)))
+                    .thenReturn(queryResponse);
+
+            Thread.currentThread().interrupt();
+            try {
+                assertThrows(IllegalStateException.class, () ->
+                                searchRepository.executeHybridRerankSearch(collection, query, 10, null, null, null),
+                        "An interrupted hybrid search must not silently fall back");
+                assertTrue(Thread.currentThread().isInterrupted(),
+                        "Interrupt status must be restored for callers above us");
+            } finally {
+                // Clear the flag so it cannot leak into other tests.
+                Thread.interrupted();
+            }
         }
 
         @Test
