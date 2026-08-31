@@ -288,6 +288,32 @@ docker-compose logs solr  # View Solr logs
 - `./solr-config`: Custom Solr schema configuration
 - `./mydata`: Sample data for indexing
 
+### API Versioning
+
+Endpoints use the **path-segment API versioning** built into Spring Framework 7 / Spring Boot 4,
+rather than hardcoding a version into each mapping:
+
+```properties
+spring.mvc.apiversion.use.path-segment=1
+spring.mvc.apiversion.default=v1
+```
+
+Controllers declare the version segment as a URI variable and the version as a mapping attribute:
+
+```java
+@RequestMapping(path = "/api/{version}/search", version = "v1")
+```
+
+- **URLs are unchanged** — `/api/v1/search/...` works exactly as before. `SemanticApiVersionParser`
+  skips leading non-digits, so `v1` parses as `1.0.0`.
+- **Adding a version** is a new mapping with `version = "v2"`, not a new path. Spring routes on the
+  segment; baseline versions (`"1.2+"`) match that version and anything higher.
+- **Unsupported versions return 400** (`InvalidApiVersionException`). The supported set is detected
+  from the mappings themselves via `detect-supported`, which defaults to true.
+- **Non-versioned paths are unaffected.** `/actuator/**` and `/api-docs` are served by separate
+  handler mappings that never consult the version strategy, so path segment 1 not being a version
+  there is harmless. `ApiVersioningTest` pins this, since it would otherwise be an easy regression.
+
 ### API Documentation
 - **Swagger UI**: http://localhost:8080/swagger-ui.html
 - **OpenAPI Spec**: http://localhost:8080/api-docs
