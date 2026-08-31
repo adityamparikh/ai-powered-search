@@ -42,7 +42,7 @@ import org.springframework.web.bind.annotation.RestController;
  * @since 1.0.0
  */
 @RestController
-@RequestMapping("/api/v1/search")
+@RequestMapping(path = "/api/{version}/search", version = "v1")
 @Tag(name = "Search", description = "API for AI-enhanced search operations")
 class SearchController {
 

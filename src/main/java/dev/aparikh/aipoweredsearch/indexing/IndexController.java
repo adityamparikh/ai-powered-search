@@ -40,7 +40,7 @@ import org.springframework.web.bind.annotation.RestController;
  * @see IndexService
  */
 @RestController
-@RequestMapping("/api/v1/index")
+@RequestMapping(path = "/api/{version}/index", version = "v1")
 @Tag(name = "Indexing", description = "API for indexing documents with vector embeddings")
 class IndexController {
 
