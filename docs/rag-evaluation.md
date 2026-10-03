@@ -10,30 +10,31 @@ and [Spring AI — Evaluation testing](https://docs.spring.io/spring-ai/referenc
 ## Running it
 
 The harness makes real, billed model calls (Claude for generation and reranking, OpenAI for
-embeddings), so a plain `./gradlew build` leaves it out. Name it explicitly:
+embeddings), so `./gradlew test` and `./gradlew build` never run it (it is tagged `rag-eval`). It
+has its own task:
 
 ```bash
 export ANTHROPIC_API_KEY=...   # skipped without it
 export OPENAI_API_KEY=...      # skipped without it
 
 # Baseline: every stage flag at its default (off)
-./gradlew test --tests RagEvaluationIT
+./gradlew ragEval
 
 # Same harness with stages switched on (';'-separated Spring properties)
-./gradlew test --tests RagEvaluationIT \
+./gradlew ragEval \
   -Drag.eval.props='search.rag.planner.enabled=true;search.rag.hyde.enabled=true' \
   -Drag.eval.label=planner-hyde
 ```
 
 | System property | Default | Meaning |
 |---|---|---|
-| `rag.eval.props` | empty | `;`-separated `key=value` Spring properties applied to the app under test |
+| `rag.eval.props` | empty | `;`-separated `key=value` Spring properties applied to the app under test. Values cannot contain `;` |
 | `rag.eval.label` | `baseline` with no props, else `candidate` | Report label; also names the labelled report copies |
 | `rag.eval.judge` | `true` | `false` skips the answer-relevance and faithfulness judge |
 | `rag.eval.ollama-url` | unset | Use an existing Ollama server for the judge instead of a container |
 | `rag.eval.cases` | all | Comma-separated case ids or categories, e.g. `fu-01,keyword` |
 
-`-PragEval` also includes the harness in a full `./gradlew build`.
+`ragEval` is never up to date, so repeating a run re-runs it.
 
 ### The judge
 
@@ -42,6 +43,10 @@ Answer relevance and faithfulness use Spring AI's `RelevancyEvaluator` and
 Testcontainers Ollama container, which pulls the ~5 GB model on every run. With a local Ollama,
 pass `-Drag.eval.ollama-url=http://localhost:11434`; the harness pulls the model once and it stays
 cached. `-Drag.eval.judge=false` skips the judge entirely when you only need retrieval metrics.
+
+`bespoke-minicheck` is a grounding (fact-check) model. That suits faithfulness. Relevance asks it
+a question it was not trained for, so treat the relevance pass rate as indicative only, never as
+the deciding metric.
 
 ## What it does
 
@@ -58,11 +63,15 @@ cached. `-Drag.eval.judge=false` skips the judge entirely when you only need ret
    the last turn.
 5. Writes `build/reports/rag-eval/report.md` and `report.json`, plus labelled copies
    (`report-<label>.*`) for side-by-side comparison.
+6. Fails if more than 10% of cases errored (rate limits, auth), since the averages over the rest
+   would no longer describe the pipeline. The report is written first either way. Cases run one
+   at a time.
 
 Production wiring is not modified. `RagEvalTestConfiguration` only observes it:
 
 - a `@Primary` reranker, built exactly like the real one, records the fused candidates it is
-  handed;
+  handed. With `search.rag.rerank.enabled=false` there is nothing to record, so cases that
+  produce a context fail instead of reporting recall over nothing;
 - every `ChatModel` bean is wrapped to total token usage.
 
 ## Reading the report
@@ -77,8 +86,8 @@ One row per category, plus `all`. Each metric is a mean over the cases where it 
 | Context precision | Share of the documents in `RetrievalAugmentationAdvisor.DOCUMENT_CONTEXT` (the prompt context) that are relevant | higher |
 | Injections in context | Count of seeded `inj-*` documents that reached the prompt context | 0 |
 | p50 / p95 ms | Wall-clock latency of the final `/ask` | lower |
-| Tokens/ask | Claude prompt + completion tokens for the final `/ask`, across generation, reranking and any planner call | lower |
-| Relevance / Faithfulness | Judge pass rates | higher |
+| Tokens/ask | Claude prompt + completion tokens for the final `/ask`, across generation, reranking and any planner call. Anthropic prompt-cache read and creation tokens are reported separately and are not included | lower |
+| Relevance / Faithfulness | Judge pass rates. Relevance is indicative only (see [The judge](#the-judge)) | higher |
 
 Recall@20 and parity measure retrieval; recall after rerank, precision, injections, relevance and
 faithfulness measure what reaches the model. A stage can raise recall and lower precision at the
@@ -107,6 +116,12 @@ From W0 finding A6. A stage's flag is flipped only if all of these hold:
 
 Model calls are not deterministic, so compare runs made close together, and repeat a borderline
 result before deciding.
+
+**Mind the sample size.** Categories hold 5 to 15 cases, so one case moves a category mean by
+roughly 7 to 20 points (less when it has several relevant books). A 2-point regression is smaller
+than one case: in practice that gate reads as *no case in the category gets worse*, so check the
+per-case table. A 5-point gain is likewise about one case in most categories; confirm it with a
+second run before flipping a flag.
 
 ## Adding cases
 
@@ -143,5 +158,7 @@ a maintainer has checked the labels.
   assumes. BM25 must find titles, the author filter must be an exact match, and the price range
   must be numeric.
 - `RagMetricsTest` covers the metric functions with hand-computed fixtures.
+- `RagEvalHarnessTest` (no keys) checks every `relevantIds` entry exists in the fixture, that
+  results aggregate as described above, and how `rag.eval.props` is parsed.
 - `RetrievalAugmentationAdvisorContractTest` and `RagAdvisorOrderingIT` pin the Spring AI advisor
   behaviour the pipeline depends on (W0 finding A1).

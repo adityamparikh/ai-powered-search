@@ -6,6 +6,8 @@ import org.apache.solr.client.solrj.SolrClient;
 import org.apache.solr.common.SolrInputDocument;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.BeforeEach;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.evaluation.FactCheckingEvaluator;
 import org.springframework.ai.chat.evaluation.RelevancyEvaluator;
@@ -16,9 +18,11 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestClientException;
 import org.testcontainers.ollama.OllamaContainer;
 import org.testcontainers.solr.SolrContainer;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 
@@ -44,6 +48,11 @@ public abstract class EvaluationTestBase {
 
     /** System property naming an external Ollama server for the judge. */
     public static final String OLLAMA_URL_PROPERTY = "rag.eval.ollama-url";
+
+    /** Upper bound on pulling the judge model into an external Ollama (about 5 GB on first pull). */
+    private static final Duration MODEL_PULL_TIMEOUT = Duration.ofMinutes(30);
+
+    private static final Logger log = LoggerFactory.getLogger(EvaluationTestBase.class);
 
     @Autowired
     protected ObjectProvider<OllamaContainer> ollama;
@@ -88,14 +97,22 @@ public abstract class EvaluationTestBase {
         String baseUrl;
         if (external != null && !external.isBlank()) {
             baseUrl = external;
-            System.out.println("Using external Ollama at " + baseUrl + "; pulling " + BESPOKE_MINICHECK + " if absent...");
-            jdkRestClient(baseUrl).build()
-                    .post().uri("/api/pull")
-                    .body(Map.of("model", BESPOKE_MINICHECK, "stream", false))
-                    .retrieve().toBodilessEntity();
+            log.info("Using external Ollama at {}; pulling {} if absent...", baseUrl, BESPOKE_MINICHECK);
+            JdkClientHttpRequestFactory pullRequestFactory = new JdkClientHttpRequestFactory();
+            pullRequestFactory.setReadTimeout(MODEL_PULL_TIMEOUT);
+            try {
+                RestClient.builder().baseUrl(baseUrl).requestFactory(pullRequestFactory).build()
+                        .post().uri("/api/pull")
+                        .body(Map.of("model", BESPOKE_MINICHECK, "stream", false))
+                        .retrieve().toBodilessEntity();
+            } catch (RestClientException e) {
+                throw new IllegalStateException("Could not pull " + BESPOKE_MINICHECK + " from the Ollama at "
+                        + baseUrl + " (" + OLLAMA_URL_PROPERTY + "). Is it running? Pass -Drag.eval.judge=false "
+                        + "to skip the judge.", e);
+            }
         } else {
             OllamaContainer container = ollama.getObject();
-            System.out.println("Pulling " + BESPOKE_MINICHECK + " model into the Ollama container...");
+            log.info("Pulling {} model into the Ollama container...", BESPOKE_MINICHECK);
             container.execInContainer("ollama", "pull", BESPOKE_MINICHECK);
             baseUrl = container.getEndpoint();
         }
@@ -167,7 +184,7 @@ public abstract class EvaluationTestBase {
 
         } catch (Exception e) {
             // Collection might already exist
-            System.out.println("Collection creation error (might already exist): " + e.getMessage());
+            log.info("Collection creation error (might already exist): {}", e.getMessage());
         }
     }
 
@@ -177,7 +194,7 @@ public abstract class EvaluationTestBase {
     protected void loadBooks() throws Exception {
         List<BookDatasetGenerator.Book> books = BookDatasetGenerator.generate1000Books();
 
-        System.out.println("Loading " + books.size() + " books into Solr...");
+        log.info("Loading {} books into Solr...", books.size());
 
         for (BookDatasetGenerator.Book book : books) {
             SolrInputDocument doc = new SolrInputDocument();
@@ -203,7 +220,7 @@ public abstract class EvaluationTestBase {
         // Commit all documents
         solrClient.commit(BOOKS_COLLECTION);
 
-        System.out.println("Finished loading books into Solr");
+        log.info("Finished loading books into Solr");
     }
 
     /**

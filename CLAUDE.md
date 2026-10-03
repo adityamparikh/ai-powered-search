@@ -590,15 +590,15 @@ The report goes to `build/reports/rag-eval/report.{md,json}`.
 
 ```bash
 # Needs ANTHROPIC_API_KEY and OPENAI_API_KEY; skipped without them. Makes billed calls,
-# so a plain ./gradlew build excludes it (tag "rag-eval"); name it or pass -PragEval.
-./gradlew test --tests RagEvaluationIT -Drag.eval.ollama-url=http://localhost:11434
+# so ./gradlew test and build exclude it (tag "rag-eval"); it has its own task.
+./gradlew ragEval -Drag.eval.ollama-url=http://localhost:11434
 
 # Same harness with stages on (';'-separated properties) and a report label
-./gradlew test --tests RagEvaluationIT \
+./gradlew ragEval \
   -Drag.eval.props='search.rag.planner.enabled=true' -Drag.eval.label=planner
 
 # Retrieval metrics only, no judge
-./gradlew test --tests RagEvaluationIT -Drag.eval.judge=false
+./gradlew ragEval -Drag.eval.judge=false
 ```
 
 - The harness builds its collection from the **project configset** (`solr-config/conf`), not
@@ -611,6 +611,8 @@ The report goes to `build/reports/rag-eval/report.{md,json}`.
 - Related tests:
   - `RagEvalFixtureIT` checks the fixture setup (OpenAI key only);
   - `RagMetricsTest` covers the metric math;
+  - `RagEvalHarnessTest` checks the eval set against the fixture and the report aggregation
+    (no keys);
   - `RetrievalAugmentationAdvisorContractTest` and `RagAdvisorOrderingIT` pin the Spring AI
     advisor behaviour the pipeline relies on (no keys).
 

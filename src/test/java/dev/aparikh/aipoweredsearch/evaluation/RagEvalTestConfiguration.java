@@ -24,7 +24,9 @@ import java.util.List;
  *   <li>A {@code @Primary} reranker that records its input is offered to
  *       {@code AiConfig.ragChatClient}. It is built exactly as
  *       {@code AiConfig.rerankingDocumentPostProcessor} builds the real one, so the pipeline
- *       under test is unchanged; it just notes the fused candidates on the way through.</li>
+ *       under test is unchanged; it just notes the fused candidates on the way through. With
+ *       {@code search.rag.rerank.enabled=false} there is no reranker to record, so
+ *       {@link RagEvaluationIT} fails those cases rather than report recall over nothing.</li>
  * </ul>
  */
 @TestConfiguration(proxyBeanMethods = false)

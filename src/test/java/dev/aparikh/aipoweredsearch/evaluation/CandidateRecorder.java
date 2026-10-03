@@ -17,6 +17,10 @@ import java.util.concurrent.ConcurrentHashMap;
  * <p>{@code RetrievalAugmentationAdvisor} builds {@code Query.context()} from the request
  * context, which carries the {@link ChatMemory#CONVERSATION_ID} advisor parameter. That is
  * how a capture is tied back to the evaluation case that produced it.</p>
+ *
+ * <p>Only the latest capture per conversation is kept, so this assumes cases run one at a time,
+ * each on its own conversation id (a follow-up's standalone rewrite uses a
+ * {@code -standalone} suffix). Concurrent cases sharing an id would overwrite each other.</p>
  */
 public class CandidateRecorder {
 

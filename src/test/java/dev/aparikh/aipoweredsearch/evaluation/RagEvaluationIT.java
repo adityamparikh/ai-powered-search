@@ -55,7 +55,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  * <ul>
  *   <li>{@code rag.eval.props}: {@code ;}-separated Spring properties for the app under test,
  *       e.g. {@code search.rag.planner.enabled=true;search.rag.hyde.enabled=true}. This is how
- *       the same harness runs with stages on or off.</li>
+ *       the same harness runs with stages on or off. A value cannot contain {@code ;}; it may
+ *       contain {@code =}, since only the first one separates key from value.</li>
  *   <li>{@code rag.eval.label}: report label (default {@code baseline} when no props are set,
  *       else {@code candidate}).</li>
  *   <li>{@code rag.eval.judge}: {@code false} skips the Ollama judge.</li>
@@ -63,9 +64,12 @@ import static org.assertj.core.api.Assertions.assertThat;
  *   <li>{@code rag.eval.cases}: comma-separated case ids or categories to run a subset.</li>
  * </ul>
  *
- * <p>Tagged {@code rag-eval} and excluded from a plain {@code ./gradlew build}: it makes real,
- * billed model calls. Run it with {@code ./gradlew test --tests RagEvaluationIT}. Without
+ * <p>Tagged {@code rag-eval} and excluded from {@code ./gradlew test} and {@code build}: it makes
+ * real, billed model calls. Run it with {@code ./gradlew ragEval}. Without
  * {@code ANTHROPIC_API_KEY} and {@code OPENAI_API_KEY} it is skipped.</p>
+ *
+ * <p>Cases run one at a time. {@link CandidateRecorder} and {@link UsageRecordingChatModel} rely
+ * on that: neither separates concurrent cases.</p>
  */
 @Tag("rag-eval")
 @SpringBootTest
@@ -82,6 +86,12 @@ class RagEvaluationIT extends EvaluationTestBase {
     static final String COLLECTION = "rag-eval";
     static final int RECALL_CUTOFF = 20;
     static final Path REPORT_DIR = Path.of("build", "reports", "rag-eval");
+
+    /**
+     * Above this share of errored cases the run fails: the averages over the remaining cases
+     * would no longer describe the pipeline. Rate limits and auth failures look like this.
+     */
+    static final double MAX_ERROR_RATE = 0.1;
 
     @Autowired
     private IndexService indexService;
@@ -105,7 +115,10 @@ class RagEvaluationIT extends EvaluationTestBase {
 
     /** Parses {@code rag.eval.props} into Spring properties for the app under test. */
     static Map<String, String> flags() {
-        String raw = System.getProperty("rag.eval.props", "");
+        return parseFlags(System.getProperty("rag.eval.props", ""));
+    }
+
+    static Map<String, String> parseFlags(String raw) {
         Map<String, String> flags = new LinkedHashMap<>();
         for (String pair : raw.split(";")) {
             if (pair.isBlank()) {
@@ -138,6 +151,10 @@ class RagEvaluationIT extends EvaluationTestBase {
 
     @Test
     void evaluate() throws Exception {
+        if (judgeEnabled()) {
+            assertThat(relevancyEvaluator).as("relevancy judge (rag.eval.judge=true)").isNotNull();
+            assertThat(factCheckingEvaluator).as("faithfulness judge (rag.eval.judge=true)").isNotNull();
+        }
         UsageRecordingChatModel usage = (UsageRecordingChatModel) chatModel;
         Map<String, RagEvalData.Book> books = fixture.books().stream()
                 .collect(Collectors.toMap(RagEvalData.Book::id, Function.identity()));
@@ -158,9 +175,13 @@ class RagEvaluationIT extends EvaluationTestBase {
         RagEvalReport.write(report, REPORT_DIR);
         log.info("[rag-eval] report written to {}\n{}", REPORT_DIR.toAbsolutePath(), RagEvalReport.toMarkdown(report));
 
-        // The harness measures; it does not gate. It only fails if it could not measure at all.
+        // The harness measures; it does not gate on the metrics. It fails only when too many cases
+        // errored for the metrics to mean anything. The report above is written either way.
         assertThat(results).isNotEmpty();
-        assertThat(results.stream().filter(r -> r.error() == null)).as("cases that ran without error").isNotEmpty();
+        long errors = results.stream().filter(r -> r.error() != null).count();
+        assertThat((double) errors / results.size())
+                .as("share of cases that errored (%d of %d, see the report)", errors, results.size())
+                .isLessThanOrEqualTo(MAX_ERROR_RATE);
     }
 
     private List<RagEvalData.EvalCase> selectedCases() {
@@ -191,6 +212,11 @@ class RagEvaluationIT extends EvaluationTestBase {
 
             List<String> candidates = candidateRecorder.lastCandidates(conversationId);
             List<String> context = response.sources();
+            if (candidates.isEmpty() && !context.isEmpty()) {
+                // Recall and parity would silently read as 0 / n/a rather than "not measured".
+                throw new IllegalStateException("No candidates recorded although the prompt context is not empty: "
+                        + "the recording reranker did not run (search.rag.rerank.enabled=false?)");
+            }
 
             double parity = Double.NaN;
             if (evalCase.isFollowUp() && evalCase.standalone() != null) {
@@ -209,10 +235,10 @@ class RagEvaluationIT extends EvaluationTestBase {
                         .map(book -> new Document(book.id(), book.content(), Map.of()))
                         .toList();
                 String question = evalCase.standalone() != null ? evalCase.standalone() : evalCase.lastTurn();
-                relevantVerdict = judge(() -> Objects.requireNonNull(relevancyEvaluator)
+                relevantVerdict = judge(() -> Objects.requireNonNull(relevancyEvaluator, "relevancyEvaluator")
                         .evaluate(new EvaluationRequest(question, contextDocuments, answer)).isPass());
                 if (!contextDocuments.isEmpty()) {
-                    faithfulVerdict = judge(() -> Objects.requireNonNull(factCheckingEvaluator)
+                    faithfulVerdict = judge(() -> Objects.requireNonNull(factCheckingEvaluator, "factCheckingEvaluator")
                             .evaluate(new EvaluationRequest(contextDocuments, answer)).isPass());
                 }
             }

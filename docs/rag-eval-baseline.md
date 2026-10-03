@@ -4,9 +4,14 @@ The W0 baseline (#33): `/api/v1/search/ask` with **every epic #32 stage off**. E
 flag is flipped only if it beats these numbers by the thresholds in
 [rag-evaluation.md](rag-evaluation.md#thresholds).
 
+> **Provisional.** The case labels in `eval/rag-eval-set.json` were drafted by Claude Code and are
+> still marked *needs maintainer review*. Until a maintainer has checked them, treat these numbers
+> as provisional, and re-run the baseline after any label changes.
+
 - **Date:** 2026-10-03 (run finished 18:06 UTC)
 - **Commit:** `b17395e` (W0 head)
 - **Command:** `./gradlew test --tests RagEvaluationIT -Drag.eval.label=baseline -Drag.eval.ollama-url=http://localhost:11434`
+  (the harness now has its own task: `./gradlew ragEval` with the same `-D` options)
 - **Models:**
   - generation and reranking: `claude-sonnet-4-5`;
   - embeddings: `text-embedding-3-small` (1536 dims);
@@ -120,6 +125,8 @@ not from a new run, so every other number above is unchanged.
 
 - **Single run.** Claude's generation and reranking are not deterministic, and neither is the
   judge. Treat differences of a few points as noise, and repeat a borderline comparison before
-  flipping a flag.
+  flipping a flag. With 5 to 15 cases per category, one case is worth 7 to 20 points.
+- **Relevance is indicative only.** The judge, `bespoke-minicheck`, is a grounding model; the
+  faithfulness rate is its intended use, the relevance rate is not.
 - **Latency** is measured on a developer laptop against hosted APIs and local Testcontainers.
   Compare runs made close together on the same machine.

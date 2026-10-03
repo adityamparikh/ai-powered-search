@@ -16,13 +16,24 @@ import java.util.concurrent.atomic.AtomicLong;
  * <p>Wrapping the model rather than reading the final {@code ChatResponse} is what makes the
  * reranker's call visible: it uses its own {@code ChatClient}, so its usage never reaches the
  * response returned to the caller.</p>
+ *
+ * <p>What it does not count:</p>
+ * <ul>
+ *   <li>{@link #stream(Prompt)} calls, which pass through untotalled. {@code /ask} only uses
+ *       {@code call()}.</li>
+ *   <li>Anthropic prompt-cache tokens. Anthropic reports cache-read and cache-creation tokens
+ *       separately from input tokens, so cached prompt content is not in the total.</li>
+ * </ul>
+ *
+ * <p>{@link #reset()} and {@link #snapshot()} are not atomic across the two counters; that is
+ * fine because cases run one at a time.</p>
  */
 public class UsageRecordingChatModel implements ChatModel {
 
     /**
      * Token totals since the last {@link #reset()}.
      *
-     * @param tokens prompt plus completion tokens
+     * @param tokens prompt plus completion tokens, excluding prompt-cache tokens
      */
     public record Totals(long calls, long tokens) {
     }

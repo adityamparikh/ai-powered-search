@@ -505,8 +505,9 @@ cost per category. Every RAG pipeline change is measured against its baseline be
 switched on.
 
 ```bash
-# Requires ANTHROPIC_API_KEY and OPENAI_API_KEY; makes billed model calls
-./gradlew test --tests RagEvaluationIT
+# Requires ANTHROPIC_API_KEY and OPENAI_API_KEY; makes billed model calls.
+# Never part of ./gradlew test or build.
+./gradlew ragEval
 open build/reports/rag-eval/report.md
 ```
 

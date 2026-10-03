@@ -79,24 +79,27 @@ dependencyManagement {
 }
 
 tasks.withType<Test> {
-    useJUnitPlatform()
-    finalizedBy(tasks.jacocoTestReport)
     maxHeapSize = "2g"
     // Forward -Drag.* to the test JVM: the RAG evaluation tests read their options from
-    // system properties.
-    System.getProperties().stringPropertyNames()
-        .filter { it.startsWith("rag.") }
-        .forEach { systemProperty(it, System.getProperty(it)) }
+    // system properties. Read through a provider so the values are tracked as build inputs.
+    systemProperties(providers.systemPropertiesPrefixedBy("rag.").get())
 }
 
-// RagEvaluationIT makes real, billed model calls across ~50 cases, so a plain `./gradlew build`
-// leaves it out. It runs when named explicitly (`--tests RagEvaluationIT`) or with `-PragEval`.
-tasks.named<Test>("test") {
-    val requestedArgs = gradle.startParameter.taskRequests.flatMap { it.args }
-    val evalRequested = project.hasProperty("ragEval") || requestedArgs.any { it.contains("RagEvaluation") }
-    if (!evalRequested) {
-        useJUnitPlatform { excludeTags("rag-eval") }
-    }
+// RagEvaluationIT (tag "rag-eval") makes real, billed model calls across ~50 cases, so `test`,
+// and with it `./gradlew build`, never runs it. `./gradlew ragEval` runs it and nothing else.
+tasks.test {
+    useJUnitPlatform { excludeTags("rag-eval") }
+    finalizedBy(tasks.jacocoTestReport)
+}
+
+tasks.register<Test>("ragEval") {
+    description = "Runs the billed RAG evaluation harness (tests tagged rag-eval)."
+    group = LifecycleBasePlugin.VERIFICATION_GROUP
+    testClassesDirs = sourceSets.test.get().output.classesDirs
+    classpath = sourceSets.test.get().runtimeClasspath
+    useJUnitPlatform { includeTags("rag-eval") }
+    // Model output is not deterministic and runs are repeated on purpose; never skip as up to date.
+    outputs.upToDateWhen { false }
 }
 
 tasks.withType<JavaCompile>().configureEach {
