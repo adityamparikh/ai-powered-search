@@ -375,8 +375,9 @@ class HybridDocumentRetrieverTest {
 
     @Test
     void fewerThanThreeFilteredCandidatesRetriesWithoutFilters() throws Exception {
+        // Two distinct candidates (one shared by both legs): one short of the threshold.
         when(searchRepository.executeKeywordSearch(any(), any(), anyInt(), any(), any()))
-                .thenReturn(List.of(solrDoc("only", "a", Map.of())))
+                .thenReturn(List.of(solrDoc("only", "a", Map.of()), solrDoc("second", "b", Map.of())))
                 .thenReturn(List.of(solrDoc("x", "x", Map.of()), solrDoc("y", "y", Map.of()), solrDoc("z", "z", Map.of())));
         when(searchRepository.executeVectorSearch(any(), any(), anyInt(), any(), any(), any()))
                 .thenReturn(List.of(solrDoc("only", "a", Map.of())))
@@ -387,6 +388,24 @@ class HybridDocumentRetrieverTest {
         assertThat(hits).extracting(Document::getId).containsExactly("x", "y", "z");
         verify(searchRepository).executeKeywordSearch(any(), any(), anyInt(), eq("metadata_year:2011"), any());
         verify(searchRepository).executeKeywordSearch(any(), any(), anyInt(), isNull(), any());
+    }
+
+    @Test
+    void aFilteredSearchThatSolrRejectsFallsBackToUnfilteredRetrieval() throws Exception {
+        // A filter Solr refuses (a 400) fails both legs; each failed leg contributes nothing, so
+        // the filtered retrieval finds no candidates and is re-run without filters.
+        when(searchRepository.executeKeywordSearch(any(), any(), anyInt(), eq("metadata_year:2011"), any()))
+                .thenThrow(new IllegalStateException("400: Invalid Number"));
+        when(searchRepository.executeVectorSearch(any(), any(), anyInt(), eq("metadata_year:2011"), any(), any()))
+                .thenThrow(new IllegalStateException("400: Invalid Number"));
+        when(searchRepository.executeKeywordSearch(any(), any(), anyInt(), isNull(), any()))
+                .thenReturn(List.of(solrDoc("a", "a", Map.of())));
+        when(searchRepository.executeVectorSearch(any(), any(), anyInt(), isNull(), any(), any()))
+                .thenReturn(List.of());
+
+        List<Document> hits = unfusedRetriever().retrieve(filtered(List.of("metadata_year:2011")));
+
+        assertThat(hits).extracting(Document::getId).containsExactly("a");
     }
 
     @Test

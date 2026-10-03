@@ -23,6 +23,7 @@ filters
       field:value
       field:"exact phrase"
       field:[low TO high]   (use * for an open end; only on numeric or date fields)
+  - Fields of type string or strings match exactly and case-sensitively. Write names and titles in a filter value exactly as the conversation spells them, including capitalisation and punctuation.
   - Add a filter only when the user states a hard constraint, such as a specific author, a price limit, or a publication-year range. Topics, genres, moods and vague preferences are not filters.
   - A relative constraint such as "cheaper", "newer" or "older" becomes a range only when its reference value appears in the conversation. For example, "cheaper" than a book listed at $9.99 becomes a price range ending just below 9.99. If the reference value is not in the conversation, leave the constraint out.
   - Never use local parameters, functions, wildcards, boolean operators, parentheses or nested queries.

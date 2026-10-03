@@ -64,6 +64,9 @@ class FilterValidatorTest {
             "metadata_genre:fantasy",
             "metadata_genre:\"epic fantasy\"",
             "metadata_published:[2020-01-01T00:00:00Z TO *]",
+            "metadata_published:{2020-01-01T00:00:00Z TO 2021-01-01T00:00:00.000Z]",
+            "metadata_year:[2008 TO 2011]",
+            "metadata_author:R.R.",
             "  metadata_year:[2008 TO *]  "
     })
     void acceptsSimpleClausesOnKnownFields(String clause) {
@@ -93,6 +96,18 @@ class FilterValidatorTest {
             "metadata_price:[* TO 9",
             "metadata_author:\"unterminated",
             "metadata_author:\"has \\\" escape\"",
+            // values and bounds must match the field's type, or Solr answers 400
+            "metadata_published:[1 TO 5]",
+            "metadata_published:2024",
+            "metadata_year:[2020-01-01T00:00:00Z TO *]",
+            "metadata_price:[2020-01-01T00:00:00Z TO *]",
+            "metadata_year:[* TO 2011.5]",
+            "metadata_year:2011.5",
+            // bare operators and a leading '-' are not plain tokens
+            "metadata_author:AND",
+            "metadata_genre:OR",
+            "metadata_genre:NOT",
+            "metadata_author:-foo",
             "id:grrm-01",
             "content:dragons",
             "vector:[0.1 TO 0.2]",
@@ -130,10 +145,8 @@ class FilterValidatorTest {
                 .containsExactly("metadata_author", "metadata_genre", "metadata_price", "metadata_published", "metadata_year");
     }
 
-    @Test
-    void schemaIsCachedUntilTheTtlExpires() {
-        AtomicReference<Instant> now = new AtomicReference<>(Instant.parse("2026-10-03T00:00:00Z"));
-        Clock clock = new Clock() {
+    private static Clock clock(AtomicReference<Instant> now) {
+        return new Clock() {
             @Override
             public ZoneOffset getZone() {
                 return ZoneOffset.UTC;
@@ -149,7 +162,12 @@ class FilterValidatorTest {
                 return now.get();
             }
         };
-        FilterValidator cached = new FilterValidator(repository, Duration.ofMinutes(5), clock);
+    }
+
+    @Test
+    void schemaIsCachedUntilTheTtlExpires() {
+        AtomicReference<Instant> now = new AtomicReference<>(Instant.parse("2026-10-03T00:00:00Z"));
+        FilterValidator cached = new FilterValidator(repository, Duration.ofMinutes(5), clock(now));
 
         cached.validate(COLLECTION, List.of("metadata_year:2011"));
         now.set(now.get().plus(Duration.ofMinutes(4)));
@@ -162,12 +180,41 @@ class FilterValidatorTest {
     }
 
     @Test
-    void failedIntrospectionDropsEveryFilterAndIsRetriedNextTime() {
+    void failedIntrospectionDropsEveryFilterAndIsRetriedAfterAShortInterval() {
+        AtomicReference<Instant> now = new AtomicReference<>(Instant.parse("2026-10-03T00:00:00Z"));
+        FilterValidator cached = new FilterValidator(repository, Duration.ofMinutes(5), clock(now));
         when(repository.getFieldsWithSchema(COLLECTION))
                 .thenThrow(new IllegalStateException("solr down"))
                 .thenReturn(SCHEMA);
 
-        assertThat(validator.validate(COLLECTION, List.of("metadata_year:2011"))).isEmpty();
-        assertThat(validator.validate(COLLECTION, List.of("metadata_year:2011"))).containsExactly("metadata_year:2011");
+        assertThat(cached.validate(COLLECTION, List.of("metadata_year:2011"))).isEmpty();
+        // The failure is cached briefly: a degraded Solr is not asked again on every turn.
+        assertThat(cached.validate(COLLECTION, List.of("metadata_year:2011"))).isEmpty();
+        verify(repository, times(1)).getFieldsWithSchema(COLLECTION);
+
+        now.set(now.get().plusSeconds(FilterValidator.FAILURE_RETRY_SECONDS + 1));
+        assertThat(cached.validate(COLLECTION, List.of("metadata_year:2011"))).containsExactly("metadata_year:2011");
+        verify(repository, times(2)).getFieldsWithSchema(COLLECTION);
+    }
+
+    @Test
+    void aFailedRefreshKeepsServingThePreviousSchema() {
+        AtomicReference<Instant> now = new AtomicReference<>(Instant.parse("2026-10-03T00:00:00Z"));
+        FilterValidator cached = new FilterValidator(repository, Duration.ofMinutes(5), clock(now));
+        when(repository.getFieldsWithSchema(COLLECTION))
+                .thenReturn(SCHEMA)
+                .thenThrow(new IllegalStateException("solr down"))
+                .thenReturn(List.of());
+
+        assertThat(cached.validate(COLLECTION, List.of("metadata_year:2011"))).containsExactly("metadata_year:2011");
+
+        now.set(now.get().plus(Duration.ofMinutes(6)));
+        assertThat(cached.validate(COLLECTION, List.of("metadata_year:2011"))).containsExactly("metadata_year:2011");
+        verify(repository, times(2)).getFieldsWithSchema(COLLECTION);
+
+        // An empty refresh is treated the same way as a failed one.
+        now.set(now.get().plusSeconds(FilterValidator.FAILURE_RETRY_SECONDS + 1));
+        assertThat(cached.validate(COLLECTION, List.of("metadata_year:2011"))).containsExactly("metadata_year:2011");
+        verify(repository, times(3)).getFieldsWithSchema(COLLECTION);
     }
 }

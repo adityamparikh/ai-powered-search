@@ -26,6 +26,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.regex.Pattern;
 
 /**
  * Plans retrieval for a RAG turn with one small-model call (W1, #36): it rewrites the question as
@@ -57,10 +58,12 @@ import java.util.concurrent.TimeoutException;
  * reranker. Expansion and post-processing both run on the caller thread, so no
  * {@code ThreadLocal} is involved (W0 finding A1).</p>
  *
- * <p><strong>Fails safe.</strong> On a timeout, an exception, an unparseable reply, a blank
- * standalone query or the wrong number of variants, the expander logs a WARN and returns
- * {@code List.of(originalQuery)}. That is exactly today's behaviour, as in Spring AI's
- * {@code MultiQueryExpander}.</p>
+ * <p><strong>Fails safe.</strong> On a timeout, an exception, an unparseable reply or a blank
+ * standalone query, the expander logs a WARN and returns {@code List.of(originalQuery)}. That is
+ * exactly today's behaviour, as in Spring AI's {@code MultiQueryExpander}, and each such fallback
+ * is recorded as an error on the {@value RagObservations#PLAN} observation. Unlike
+ * {@code MultiQueryExpander}, a wrong variant count does not discard the plan: the standalone
+ * rewrite is its most valuable part, so missing variants are tolerated and extras are dropped.</p>
  *
  * <p>Pattern: <a href="https://medium.com/@thetalkingapp/spring-ai-recipe-making-rag-conversation-aware-189b82a37060">Making
  * RAG Conversation-Aware</a> and
@@ -71,6 +74,10 @@ import java.util.concurrent.TimeoutException;
 public final class QueryPlanningExpander implements QueryExpander {
 
     private static final Logger log = LoggerFactory.getLogger(QueryPlanningExpander.class);
+
+    private static final Pattern WHITESPACE = Pattern.compile("\\s+");
+    /** One character of what {@link #normalise} strips from the end: ASCII punctuation or whitespace. */
+    private static final Pattern TRAILING_CHAR = Pattern.compile("[\\p{Punct}\\s]");
 
     /** Longest single history message passed to the planner; long answers are truncated. */
     static final int MAX_HISTORY_MESSAGE_CHARS = 1500;
@@ -105,20 +112,22 @@ public final class QueryPlanningExpander implements QueryExpander {
 
     @Override
     public List<Query> expand(Query query) {
-        QueryPlan plan;
+        QueryPlan accepted;
         try {
-            plan = RagObservations.observe(observationRegistry, RagObservations.PLAN, () -> plan(query));
+            // A rejected plan is thrown inside the observation, so every fallback is counted
+            // as an errored rag.plan, not only timeouts and model errors.
+            accepted = RagObservations.observe(observationRegistry, RagObservations.PLAN, () -> {
+                QueryPlan plan = plan(query);
+                String problem = problemWith(plan);
+                if (problem != null) {
+                    throw new IllegalStateException("plan rejected: " + problem);
+                }
+                return plan;
+            });
         } catch (RuntimeException e) {
             log.warn("Query planning failed, retrieving with the original question: {}", describe(e));
             return List.of(query);
         }
-
-        String problem = problemWith(plan);
-        if (problem != null) {
-            log.warn("Query plan rejected ({}), retrieving with the original question", problem);
-            return List.of(query);
-        }
-        QueryPlan accepted = Objects.requireNonNull(plan);
         String standalone = Objects.requireNonNull(accepted.standalone()).strip();
         String keywordQuery = isBlank(accepted.keywordQuery()) ? standalone
                 : Objects.requireNonNull(accepted.keywordQuery()).strip();
@@ -130,7 +139,12 @@ public final class QueryPlanningExpander implements QueryExpander {
         List<Query> queries = new ArrayList<>();
         Set<String> seen = new HashSet<>();
         addQuery(queries, seen, query, standalone, keywordQuery, standalone, filters);
-        for (String variant : nonBlank(accepted.variants())) {
+        List<String> variantTexts = nonBlank(accepted.variants());
+        if (variantTexts.size() != variants) {
+            log.debug("Planner returned {} variants, {} requested; using at most {}",
+                    variantTexts.size(), variants, variants);
+        }
+        for (String variant : variantTexts.subList(0, Math.min(variants, variantTexts.size()))) {
             addQuery(queries, seen, query, variant.strip(), variant.strip(), standalone, filters);
         }
 
@@ -141,12 +155,13 @@ public final class QueryPlanningExpander implements QueryExpander {
 
     /**
      * Calls the planner on a virtual thread bounded by {@code timeout}, cancelling it on expiry.
+     * The user message is built inside the bounded call, so a cold field-introspection lookup
+     * ({@link FilterValidator#filterableFields}) counts against the timeout too.
      */
     private QueryPlan plan(Query query) {
-        String userMessage = userMessage(query);
         Callable<Optional<QueryPlan>> call = () -> Optional.ofNullable(plannerChatClient.prompt()
                 .system(systemPrompt)
-                .user(userMessage)
+                .user(userMessage(query))
                 .call()
                 .entity(QueryPlan.class));
         FutureTask<Optional<QueryPlan>> task = new FutureTask<>(contextSnapshotFactory.captureAll().wrap(call));
@@ -216,16 +231,16 @@ public final class QueryPlanningExpander implements QueryExpander {
         return turns.size() <= historyMessages ? turns : turns.subList(turns.size() - historyMessages, turns.size());
     }
 
-    private @Nullable String problemWith(@Nullable QueryPlan plan) {
+    /**
+     * Only a missing plan or a blank standalone query rejects a plan. A wrong variant count does
+     * not: the standalone rewrite and the filters are still worth using.
+     */
+    private static @Nullable String problemWith(@Nullable QueryPlan plan) {
         if (plan == null) {
             return "no plan";
         }
         if (isBlank(plan.standalone())) {
             return "blank standalone query";
-        }
-        int returned = nonBlank(plan.variants()).size();
-        if (returned != variants) {
-            return "expected " + variants + " variants, got " + returned;
         }
         return null;
     }
@@ -247,6 +262,8 @@ public final class QueryPlanningExpander implements QueryExpander {
     /**
      * Writes the standalone query into the original query's context for the post-processors.
      * The advisor's map is mutable; a caller-built {@code Map.of()} is not, and is left alone.
+     * That mutability is Spring AI behaviour, not API: {@code RetrievalAugmentationAdvisorContractTest}
+     * pins it, so an upgrade that breaks the reranker hand-off fails there first.
      */
     private static void handOffStandalone(Query original, String standalone) {
         try {
@@ -256,11 +273,18 @@ public final class QueryPlanningExpander implements QueryExpander {
         }
     }
 
+    /**
+     * Lower-cases, collapses whitespace runs to one space and strips trailing ASCII punctuation
+     * and whitespace. The trailing strip is a backwards scan rather than {@code [\p{Punct}\s]+$},
+     * which backtracks quadratically on a long punctuation run followed by a letter.
+     */
     static String normalise(String text) {
-        return text.strip()
-                .toLowerCase(Locale.ROOT)
-                .replaceAll("\\s+", " ")
-                .replaceAll("[\\p{Punct}\\s]+$", "");
+        String collapsed = WHITESPACE.matcher(text.strip().toLowerCase(Locale.ROOT)).replaceAll(" ");
+        int end = collapsed.length();
+        while (end > 0 && TRAILING_CHAR.matcher(collapsed.subSequence(end - 1, end)).matches()) {
+            end--;
+        }
+        return collapsed.substring(0, end);
     }
 
     private static List<String> nonBlank(@Nullable List<String> values) {

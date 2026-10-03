@@ -49,15 +49,21 @@ public class RagPlannerConfig {
      * <p>No prompt-caching options are set. Claude Haiku 4.5's minimum cacheable prompt is 4096
      * tokens and the planner's system prompt is roughly 1K, so a cache breakpoint would silently do
      * nothing (W0 finding A3). Revisit if the prompt grows past the minimum.</p>
+     *
+     * <p>The planner timeout is also set as this client's per-call HTTP timeout. The expander
+     * already stops waiting and cancels its thread at the timeout; this makes the SDK abort the
+     * request itself, so an abandoned call does not run on (and bill) for the 60s default.</p>
      */
     @Bean
     @ConditionalOnProperty(name = "search.rag.planner.enabled", havingValue = "true")
     public ChatClient plannerChatClient(ChatModel chatModel,
-                                        @Value("${search.rag.planner.model:claude-haiku-4-5}") String model) {
+                                        @Value("${search.rag.planner.model:claude-haiku-4-5}") String model,
+                                        @Value("${search.rag.planner.timeout:3s}") Duration timeout) {
         return ChatClient.builder(chatModel)
                 .defaultOptions(AnthropicChatOptions.builder()
                         .model(model)
-                        .maxTokens(1500))
+                        .maxTokens(1500)
+                        .timeout(timeout))
                 .defaultAdvisors(SimpleLoggerAdvisor.builder().build())
                 .build();
     }

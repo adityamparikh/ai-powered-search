@@ -109,20 +109,33 @@ through unchanged.
 filters are untrusted. A clause survives only if it is exactly one `field:value` (one plain
 token), `field:"phrase"`, or `field:[a TO b]` with numeric, ISO-instant or `*` bounds, on a known
 filterable field of the collection. Ranges are allowed only on numeric and date types: on
-`text_general` they compare lexically, and `10.99` would fall inside `[* TO 9]`. That rules out
-`{!func}` local params, `_query_`, `*:*`, wildcards, boolean expressions and unknown fields.
-Rejected clauses are dropped with a DEBUG log. Field types come from
+`text_general` they compare lexically, and `10.99` would fall inside `[* TO 9]`. Values and bounds
+must match the field's type (integers on `pint`, numbers on `pdouble`, ISO instants on `pdate`;
+date fields take ranges only), since a mismatch is a Solr 400. That rules out
+`{!func}` local params, `_query_`, `*:*`, wildcards, boolean expressions, bare `AND`/`OR`/`NOT`
+values and unknown fields. Rejected clauses are dropped with a DEBUG log. Field types come from
 `SearchRepository.getFieldsWithSchema()`, cached for `search.rag.planner.filters.field-cache-ttl`.
+If a refresh fails, the previous schema is kept, and a failure with nothing to fall back on is
+cached for 30s rather than retried on every turn.
 The configset declares typed fields for this: `metadata_author` (`strings`), `metadata_price`
-(`pdouble`) and `metadata_year` (`pint`) (W0 finding A7).
+(`pdouble`) and `metadata_year` (`pint`) (W0 finding A7). `strings` matches exactly and
+case-sensitively, so the prompt tells the planner to copy names as the conversation spells them.
+
+**Migration.** The typed fields are part of the configset, so they apply whether or not the
+planner is on. Re-upload the configset and reindex existing collections. After that, a document
+indexed through `/api/v1/index` whose `price` or `year` metadata is not a single number (`"N/A"`,
+`"$9.99"`, an array) is rejected by Solr.
 
 **Zero-results fallback.** If a filtered query finds fewer than 3 distinct candidates, the
 retriever re-runs it without filters. That costs Solr queries only, never a model call.
 
 **Failure behaviour.** On a timeout (`search.rag.planner.timeout`), a model error, unparseable
-output, a blank `standalone` or the wrong number of variants, the expander logs a WARN and returns
-the original query: exactly the planner-off path. The call runs on a virtual thread and is
-cancelled at the timeout. Variants that repeat the standalone query or each other are dropped,
+output or a blank `standalone`, the expander logs a WARN and returns the original query: exactly
+the planner-off path. Each fallback is recorded as an error on the `rag.plan` observation, so its
+rate can be graphed. A wrong number of variants does not discard the plan: missing variants are
+tolerated and extras dropped, since the standalone rewrite is the valuable part. The call runs on a
+virtual thread and is cancelled at the timeout. The timeout also bounds field introspection for the
+prompt, and is set as the planner client's per-call HTTP timeout, so the SDK aborts the request too. Variants that repeat the standalone query or each other are dropped,
 because `RetrievalAugmentationAdvisor` collects queries with `Collectors.toMap`, and two equal
 queries would be a duplicate key and a 5xx.
 

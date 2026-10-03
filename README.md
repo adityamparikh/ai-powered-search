@@ -353,6 +353,11 @@ alternative phrasings, and with `search.rag.planner.filters.enabled=true` it tur
 constraints (author, price, year) into validated Solr filters. If the planner is slow or fails,
 the question is answered exactly as before.
 
+> **Migration note:** the configset now types `metadata_author` (`strings`), `metadata_price`
+> (`pdouble`) and `metadata_year` (`pint`), whether or not the planner is enabled. Re-upload the
+> configset and reindex existing collections. Documents whose `price` or `year` metadata is not a
+> single number (for example `"N/A"`) are then rejected by Solr.
+
 ## 🔍 Usage Examples
 
 ### Semantic Search Examples

@@ -4,6 +4,10 @@ import dev.aparikh.aipoweredsearch.search.SearchRepository;
 import dev.aparikh.aipoweredsearch.search.model.FieldInfo;
 import io.micrometer.observation.tck.TestObservationRegistry;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.messages.AssistantMessage;
@@ -23,6 +27,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Function;
+import java.util.stream.Stream;
 
 import static io.micrometer.observation.tck.TestObservationRegistryAssert.assertThat;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -157,7 +162,8 @@ class QueryPlanningExpanderTest {
         List<Query> queries = expander.expand(followUp());
 
         assertThat(prompts.getFirst().getUserMessage().getText()).contains("Filterable fields: none");
-        assertThat(queries).allSatisfy(q -> assertThat(q.context()).doesNotContainKey(RagContextKeys.FILTERS));
+        assertThat(queries).isNotEmpty()
+                .allSatisfy(q -> assertThat(q.context()).doesNotContainKey(RagContextKeys.FILTERS));
     }
 
     // ==================== fallbacks: always the original query ====================
@@ -176,6 +182,24 @@ class QueryPlanningExpanderTest {
 
         long start = System.nanoTime();
         List<Query> queries = expander(slow, 2, validator()).expand(original);
+        long elapsedMs = (System.nanoTime() - start) / 1_000_000;
+
+        assertThat(queries).containsExactly(original);
+        assertThat(elapsedMs).isLessThan(3_000);
+    }
+
+    @Test
+    void coldFieldIntrospectionCountsAgainstTheTimeout() {
+        SearchRepository slowSolr = mock(SearchRepository.class);
+        when(slowSolr.getFieldsWithSchema("books")).thenAnswer(invocation -> {
+            Thread.sleep(5_000);
+            return List.of();
+        });
+        Query original = followUp();
+
+        long start = System.nanoTime();
+        List<Query> queries = expander(replying(p -> PLAN_JSON), 2,
+                new FilterValidator(slowSolr, Duration.ofMinutes(5))).expand(original);
         long elapsedMs = (System.nanoTime() - start) / 1_000_000;
 
         assertThat(queries).containsExactly(original);
@@ -207,14 +231,26 @@ class QueryPlanningExpanderTest {
 
         assertThat(expander(replying(p -> plan), 2, validator()).expand(original)).containsExactly(original);
         assertThat(original.context()).doesNotContainKey(RagContextKeys.STANDALONE);
+        // A rejected plan is a fallback like any other: an errored rag.plan observation.
+        assertThat(observations).hasObservationWithNameEqualTo(RagObservations.PLAN).that().hasError();
     }
 
     @Test
-    void fallsBackOnTheWrongNumberOfVariants() {
+    void fewerVariantsThanRequestedKeepTheStandaloneRewrite() {
         String plan = "{\"standalone\": \"s\", \"keywordQuery\": \"k\", \"variants\": [\"only one\", \"  \"], \"filters\": []}";
         Query original = followUp();
 
-        assertThat(expander(replying(p -> plan), 2, validator()).expand(original)).containsExactly(original);
+        assertThat(expander(replying(p -> plan), 2, validator()).expand(original))
+                .extracting(Query::text).containsExactly("s", "only one");
+        assertThat(original.context()).containsEntry(RagContextKeys.STANDALONE, "s");
+    }
+
+    @Test
+    void variantsBeyondTheRequestedNumberAreDropped() {
+        String plan = "{\"standalone\": \"s\", \"keywordQuery\": \"k\", \"variants\": [\"a\", \"b\", \"c\"], \"filters\": []}";
+
+        assertThat(expander(replying(p -> plan), 2, validator()).expand(followUp()))
+                .extracting(Query::text).containsExactly("s", "a", "b");
     }
 
     @Test
@@ -304,5 +340,41 @@ class QueryPlanningExpanderTest {
     void normalisationIgnoresCaseWhitespaceAndTrailingPunctuation() {
         assertThat(QueryPlanningExpander.normalise("  Books  by\tMartin?! "))
                 .isEqualTo(QueryPlanningExpander.normalise("books by martin"));
+    }
+
+    static Stream<Arguments> normalisationCases() {
+        return Stream.of(
+                Arguments.of("", ""),
+                Arguments.of("   ", ""),
+                Arguments.of("?!", ""),
+                Arguments.of(" . ? ", ""),
+                Arguments.of("Books by Martin", "books by martin"),
+                Arguments.of("books by george r.r. martin?", "books by george r.r. martin"),
+                Arguments.of("  Books  by\tMartin?! ", "books by martin"),
+                Arguments.of("A Game of Thrones (Book 1).", "a game of thrones (book 1"),
+                Arguments.of("trailing ... \t\n !", "trailing"),
+                Arguments.of("keeps . inner ! punctuation", "keeps . inner ! punctuation"),
+                Arguments.of("x_y-z~", "x_y-z"),
+                Arguments.of("x?y", "x?y"),
+                // only ASCII punctuation and whitespace are stripped, as with [\p{Punct}\s]
+                Arguments.of("ünïcödé — dash…", "ünïcödé — dash…"),
+                Arguments.of("abc!\u00A0", "abc!\u00A0"));
+    }
+
+    @ParameterizedTest
+    @MethodSource("normalisationCases")
+    void normalisationPinsTheOriginalRegexBehaviour(String text, String expected) {
+        // normalise() used replaceAll("[\\p{Punct}\\s]+$", "") for the trailing strip, rewritten
+        // as a backwards scan for java:S8786 (super-linear backtracking). The output must not change.
+        assertThat(QueryPlanningExpander.normalise(text)).isEqualTo(expected);
+    }
+
+    @Test
+    @Timeout(5)
+    void normalisationIsLinearOnLongPunctuationRuns() {
+        String adversarial = "!".repeat(200_000) + "x";
+
+        assertThat(QueryPlanningExpander.normalise(adversarial)).isEqualTo(adversarial);
+        assertThat(QueryPlanningExpander.normalise("x" + "!".repeat(200_000))).isEqualTo("x");
     }
 }
