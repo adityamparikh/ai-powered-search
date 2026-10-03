@@ -2,23 +2,24 @@ package dev.aparikh.aipoweredsearch.config;
 
 import org.springframework.boot.devtools.restart.RestartScope;
 import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Lazy;
 import org.testcontainers.ollama.OllamaContainer;
-import org.testcontainers.solr.SolrContainer;
 import org.testcontainers.utility.DockerImageName;
 
 /**
- * Shared test configuration for Ollama and Solr containers used across evaluation tests.
+ * Shared test configuration for the LLM judge used by evaluation tests.
  *
- * <p>This configuration provides reusable container instances with @RestartScope to avoid
- * recreating containers for every test class, significantly improving test execution speed.
+ * <p>Solr is deliberately <em>not</em> defined here. Evaluation tests import
+ * {@link SolrTestConfiguration} alongside this class, which also points the application's
+ * {@code solr.url} at the container, so the app under test and the test itself see the same
+ * Solr. (An earlier version defined a second {@code solrContainer} bean here, which collided with
+ * {@link SolrTestConfiguration} as soon as both were imported.)</p>
  *
- * <p>Containers are configured for:
- * <ul>
- *   <li>Ollama: For LLM-based evaluation (fact-checking, relevancy)</li>
- *   <li>Solr 9.10.1: For search operations with native RRF support</li>
- * </ul>
+ * <p>The Ollama container is {@link Lazy}: Testcontainers starts it only when a test actually asks
+ * for it. That lets an evaluation run skip the judge, or use an Ollama server that already holds
+ * the model ({@code -Drag.eval.ollama-url=http://localhost:11434}), without pulling the
+ * multi-gigabyte model into a fresh container.</p>
  */
 @TestConfiguration(proxyBeanMethods = false)
 public class EvaluationModelsTestConfiguration {
@@ -36,13 +37,6 @@ public class EvaluationModelsTestConfiguration {
     /**
      * Creates a reusable Ollama container for LLM evaluations.
      *
-     * <p>Container configuration:
-     * <ul>
-     *   <li>Image: ollama/ollama:latest</li>
-     *   <li>Reuse: enabled for faster test execution</li>
-     *   <li>Scope: @RestartScope for sharing across test classes</li>
-     * </ul>
-     *
      * <p>The bespoke-minicheck model must be pulled in test setup:
      * <pre>{@code
      * ollama.execInContainer("ollama", "pull", BESPOKE_MINICHECK);
@@ -51,33 +45,10 @@ public class EvaluationModelsTestConfiguration {
      * @return configured OllamaContainer instance
      */
     @Bean
+    @Lazy
     @RestartScope
-    @ServiceConnection
     public OllamaContainer ollamaContainer() {
         return new OllamaContainer(DockerImageName.parse("ollama/ollama:latest"))
-                .withReuse(true);
-    }
-
-    /**
-     * Creates a reusable Solr container for search operations.
-     *
-     * <p>Container configuration:
-     * <ul>
-     *   <li>Image: solr:9.10.1 (with native RRF support)</li>
-     *   <li>Heap: 512m (sufficient for evaluation tests)</li>
-     *   <li>Reuse: enabled for faster test execution</li>
-     *   <li>Scope: @RestartScope for sharing across test classes</li>
-     * </ul>
-     *
-     * <p>Collections with vector fields must be created in test setup.
-     *
-     * @return configured SolrContainer instance
-     */
-    @Bean
-    @RestartScope
-    public SolrContainer solrContainer() {
-        return new SolrContainer(DockerImageName.parse("solr:9.10.1"))
-                .withEnv("SOLR_HEAP", "512m")
                 .withReuse(true);
     }
 }

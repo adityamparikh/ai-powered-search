@@ -82,6 +82,21 @@ tasks.withType<Test> {
     useJUnitPlatform()
     finalizedBy(tasks.jacocoTestReport)
     maxHeapSize = "2g"
+    // Forward -Drag.* to the test JVM: RagEvaluationIT (rag.eval.*) and the golden /ask
+    // regression (rag.golden.record) read their options from system properties.
+    System.getProperties().stringPropertyNames()
+        .filter { it.startsWith("rag.") }
+        .forEach { systemProperty(it, System.getProperty(it)) }
+}
+
+// RagEvaluationIT makes real, billed model calls across ~50 cases, so a plain `./gradlew build`
+// leaves it out. It runs when named explicitly (`--tests RagEvaluationIT`) or with `-PragEval`.
+tasks.named<Test>("test") {
+    val requestedArgs = gradle.startParameter.taskRequests.flatMap { it.args }
+    val evalRequested = project.hasProperty("ragEval") || requestedArgs.any { it.contains("RagEvaluation") }
+    if (!evalRequested) {
+        useJUnitPlatform { excludeTags("rag-eval") }
+    }
 }
 
 tasks.withType<JavaCompile>().configureEach {

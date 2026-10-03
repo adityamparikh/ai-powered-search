@@ -5,6 +5,7 @@ import dev.aparikh.aipoweredsearch.fixtures.BookDatasetGenerator;
 import org.apache.solr.client.solrj.SolrClient;
 import org.apache.solr.client.solrj.impl.HttpJdkSolrClient;
 import org.apache.solr.common.SolrInputDocument;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.evaluation.FactCheckingEvaluator;
@@ -12,6 +13,7 @@ import org.springframework.ai.chat.evaluation.RelevancyEvaluator;
 import org.springframework.ai.ollama.OllamaChatModel;
 import org.springframework.ai.ollama.api.OllamaApi;
 import org.springframework.ai.ollama.api.OllamaChatOptions;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.web.client.RestClient;
@@ -19,21 +21,33 @@ import org.testcontainers.ollama.OllamaContainer;
 import org.testcontainers.solr.SolrContainer;
 
 import java.util.List;
+import java.util.Map;
 
 import static dev.aparikh.aipoweredsearch.config.EvaluationModelsTestConfiguration.BESPOKE_MINICHECK;
 
 /**
- * Base class for all evaluation tests providing common setup for:
- * - Ollama container with bespoke-minicheck model
- * - Solr container with 1000 book dataset
- * - FactCheckingEvaluator and RelevancyEvaluator
+ * Base class for evaluation tests providing common setup for:
+ * <ul>
+ *   <li>an Ollama judge running bespoke-minicheck, wrapped in {@link FactCheckingEvaluator} and
+ *       {@link RelevancyEvaluator};</li>
+ *   <li>a Solr client and a books collection, by default the 1000-book synthetic dataset.</li>
+ * </ul>
  *
- * <p>This class centralizes the setup logic to avoid duplication across evaluation test classes.
+ * <p>Subclasses import {@code SolrTestConfiguration} and {@code EvaluationModelsTestConfiguration}.
+ * They customise the corpus by overriding {@link #createBooksCollection()} and {@link #loadBooks()},
+ * and can opt out of the judge by overriding {@link #judgeEnabled()}.</p>
+ *
+ * <p>The judge runs in the lazily-started Ollama container unless the system property
+ * {@value #OLLAMA_URL_PROPERTY} names an Ollama server to use instead. A long-lived local server
+ * keeps the model between runs, where a fresh container pulls it every time.</p>
  */
 public abstract class EvaluationTestBase {
 
+    /** System property naming an external Ollama server for the judge. */
+    public static final String OLLAMA_URL_PROPERTY = "rag.eval.ollama-url";
+
     @Autowired
-    protected OllamaContainer ollama;
+    protected ObjectProvider<OllamaContainer> ollama;
 
     @Autowired
     protected SolrContainer solr;
@@ -41,20 +55,54 @@ public abstract class EvaluationTestBase {
     @Autowired(required = false)
     protected EmbeddingService embeddingService;
 
-    protected FactCheckingEvaluator factCheckingEvaluator;
-    protected RelevancyEvaluator relevancyEvaluator;
+    /** Null when {@link #judgeEnabled()} is false. */
+    protected @Nullable FactCheckingEvaluator factCheckingEvaluator;
+
+    /** Null when {@link #judgeEnabled()} is false. */
+    protected @Nullable RelevancyEvaluator relevancyEvaluator;
+
     protected SolrClient solrClient;
 
     protected static final String BOOKS_COLLECTION = "books";
 
     @BeforeEach
     void setUpBase() throws Exception {
-        // 1. Pull bespoke-minicheck model
-        System.out.println("Pulling " + BESPOKE_MINICHECK + " model...");
-        ollama.execInContainer("ollama", "pull", BESPOKE_MINICHECK);
+        if (judgeEnabled()) {
+            setUpJudge();
+        }
 
-        // 2. Create Ollama API with JDK HttpClient (to avoid Jetty conflicts)
-        String baseUrl = ollama.getEndpoint();
+        String solrUrl = "http://" + solr.getHost() + ":" + solr.getSolrPort() + "/solr";
+        solrClient = new HttpJdkSolrClient.Builder(solrUrl).build();
+
+        createBooksCollection();
+        loadBooks();
+    }
+
+    /**
+     * Whether to start the Ollama judge. Defaults to true.
+     */
+    protected boolean judgeEnabled() {
+        return true;
+    }
+
+    private void setUpJudge() throws Exception {
+        String external = System.getProperty(OLLAMA_URL_PROPERTY);
+        String baseUrl;
+        if (external != null && !external.isBlank()) {
+            baseUrl = external;
+            System.out.println("Using external Ollama at " + baseUrl + "; pulling " + BESPOKE_MINICHECK + " if absent...");
+            RestClient.builder().baseUrl(baseUrl).requestFactory(new JdkClientHttpRequestFactory()).build()
+                    .post().uri("/api/pull")
+                    .body(Map.of("model", BESPOKE_MINICHECK, "stream", false))
+                    .retrieve().toBodilessEntity();
+        } else {
+            OllamaContainer container = ollama.getObject();
+            System.out.println("Pulling " + BESPOKE_MINICHECK + " model into the Ollama container...");
+            container.execInContainer("ollama", "pull", BESPOKE_MINICHECK);
+            baseUrl = container.getEndpoint();
+        }
+
+        // Create Ollama API with JDK HttpClient (to avoid Jetty conflicts)
         RestClient.Builder restClientBuilder = RestClient.builder()
                 .baseUrl(baseUrl)
                 .requestFactory(new JdkClientHttpRequestFactory());
@@ -64,7 +112,6 @@ public abstract class EvaluationTestBase {
                 .restClientBuilder(restClientBuilder)
                 .build();
 
-        // 3. Create ChatModel with user-specified config
         OllamaChatOptions options = OllamaChatOptions.builder()
                 .model(BESPOKE_MINICHECK)
                 .numPredict(2)  // Limit token generation for yes/no answers
@@ -76,19 +123,8 @@ public abstract class EvaluationTestBase {
                 .options(options)
                 .build();
 
-        // 4. Create evaluators
         factCheckingEvaluator = FactCheckingEvaluator.builder(ChatClient.builder(chatModel)).build();
         relevancyEvaluator = RelevancyEvaluator.builder().chatClientBuilder(ChatClient.builder(chatModel)).build();
-
-        // 5. Create Solr client
-        String solrUrl = "http://" + solr.getHost() + ":" + solr.getSolrPort() + "/solr";
-        solrClient = new HttpJdkSolrClient.Builder(solrUrl).build();
-
-        // 6. Create Solr collection with vector fields
-        createBooksCollection();
-
-        // 7. Load 1000 books
-        loadBooks();
     }
 
     /**
