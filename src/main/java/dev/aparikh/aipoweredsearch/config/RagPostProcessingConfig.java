@@ -40,8 +40,10 @@ import java.util.Locale;
  *   <li>{@code search.rag.rerank.provider} (default {@code claude}): {@code claude} or {@code jev}</li>
  *   <li>{@code search.rag.rerank.model} (default {@code claude-sonnet-4-5}): the Claude reranker's
  *       model, see {@code AiConfig#rerankingDocumentPostProcessor}</li>
- *   <li>{@code search.rag.rerank.short-circuit} (default: the value of {@code search.rag.jev.enabled}):
- *       skip the reranker when the candidates already fit in {@code search.rag.rerank.top-k}</li>
+ *   <li>{@code search.rag.rerank.short-circuit} (default {@code false}): skip the reranker when the
+ *       candidates already fit in {@code search.rag.rerank.top-k}. Off by default: with Jev on, the
+ *       evaluation showed that skipping lets every Jev survivor into the prompt (context precision
+ *       0.631 vs 0.770 with reranking always on), so the reranker's discarding is worth its call.</li>
  *   <li>{@code spring.ai.typesafe.api-key} ({@code ${TYPESAFE_API_KEY:}}), {@code spring.ai.typesafe.base-url},
  *       {@code spring.ai.typesafe.timeout}</li>
  * </ul>
@@ -62,7 +64,7 @@ public class RagPostProcessingConfig {
             @Value("${search.rag.rerank.provider:claude}") String provider,
             @Value("${search.rag.rerank.top-k:5}") int rerankTopK,
             @Value("${search.rag.jev.enabled:false}") boolean jevEnabled,
-            @Value("${search.rag.rerank.short-circuit:${search.rag.jev.enabled:false}}") boolean shortCircuit,
+            @Value("${search.rag.rerank.short-circuit:false}") boolean shortCircuit,
             @Value("${search.rag.jev.concurrency:4}") int jevConcurrency,
             @Value("${search.rag.jev.timeout:5s}") Duration jevTimeout,
             @Value("${spring.ai.typesafe.api-key:}") String typeSafeApiKey,

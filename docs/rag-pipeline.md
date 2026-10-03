@@ -339,7 +339,7 @@ instructions…" could reach the prompt.
 [JevDocumentFilter]       if search.rag.jev.enabled: fail-open, bounded by search.rag.jev.timeout
       ↓
 [reranker]                Claude (default) or Jev, per search.rag.rerank.provider;
-                          skipped when candidates ≤ search.rag.rerank.top-k (short-circuit)
+                          optionally skipped when candidates ≤ search.rag.rerank.top-k (short-circuit)
 ```
 
 Both stages judge against the standalone question when the planner produced one
@@ -360,11 +360,18 @@ runs **before** the reranker, so the reranker only reads passages that survived 
 - `jev`: `JevDocumentReranker` scores each passage on "does this answer the query" and keeps the
   top `search.rag.rerank.top-k`.
 
-**Short-circuit.** Reranking earns its cost by discarding, so reranking `top-k` or fewer
-candidates only reorders them. `RerankShortCircuit` skips the reranker in that case. It is on
-whenever the Jev filter is on (`search.rag.rerank.short-circuit` defaults to
-`search.rag.jev.enabled`), because that is when survivors routinely drop to `top-k` or below.
-With Jev off it stays off, so today's behaviour is unchanged.
+**Short-circuit (opt-in).** With `search.rag.rerank.short-circuit=true`, `RerankShortCircuit` skips
+the reranker when `top-k` or fewer candidates remain, saving a model call. It is **off by
+default**. The reasoning "reranking N down to N only reorders" overlooks that the Claude reranker
+also *discards* irrelevant documents. In the 2026-10-03 evaluation, with Jev on:
+
+| | Context precision | Injections in context | Claude tokens/ask | p95 |
+|---|---:|---:|---:|---:|
+| baseline (no Jev) | 0.665 | 11 | 1,865 | 4.9 s |
+| Jev + short-circuit | 0.631 | 0 | 722 | 7.9 s |
+| Jev + reranking always on | **0.770** | 1 | 937 | 9.3 s |
+
+Skipping let every Jev survivor into the prompt; keyword precision fell 19 points.
 
 **External API, failure behaviour and cost.**
 - Jev calls TypeSafe's hosted API. Candidate passages and the standalone question leave the
@@ -390,7 +397,7 @@ With Jev off it stays off, so today's behaviour is unchanged.
 | `search.rag.rerank.provider` | `claude` | `claude` or `jev` |
 | `search.rag.rerank.model` | `claude-sonnet-4-5` | Claude reranker model |
 | `search.rag.rerank.top-k` | `5` | Documents kept by the reranker |
-| `search.rag.rerank.short-circuit` | `${search.rag.jev.enabled}` | Skip reranking when candidates ≤ top-k |
+| `search.rag.rerank.short-circuit` | `false` | Skip reranking when candidates ≤ top-k (costs precision; see above) |
 | `spring.ai.typesafe.api-key` | `${TYPESAFE_API_KEY:}` | TypeSafe API key |
 | `spring.ai.typesafe.base-url` | TypeSafe default | Override, e.g. for a proxy |
 | `spring.ai.typesafe.timeout` | `10s` | HTTP timeout per Jev call |

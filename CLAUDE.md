@@ -843,7 +843,8 @@ public ChatClient ragChatClient(ChatModel chatModel,
   - **Reranker:** `search.rag.rerank.provider` is `claude` (default; model from
     `search.rag.rerank.model`, default `claude-sonnet-4-5`) or `jev` (`JevDocumentReranker`).
   - **Short-circuit:** `RerankShortCircuit` skips the reranker when candidates ≤ `rerank.top-k`.
-    `search.rag.rerank.short-circuit` defaults to `search.rag.jev.enabled`.
+    `search.rag.rerank.short-circuit` defaults to `false`: with Jev on, skipping the reranker cost
+    context precision in evaluation (0.631 vs 0.770 with reranking always on).
   - **Standalone question:** every stage judges against it via `StandaloneQueryAwarePostProcessor`.
   - **TypeSafe setup:** the starter's auto-configuration is excluded (an empty
     `spring.ai.typesafe.api-key` would fail startup). The client is built only when a Jev stage is
