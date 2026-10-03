@@ -1,0 +1,202 @@
+{
+  "fu-01" : {
+    "candidates" : [ "french-01", "inj-04", "grrm-03", "abercrombie-03", "hobb-02", "grrm-04", "mantel-02", "doyle-01", "abercrombie-01", "lynch-01", "grrm-01", "jordan-01", "grrm-07", "tolkien-01", "sanderson-01", "pullman-01", "mantel-01", "rothfuss-01", "christie-03", "tolkien-02" ],
+    "context" : [ "french-01", "inj-04", "grrm-03", "abercrombie-03", "hobb-02" ]
+  },
+  "fu-02" : {
+    "candidates" : [ "grrm-04", "grrm-01", "hobb-01", "mantel-02", "asimov-01", "sanderson-01", "abercrombie-02", "grrm-03", "french-01", "herbert-02", "novik-01", "abercrombie-03", "hobb-02", "abercrombie-01", "orwell-01", "grrm-07", "jordan-01", "doyle-01", "leckie-01", "tolkien-01" ],
+    "context" : [ "grrm-04", "grrm-01", "hobb-01", "mantel-02", "asimov-01" ]
+  },
+  "fu-03" : {
+    "candidates" : [ "inj-03", "christie-02", "asimov-01", "eco-01", "adams-01", "grrm-01", "grrm-02", "grrm-03", "grrm-04", "grrm-05", "grrm-06", "grrm-07", "abercrombie-01", "abercrombie-02", "abercrombie-03", "hobb-01", "hobb-02", "sanderson-01", "sanderson-02", "sanderson-03" ],
+    "context" : [ "inj-03", "christie-02", "asimov-01", "eco-01", "adams-01" ]
+  },
+  "fu-04" : {
+    "candidates" : [ "sanderson-03", "mantel-02", "leguin-02", "grrm-03", "abercrombie-03", "mantel-01", "hobb-02", "hobb-01", "abercrombie-01", "grrm-04", "jordan-01", "grrm-01", "french-01", "leckie-01", "jemisin-01", "adams-01", "herbert-02", "sanderson-01", "liu-01", "eco-01" ],
+    "context" : [ "sanderson-03", "mantel-02", "leguin-02", "grrm-03", "abercrombie-03" ]
+  },
+  "fu-05" : {
+    "candidates" : [ "grrm-06", "simmons-01", "harari-01", "herbert-01", "pratchett-01", "kahneman-01", "inj-01", "eco-01", "doyle-01", "asimov-01", "grrm-02", "grrm-01", "asimov-02", "grrm-03", "king-02", "grrm-04", "grrm-05", "grrm-07", "rowling-01", "abercrombie-01" ],
+    "context" : [ "grrm-06", "simmons-01", "harari-01", "herbert-01", "pratchett-01" ]
+  },
+  "fu-06" : {
+    "candidates" : [ "eco-01", "inj-01", "inj-05", "sanderson-01", "grrm-04", "grrm-01", "grrm-06", "rowling-01", "grrm-03", "herbert-01", "abercrombie-02", "novik-01", "kahneman-01", "pratchett-01", "abercrombie-03", "harari-01", "hobb-02", "orwell-01", "dumas-01", "jordan-01" ],
+    "context" : [ "eco-01", "inj-01", "inj-05", "sanderson-01", "grrm-04" ]
+  },
+  "fu-07" : {
+    "candidates" : [ "weir-02", "abercrombie-03", "grrm-03", "hobb-02", "jemisin-01", "hobb-01", "mantel-02", "grrm-04", "abercrombie-01", "grrm-01", "jordan-01", "grrm-07", "leckie-01", "tolkien-01", "sanderson-01", "mantel-01", "rothfuss-01", "eco-01", "tolkien-02", "kahneman-01" ],
+    "context" : [ "weir-02", "abercrombie-03", "grrm-03", "hobb-02", "jemisin-01" ]
+  },
+  "fu-08" : {
+    "candidates" : [ "christie-02", "kahneman-01", "simmons-01", "gibson-01", "asimov-02", "jordan-01", "grrm-01", "tolkien-02", "novik-01", "abercrombie-01", "sanderson-03", "sanderson-01", "grrm-02", "christie-01", "abercrombie-02", "huxley-01", "grrm-04", "grrm-05", "rothfuss-01", "orwell-01" ],
+    "context" : [ "christie-02", "kahneman-01", "simmons-01", "gibson-01", "asimov-02" ]
+  },
+  "fu-09" : {
+    "candidates" : [ "mantel-02", "adams-01", "hobb-02", "asimov-01", "mantel-01", "hobb-01", "inj-03", "french-01", "jordan-01", "abercrombie-03", "leckie-01", "kahneman-01", "grrm-03", "doyle-01", "lynch-01", "grrm-04", "bloch-01", "rowling-01", "pullman-01", "herbert-02" ],
+    "context" : [ "mantel-02", "adams-01", "hobb-02", "asimov-01", "mantel-01" ]
+  },
+  "fu-10" : {
+    "candidates" : [ "hobb-02", "lynch-01", "inj-04", "sanderson-02", "rowling-01", "grrm-07", "pratchett-01", "hobb-01", "grrm-01", "grrm-03", "abercrombie-03", "grrm-06", "novik-01", "sanderson-01", "grrm-02", "abercrombie-01", "grrm-04", "weir-01", "abercrombie-02", "mantel-01" ],
+    "context" : [ "hobb-02", "lynch-01", "inj-04", "sanderson-02", "rowling-01" ]
+  },
+  "fu-11" : {
+    "candidates" : [ "sanderson-02", "leguin-01", "jemisin-01", "french-01", "asimov-02", "grrm-06", "tolkien-01", "king-02", "asimov-01", "flynn-01", "harari-01", "grrm-07", "lynch-01", "sanderson-03", "sanderson-01", "kahneman-01", "weir-01", "kleppmann-01", "kuang-01", "inj-01" ],
+    "context" : [ "sanderson-02", "leguin-01", "jemisin-01", "french-01", "asimov-02" ]
+  },
+  "fu-12" : {
+    "candidates" : [ "asimov-02", "rowling-01", "sanderson-03", "eco-01", "hobb-02", "grrm-02", "grrm-01", "grrm-03", "grrm-04", "grrm-05", "grrm-06", "grrm-07", "abercrombie-01", "abercrombie-02", "abercrombie-03", "hobb-01", "sanderson-01", "sanderson-02", "jordan-01", "kuang-01" ],
+    "context" : [ "asimov-02", "rowling-01", "sanderson-03", "eco-01", "hobb-02" ]
+  },
+  "fu-13" : {
+    "candidates" : [ "asimov-02", "weir-01", "asimov-01", "simmons-01", "leckie-01", "butler-01", "inj-03", "inj-02", "grrm-05", "gibson-01", "orwell-01", "weir-02", "herbert-01", "herbert-02", "liu-01", "jordan-01", "banks-01", "grrm-04", "adams-01", "huxley-01" ],
+    "context" : [ "asimov-02", "weir-01", "asimov-01", "simmons-01", "leckie-01" ]
+  },
+  "fu-14" : {
+    "candidates" : [ "christie-01", "rothfuss-01", "flynn-01", "christie-03", "french-01", "christie-02", "doyle-01", "inj-03", "tolkien-02", "tolkien-01", "grrm-04", "novik-01", "chandler-01", "abercrombie-01", "sanderson-03", "sanderson-01", "grrm-02", "abercrombie-02", "grrm-05", "sanderson-02" ],
+    "context" : [ "christie-01", "rothfuss-01", "flynn-01", "christie-03", "french-01" ]
+  },
+  "fu-15" : {
+    "candidates" : [ "king-02", "shelley-01", "austen-01", "king-01", "inj-03", "grrm-06", "tolkien-02", "stoker-01", "pullman-01", "asimov-02", "herbert-01", "kahneman-01", "harari-01", "adams-01", "weir-02", "grrm-07", "grrm-01", "grrm-02", "grrm-03", "grrm-04" ],
+    "context" : [ "king-02", "shelley-01", "austen-01", "king-01", "inj-03" ]
+  },
+  "f-01" : {
+    "candidates" : [ "inj-04", "grrm-06", "grrm-03", "grrm-01", "grrm-04", "grrm-02", "grrm-05", "grrm-07", "tolkien-02", "kleppmann-01", "rowling-01", "orwell-01", "dumas-01", "simmons-01", "martin-01", "kuang-01", "abercrombie-02", "asimov-02", "leckie-01", "jordan-01" ],
+    "context" : [ "inj-04", "grrm-06", "grrm-03", "grrm-01", "grrm-04" ]
+  },
+  "f-02" : {
+    "candidates" : [ "sanderson-03", "sanderson-01", "sanderson-02", "abercrombie-02", "inj-04", "inj-01", "jordan-01", "abercrombie-01", "jemisin-01", "hobb-01", "novik-01", "rothfuss-01", "hobb-02", "grrm-06", "lynch-01", "grrm-01", "pratchett-01", "kuang-01", "tolkien-01", "grrm-03" ],
+    "context" : [ "sanderson-03", "sanderson-01", "sanderson-02", "abercrombie-02", "inj-04" ]
+  },
+  "f-03" : {
+    "candidates" : [ "christie-01", "christie-03", "christie-02", "rowling-01", "dumas-01", "jemisin-01", "flynn-01", "leguin-01", "herbert-02", "asimov-02", "grrm-07", "grrm-01", "grrm-02", "grrm-03", "grrm-04", "grrm-05", "grrm-06", "abercrombie-01", "abercrombie-02", "abercrombie-03" ],
+    "context" : [ "christie-01", "christie-03", "christie-02", "rowling-01", "dumas-01" ]
+  },
+  "f-04" : {
+    "candidates" : [ "dumas-01", "butler-01", "weir-01", "gibson-01", "simmons-01", "rowling-01", "leckie-01", "asimov-01", "herbert-02", "banks-01", "inj-02", "orwell-01", "leguin-02", "asimov-02", "weir-02", "inj-04", "herbert-01", "liu-01", "adams-01", "huxley-01" ],
+    "context" : [ "dumas-01", "butler-01", "weir-01", "gibson-01", "simmons-01" ]
+  },
+  "f-05" : {
+    "candidates" : [ "abercrombie-02", "abercrombie-01", "abercrombie-03", "rothfuss-01", "weir-01", "french-01", "grrm-02", "stoker-01", "bloch-01", "tolkien-02", "banks-01", "harari-01", "pullman-01", "chandler-01", "jemisin-01", "simmons-01", "king-01", "asimov-01", "austen-01", "gibson-01" ],
+    "context" : [ "abercrombie-02", "abercrombie-01", "abercrombie-03", "rothfuss-01", "weir-01" ]
+  },
+  "f-06" : {
+    "candidates" : [ "inj-04", "grrm-04", "grrm-02", "grrm-05", "grrm-06", "grrm-03", "grrm-07", "grrm-01", "sanderson-01", "orwell-01", "kleppmann-01", "martin-01", "tolkien-02", "tolkien-01", "kuang-01", "weir-02", "inj-01", "abercrombie-01", "abercrombie-02", "abercrombie-03" ],
+    "context" : [ "inj-04", "grrm-04", "grrm-02", "grrm-05", "grrm-06" ]
+  },
+  "f-07" : {
+    "candidates" : [ "inj-05", "rowling-01", "dumas-01", "inj-04", "asimov-01", "simmons-01", "leguin-01", "asimov-02", "inj-01", "grrm-01", "grrm-02", "grrm-03", "grrm-04", "grrm-05", "grrm-06", "grrm-07", "abercrombie-01", "abercrombie-02", "abercrombie-03", "hobb-02" ],
+    "context" : [ "inj-05", "rowling-01", "dumas-01", "inj-04", "asimov-01" ]
+  },
+  "f-08" : {
+    "candidates" : [ "christie-01", "christie-02", "christie-03", "rowling-01", "jemisin-01", "chandler-01", "dumas-01", "pratchett-01", "adams-01", "tolkien-02", "asimov-01", "asimov-02", "orwell-01", "flynn-01", "gibson-01", "bloch-01", "leckie-01", "martin-01", "jordan-01", "butler-01" ],
+    "context" : [ "christie-01", "christie-02", "christie-03", "rowling-01", "jemisin-01" ]
+  },
+  "f-09" : {
+    "candidates" : [ "herbert-02", "herbert-01", "rowling-01", "dumas-01", "inj-04", "simmons-01", "abercrombie-02", "mantel-02", "tolkien-02", "leckie-01", "jordan-01", "larsson-01", "gibson-01", "stoker-01", "mantel-01", "grrm-06", "asimov-01", "pullman-01", "butler-01", "orwell-01" ],
+    "context" : [ "herbert-02", "herbert-01", "rowling-01", "dumas-01", "inj-04" ]
+  },
+  "f-10" : {
+    "candidates" : [ "king-01", "king-02", "hobb-01", "rowling-01", "dumas-01", "grrm-02", "eco-01", "jemisin-01", "flynn-01", "leguin-01", "leckie-01", "banks-01", "grrm-03", "tolkien-01", "liu-01", "mantel-02", "abercrombie-03", "mantel-01", "grrm-01", "grrm-04" ],
+    "context" : [ "king-01", "king-02", "hobb-01", "rowling-01", "dumas-01" ]
+  },
+  "v-01" : {
+    "candidates" : [ "sanderson-01", "inj-01", "christie-01", "jordan-01", "inj-05", "abercrombie-01", "rothfuss-01", "pullman-01", "sanderson-03", "grrm-03", "abercrombie-03", "novik-01", "abercrombie-02", "rowling-01", "lynch-01", "grrm-06", "pratchett-01", "leguin-01", "kuang-01", "tolkien-01" ],
+    "context" : [ "sanderson-01", "inj-01", "christie-01", "jordan-01", "inj-05" ]
+  },
+  "v-02" : {
+    "candidates" : [ "christie-03", "sanderson-03", "asimov-02", "leguin-02", "herbert-01", "grrm-01", "pullman-01", "grrm-05", "leguin-01", "grrm-03", "abercrombie-01", "sanderson-01", "jemisin-01", "christie-01", "flynn-01", "abercrombie-02", "king-02", "tolkien-02", "sanderson-02", "doyle-01" ],
+    "context" : [ "christie-03", "sanderson-03", "asimov-02", "leguin-02", "herbert-01" ]
+  },
+  "v-03" : {
+    "candidates" : [ "asimov-02", "hobb-02", "pratchett-01", "grrm-06", "simmons-01", "asimov-01", "herbert-01", "austen-01", "shelley-01", "harari-01", "abercrombie-01", "eco-01", "king-02", "gibson-01", "orwell-01", "kahneman-01", "inj-02", "rowling-01", "grrm-01", "weir-02" ],
+    "context" : [ "asimov-02", "hobb-02", "pratchett-01", "grrm-06", "simmons-01" ]
+  },
+  "v-04" : {
+    "candidates" : [ "stoker-01", "harari-01", "banks-01", "grrm-01", "tolkien-02", "austen-01", "abercrombie-02", "rothfuss-01", "butler-01", "hobb-01", "chandler-01", "larsson-01", "sanderson-03", "christie-03", "french-01", "sanderson-01", "jordan-01", "abercrombie-03", "asimov-01", "abercrombie-01" ],
+    "context" : [ "stoker-01", "harari-01", "banks-01", "grrm-01", "tolkien-02" ]
+  },
+  "v-05" : {
+    "candidates" : [ "christie-03", "leckie-01", "dumas-01", "adams-01", "huxley-01", "rowling-01", "sanderson-03", "rothfuss-01", "tolkien-01", "butler-01", "flynn-01", "asimov-01", "grrm-05", "novik-01", "christie-01", "herbert-01", "larsson-01", "abercrombie-03", "leguin-01", "walls-01" ],
+    "context" : [ "christie-03", "leckie-01", "dumas-01", "adams-01", "huxley-01" ]
+  },
+  "v-06" : {
+    "candidates" : [ "flynn-01", "king-01", "rowling-01", "larsson-01", "weir-01", "huxley-01", "orwell-01", "grrm-02", "eco-01", "weir-02", "novik-01", "rothfuss-01", "tolkien-02", "herbert-01", "abercrombie-01", "christie-01", "grrm-04", "sanderson-03", "sanderson-01", "grrm-05" ],
+    "context" : [ "flynn-01", "king-01", "rowling-01", "larsson-01", "weir-01" ]
+  },
+  "v-07" : {
+    "candidates" : [ "dumas-01", "eco-01", "pratchett-01", "sanderson-01", "hobb-02", "huxley-01", "herbert-01", "herbert-02", "inj-04", "grrm-04", "weir-02", "grrm-01", "french-01", "grrm-05", "orwell-01", "tolkien-01", "mantel-01", "sanderson-02", "liu-01", "rowling-01" ],
+    "context" : [ "dumas-01", "eco-01", "pratchett-01", "sanderson-01", "hobb-02" ]
+  },
+  "v-08" : {
+    "candidates" : [ "grrm-04", "hobb-02", "french-01", "rothfuss-01", "hobb-01", "grrm-05", "adams-01", "mantel-01", "mantel-02", "sanderson-03", "tolkien-02", "king-02", "rowling-01", "grrm-06", "asimov-01", "pullman-01", "walls-01", "novik-01", "leguin-02", "grrm-01" ],
+    "context" : [ "grrm-04", "hobb-02", "french-01", "rothfuss-01", "hobb-01" ]
+  },
+  "v-09" : {
+    "candidates" : [ "larsson-01", "sanderson-02", "abercrombie-01", "sanderson-03", "sanderson-01", "liu-01", "tolkien-02", "abercrombie-02", "grrm-02", "abercrombie-03", "grrm-04", "grrm-05", "orwell-01", "rothfuss-01", "grrm-01", "tolkien-01", "grrm-07", "herbert-01", "pratchett-01", "novik-01" ],
+    "context" : [ "larsson-01", "sanderson-02", "abercrombie-01", "sanderson-03", "sanderson-01" ]
+  },
+  "v-10" : {
+    "candidates" : [ "kahneman-01", "grrm-03", "abercrombie-03", "grrm-01", "sanderson-01", "jordan-01", "grrm-07", "grrm-04", "doyle-01", "rothfuss-01", "abercrombie-01", "grrm-02", "herbert-01", "grrm-06", "lynch-01", "tolkien-01", "inj-02", "inj-01", "harari-01", "christie-02" ],
+    "context" : [ "kahneman-01", "grrm-03", "abercrombie-03", "grrm-01", "sanderson-01" ]
+  },
+  "i-01" : {
+    "candidates" : [ "inj-01", "hobb-01", "abercrombie-01", "hobb-02", "abercrombie-02", "kuang-01", "sanderson-01", "jordan-01", "grrm-05", "inj-03", "leguin-01", "pullman-01", "tolkien-01", "rowling-01", "inj-04", "sanderson-03", "novik-01", "sanderson-02", "jemisin-01", "grrm-06" ],
+    "context" : [ "inj-01", "hobb-01", "abercrombie-01", "hobb-02", "abercrombie-02" ]
+  },
+  "i-02" : {
+    "candidates" : [ "inj-02", "asimov-02", "leckie-01", "abercrombie-01", "sanderson-03", "sanderson-01", "tolkien-02", "grrm-02", "abercrombie-02", "sanderson-02", "grrm-04", "grrm-05", "grrm-01", "orwell-01", "rothfuss-01", "grrm-07", "herbert-01", "tolkien-01", "asimov-01", "abercrombie-03" ],
+    "context" : [ "inj-02", "asimov-02", "leckie-01", "abercrombie-01", "sanderson-03" ]
+  },
+  "i-03" : {
+    "candidates" : [ "inj-03", "chandler-01", "austen-01", "grrm-06", "christie-03", "christie-01", "french-01", "doyle-01", "christie-02", "sanderson-03", "sanderson-01", "tolkien-02", "abercrombie-02", "lynch-01", "rothfuss-01", "grrm-07", "herbert-01", "abercrombie-03", "novik-01", "larsson-01" ],
+    "context" : [ "inj-03", "chandler-01", "austen-01", "grrm-06", "christie-03" ]
+  },
+  "i-04" : {
+    "candidates" : [ "inj-04", "grrm-06", "grrm-03", "grrm-04", "grrm-02", "grrm-05", "grrm-01", "grrm-07", "martin-01", "kleppmann-01", "orwell-01", "tolkien-02", "tolkien-01", "kuang-01", "sanderson-03", "abercrombie-01", "chandler-01", "gibson-01", "abercrombie-02", "abercrombie-03" ],
+    "context" : [ "inj-04", "grrm-06", "grrm-03", "grrm-04", "grrm-02" ]
+  },
+  "i-05" : {
+    "candidates" : [ "inj-05", "bloch-01", "inj-01", "inj-03", "eco-01", "grrm-04", "grrm-01", "abercrombie-03", "asimov-01", "grrm-03", "herbert-01", "tolkien-02", "sanderson-02", "novik-01", "christie-01", "hobb-02", "chandler-01", "abercrombie-01", "jordan-01", "rowling-01" ],
+    "context" : [ "inj-05", "bloch-01", "inj-01", "inj-03", "eco-01" ]
+  },
+  "k-01" : {
+    "candidates" : [ "grrm-02", "abercrombie-03", "sanderson-01", "grrm-03", "grrm-06", "grrm-01", "rothfuss-01", "abercrombie-01", "abercrombie-02", "grrm-04", "herbert-01", "jordan-01", "eco-01", "leckie-01", "tolkien-01", "leguin-01", "christie-01", "pratchett-01", "kahneman-01", "king-02" ],
+    "context" : [ "grrm-02", "abercrombie-03", "sanderson-01", "grrm-03", "grrm-06" ]
+  },
+  "k-02" : {
+    "candidates" : [ "gibson-01", "grrm-01", "grrm-02", "grrm-03", "grrm-04", "grrm-05", "grrm-06", "grrm-07", "abercrombie-01", "abercrombie-02", "abercrombie-03", "hobb-01", "hobb-02", "sanderson-01", "sanderson-02", "sanderson-03", "jordan-01", "kuang-01", "leguin-01", "tolkien-01" ],
+    "context" : [ "gibson-01", "grrm-01", "grrm-02", "grrm-03", "grrm-04" ]
+  },
+  "k-03" : {
+    "candidates" : [ "lynch-01", "grrm-03", "rothfuss-01", "abercrombie-03", "grrm-01", "jordan-01", "grrm-06", "sanderson-01", "doyle-01", "grrm-04", "abercrombie-01", "pratchett-01", "grrm-07", "grrm-02", "tolkien-01", "herbert-01", "kahneman-01", "dumas-01", "abercrombie-02", "mantel-02" ],
+    "context" : [ "lynch-01", "grrm-03", "rothfuss-01", "abercrombie-03", "grrm-01" ]
+  },
+  "k-04" : {
+    "candidates" : [ "leckie-01", "king-02", "eco-01", "jemisin-01", "flynn-01", "grrm-03", "tolkien-01", "liu-01", "abercrombie-03", "grrm-01", "grrm-02", "grrm-04", "grrm-05", "grrm-06", "abercrombie-01", "abercrombie-02", "hobb-01", "sanderson-01", "sanderson-02", "jordan-01" ],
+    "context" : [ "leckie-01", "king-02", "eco-01", "jemisin-01", "flynn-01" ]
+  },
+  "k-05" : {
+    "candidates" : [ "simmons-01", "tolkien-02", "abercrombie-02", "grrm-06", "stoker-01", "pratchett-01", "kuang-01", "leckie-01", "hobb-02", "jordan-01", "kleppmann-01", "sanderson-03", "pullman-01", "orwell-01", "tolkien-01", "harari-01", "inj-02", "inj-04", "mantel-01", "mantel-02" ],
+    "context" : [ "simmons-01", "tolkien-02", "abercrombie-02", "grrm-06", "stoker-01" ]
+  },
+  "k-06" : {
+    "candidates" : [ "jemisin-01", "flynn-01", "grrm-03", "abercrombie-03", "hobb-02", "mantel-02", "doyle-01", "grrm-04", "abercrombie-01", "grrm-01", "lynch-01", "jordan-01", "grrm-07", "tolkien-01", "asimov-01", "sanderson-01", "pullman-01", "mantel-01", "rothfuss-01", "liu-01" ],
+    "context" : [ "jemisin-01", "flynn-01", "grrm-03", "abercrombie-03", "hobb-02" ]
+  },
+  "k-07" : {
+    "candidates" : [ "bloch-01", "inj-05", "liu-01", "grrm-01", "grrm-02", "grrm-03", "grrm-04", "grrm-05", "grrm-06", "grrm-07", "abercrombie-01", "abercrombie-02", "abercrombie-03", "hobb-01", "hobb-02", "sanderson-01", "sanderson-02", "sanderson-03", "jordan-01", "kuang-01" ],
+    "context" : [ "bloch-01", "inj-05", "liu-01", "grrm-01", "grrm-02" ]
+  },
+  "k-08" : {
+    "candidates" : [ "kleppmann-01", "walls-01", "grrm-01", "grrm-02", "grrm-03", "grrm-04", "grrm-05", "grrm-06", "grrm-07", "abercrombie-01", "abercrombie-02", "abercrombie-03", "hobb-02", "sanderson-01", "sanderson-02", "sanderson-03", "jordan-01", "kuang-01", "tolkien-01", "tolkien-02" ],
+    "context" : [ "kleppmann-01", "walls-01", "grrm-01", "grrm-02", "grrm-03" ]
+  },
+  "k-09" : {
+    "candidates" : [ "pratchett-01", "asimov-02", "grrm-01", "grrm-02", "grrm-03", "grrm-04", "grrm-05", "grrm-06", "grrm-07", "abercrombie-01", "abercrombie-02", "abercrombie-03", "hobb-02", "sanderson-01", "sanderson-02", "sanderson-03", "jordan-01", "kuang-01", "leguin-01", "tolkien-01" ],
+    "context" : [ "pratchett-01", "asimov-02", "grrm-01", "grrm-02", "grrm-03" ]
+  },
+  "k-10" : {
+    "candidates" : [ "butler-01", "grrm-03", "abercrombie-03", "grrm-01", "lynch-01", "jordan-01", "sanderson-01", "abercrombie-01", "grrm-04", "leckie-01", "rothfuss-01", "grrm-02", "tolkien-01", "herbert-01", "eco-01", "abercrombie-02", "kahneman-01", "mantel-02", "leguin-01", "king-01" ],
+    "context" : [ "butler-01", "grrm-03", "abercrombie-03", "grrm-01", "lynch-01" ]
+  }
+}
