@@ -716,6 +716,294 @@
           "refId": "B"
         }
       ]
+    },
+    {
+      "id": 204,
+      "type": "row",
+      "title": "RAG Pipeline Stages (/ask)",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 50
+      },
+      "panels": []
+    },
+    {
+      "id": 60,
+      "type": "timeseries",
+      "title": "Retrieval latency by leg (p50 / p95)",
+      "description": "rag.retrieve: one observation per query and retrieval leg (hybrid today; keyword/vector once the RRF joiner lands).",
+      "datasource": {
+        "uid": "prometheus",
+        "type": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 51
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "uid": "prometheus",
+            "type": "prometheus"
+          },
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le, leg) (rate(rag_retrieve_seconds_bucket{job=\"ai-powered-search\"}[5m])))",
+          "legendFormat": "p95 {{leg}}"
+        },
+        {
+          "datasource": {
+            "uid": "prometheus",
+            "type": "prometheus"
+          },
+          "refId": "B",
+          "expr": "histogram_quantile(0.50, sum by (le, leg) (rate(rag_retrieve_seconds_bucket{job=\"ai-powered-search\"}[5m])))",
+          "legendFormat": "p50 {{leg}}"
+        }
+      ]
+    },
+    {
+      "id": 61,
+      "type": "timeseries",
+      "title": "Post-processing latency by processor (p50 / p95)",
+      "description": "rag.postprocess: one observation per document post-processor (reranker, and later the Jev filter).",
+      "datasource": {
+        "uid": "prometheus",
+        "type": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 51
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "uid": "prometheus",
+            "type": "prometheus"
+          },
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le, processor) (rate(rag_postprocess_seconds_bucket{job=\"ai-powered-search\"}[5m])))",
+          "legendFormat": "p95 {{processor}}"
+        },
+        {
+          "datasource": {
+            "uid": "prometheus",
+            "type": "prometheus"
+          },
+          "refId": "B",
+          "expr": "histogram_quantile(0.50, sum by (le, processor) (rate(rag_postprocess_seconds_bucket{job=\"ai-powered-search\"}[5m])))",
+          "legendFormat": "p50 {{processor}}"
+        }
+      ]
+    },
+    {
+      "id": 62,
+      "type": "timeseries",
+      "title": "Join and planning latency (p50 / p95)",
+      "description": "rag.join: merging per-query results. rag.plan: the query planner's model call (W1; empty until enabled).",
+      "datasource": {
+        "uid": "prometheus",
+        "type": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 59
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "uid": "prometheus",
+            "type": "prometheus"
+          },
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(rag_join_seconds_bucket{job=\"ai-powered-search\"}[5m])))",
+          "legendFormat": "p95 join"
+        },
+        {
+          "datasource": {
+            "uid": "prometheus",
+            "type": "prometheus"
+          },
+          "refId": "B",
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(rag_join_seconds_bucket{job=\"ai-powered-search\"}[5m])))",
+          "legendFormat": "p50 join"
+        },
+        {
+          "datasource": {
+            "uid": "prometheus",
+            "type": "prometheus"
+          },
+          "refId": "C",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(rag_plan_seconds_bucket{job=\"ai-powered-search\"}[5m])))",
+          "legendFormat": "p95 plan"
+        },
+        {
+          "datasource": {
+            "uid": "prometheus",
+            "type": "prometheus"
+          },
+          "refId": "D",
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(rag_plan_seconds_bucket{job=\"ai-powered-search\"}[5m])))",
+          "legendFormat": "p50 plan"
+        }
+      ]
+    },
+    {
+      "id": 63,
+      "type": "timeseries",
+      "title": "RAG stage throughput",
+      "description": "Observations per second for each stage.",
+      "datasource": {
+        "uid": "prometheus",
+        "type": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 59
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "uid": "prometheus",
+            "type": "prometheus"
+          },
+          "refId": "A",
+          "expr": "sum by (leg) (rate(rag_retrieve_seconds_count{job=\"ai-powered-search\"}[5m]))",
+          "legendFormat": "retrieve {{leg}}"
+        },
+        {
+          "datasource": {
+            "uid": "prometheus",
+            "type": "prometheus"
+          },
+          "refId": "B",
+          "expr": "sum(rate(rag_join_seconds_count{job=\"ai-powered-search\"}[5m]))",
+          "legendFormat": "join"
+        },
+        {
+          "datasource": {
+            "uid": "prometheus",
+            "type": "prometheus"
+          },
+          "refId": "C",
+          "expr": "sum by (processor) (rate(rag_postprocess_seconds_count{job=\"ai-powered-search\"}[5m]))",
+          "legendFormat": "postprocess {{processor}}"
+        }
+      ]
     }
   ],
   "refresh": "30s",

@@ -3,6 +3,9 @@ package dev.aparikh.aipoweredsearch.config;
 import com.anthropic.models.messages.Model;
 import dev.aparikh.aipoweredsearch.search.HybridDocumentRetriever;
 import dev.aparikh.aipoweredsearch.search.RerankingDocumentPostProcessor;
+import dev.aparikh.aipoweredsearch.search.rag.ObservedDocumentJoiner;
+import dev.aparikh.aipoweredsearch.search.rag.ObservedDocumentPostProcessor;
+import io.micrometer.observation.ObservationRegistry;
 import org.springframework.ai.anthropic.AnthropicCacheOptions;
 import org.springframework.ai.anthropic.AnthropicCacheStrategy;
 import org.springframework.ai.anthropic.AnthropicCacheTtl;
@@ -18,6 +21,8 @@ import org.springframework.ai.openai.OpenAiEmbeddingModel;
 import org.springframework.ai.openai.OpenAiEmbeddingOptions;
 import org.springframework.ai.rag.advisor.RetrievalAugmentationAdvisor;
 import org.springframework.ai.rag.generation.augmentation.ContextualQueryAugmenter;
+import org.springframework.ai.rag.retrieval.join.DocumentJoiner;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
@@ -25,6 +30,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.task.TaskExecutor;
 
 import org.jspecify.annotations.Nullable;
 
@@ -208,6 +214,11 @@ public class AiConfig {
      * @param hybridDocumentRetriever retrieves RAG context using RRF-fused hybrid search
      * @param cachingEnabled whether prompt caching is enabled
      * @param chatOptions the chat options with caching configured (optional, may be null if caching disabled)
+     * @param reranker the reranking post-processor, absent when {@code search.rag.rerank.enabled=false}
+     * @param applicationTaskExecutor Spring Boot's {@code applicationTaskExecutor}. Per-query retrieval
+     *        runs on it rather than on the advisor's private 4-16 platform-thread pool; with
+     *        {@code spring.threads.virtual.enabled=true} it runs each task on a virtual thread
+     * @param observationRegistry records the {@code rag.join} and {@code rag.postprocess} observations
      * @return configured ChatClient instance with RAG capabilities
      */
     @Bean
@@ -216,13 +227,26 @@ public class AiConfig {
                                     HybridDocumentRetriever hybridDocumentRetriever,
                                     @Value("${spring.ai.anthropic.prompt-caching.enabled:true}") boolean cachingEnabled,
                                     @Autowired(required = false) @Qualifier("anthropicChatOptionsWithCaching") AnthropicChatOptions.@Nullable Builder chatOptions,
-                                    @Autowired(required = false) @Nullable RerankingDocumentPostProcessor reranker) {
+                                    @Autowired(required = false) @Nullable RerankingDocumentPostProcessor reranker,
+                                    @Qualifier("applicationTaskExecutor") ObjectProvider<TaskExecutor> applicationTaskExecutor,
+                                    ObjectProvider<ObservationRegistry> observationRegistry) {
         ChatClient.Builder builder = ChatClient.builder(chatModel);
 
         // Set default options if caching is enabled
         if (cachingEnabled && chatOptions != null) {
             builder.defaultOptions(chatOptions);
         }
+
+        ObservationRegistry observations = observationRegistry.getIfAvailable(() -> ObservationRegistry.NOOP);
+
+        // Pass-through joiner. The default ConcatenationDocumentJoiner re-sorts documents by
+        // their individual score, which would undo the RRF ranking the retriever just
+        // computed — our score IS the fused RRF value and is not comparable across retrieval
+        // strategies.
+        DocumentJoiner passThroughJoiner = documentsForQuery -> documentsForQuery.values().stream()
+                .flatMap(List::stream)
+                .flatMap(List::stream)
+                .toList();
 
         RetrievalAugmentationAdvisor.Builder ragAdvisor =
                 RetrievalAugmentationAdvisor.builder()
@@ -234,20 +258,22 @@ public class AiConfig {
                                 .queryAugmenter(ContextualQueryAugmenter.builder()
                                         .allowEmptyContext(true)
                                         .build())
-                                // Pass-through joiner. The default ConcatenationDocumentJoiner
-                                // re-sorts documents by their individual score, which would undo
-                                // the RRF ranking the retriever just computed — our score IS the
-                                // fused RRF value and is not comparable across retrieval strategies.
-                                .documentJoiner(documentsForQuery -> documentsForQuery.values().stream()
-                                        .flatMap(List::stream)
-                                        .flatMap(List::stream)
-                                        .toList());
+                                .documentJoiner(new ObservedDocumentJoiner(passThroughJoiner, observations));
+
+        // Without an executor the advisor retrieves on its own 4-16 platform-thread pool.
+        // Boot's applicationTaskExecutor is virtual-thread backed when virtual threads are
+        // enabled and, with spring.task.execution.propagate-context=true, carries the current
+        // trace into each retrieval so the rag.retrieve spans nest under the request.
+        TaskExecutor executor = applicationTaskExecutor.getIfAvailable();
+        if (executor != null) {
+            ragAdvisor.taskExecutor(executor);
+        }
 
         // Reranking is the third and last place the pipeline can improve context quality:
         // the retriever decides what is a candidate, and this decides what actually reaches
         // the prompt. Absent when search.rag.rerank.enabled=false.
         if (reranker != null) {
-            ragAdvisor.documentPostProcessors(reranker);
+            ragAdvisor.documentPostProcessors(ObservedDocumentPostProcessor.of(reranker, observations));
         }
 
         return builder.defaultAdvisors(

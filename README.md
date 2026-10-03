@@ -514,6 +514,17 @@ open build/reports/rag-eval/report.md
 See [docs/rag-evaluation.md](docs/rag-evaluation.md) for options and how to read the report, and
 [docs/rag-eval-baseline.md](docs/rag-eval-baseline.md) for the current baseline.
 
+### RAG Pipeline Observability
+
+Every stage of the `/ask` pipeline is a Micrometer observation:
+- `rag.retrieve`, tagged by retrieval leg;
+- `rag.join`;
+- `rag.postprocess`, tagged by post-processor.
+
+Each shows up as its own span in Tempo. The **Search & AI Performance** Grafana dashboard has a
+**RAG Pipeline Stages** row with p50/p95 latency per stage. Retrieval runs on virtual threads via
+Spring Boot's `applicationTaskExecutor`. See [docs/rag-pipeline.md](docs/rag-pipeline.md).
+
 ## 📊 Code Quality & Automation
 
 ### SonarQube Integration

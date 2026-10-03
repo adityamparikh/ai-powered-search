@@ -3,9 +3,12 @@ package dev.aparikh.aipoweredsearch.evaluation;
 import dev.aparikh.aipoweredsearch.config.PostgresTestConfiguration;
 import dev.aparikh.aipoweredsearch.config.SolrTestConfiguration;
 import dev.aparikh.aipoweredsearch.indexing.IndexService;
+import dev.aparikh.aipoweredsearch.search.HybridDocumentRetriever;
+import dev.aparikh.aipoweredsearch.search.SearchRepository;
 import dev.aparikh.aipoweredsearch.search.SearchService;
 import dev.aparikh.aipoweredsearch.search.model.AskRequest;
 import dev.aparikh.aipoweredsearch.search.model.AskResponse;
+import io.micrometer.observation.ObservationRegistry;
 import org.apache.solr.client.solrj.SolrClient;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -14,8 +17,11 @@ import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
+import org.springframework.ai.document.Document;
 import org.springframework.ai.embedding.EmbeddingModel;
+import org.springframework.ai.rag.Query;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
@@ -33,6 +39,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -79,6 +86,32 @@ class RagGoldenRegressionIT {
         ChatModel stubChatModel() {
             return prompt -> new ChatResponse(List.of(new Generation(new AssistantMessage("stub answer"))));
         }
+
+        @Bean
+        @Primary
+        ThreadRecordingRetriever threadRecordingRetriever(SearchRepository searchRepository,
+                                                          @Value("${solr.default.collection}") String collection,
+                                                          @Value("${search.rag.hybrid.top-k:20}") int topK,
+                                                          ObservationRegistry observationRegistry) {
+            return new ThreadRecordingRetriever(searchRepository, collection, topK, observationRegistry);
+        }
+    }
+
+    /** The real retriever, noting which kind of thread each retrieval ran on. */
+    static class ThreadRecordingRetriever extends HybridDocumentRetriever {
+
+        final List<Boolean> virtualThreads = new CopyOnWriteArrayList<>();
+
+        ThreadRecordingRetriever(SearchRepository searchRepository, String collection, int topK,
+                                 ObservationRegistry observationRegistry) {
+            super(searchRepository, collection, topK, observationRegistry);
+        }
+
+        @Override
+        public List<Document> retrieve(Query query) {
+            virtualThreads.add(Thread.currentThread().isVirtual());
+            return super.retrieve(query);
+        }
     }
 
     @Autowired
@@ -95,6 +128,9 @@ class RagGoldenRegressionIT {
 
     @Autowired
     private CandidateRecorder candidateRecorder;
+
+    @Autowired
+    private ThreadRecordingRetriever retriever;
 
     @BeforeAll
     void indexFixture() throws Exception {
@@ -128,6 +164,18 @@ class RagGoldenRegressionIT {
             assertThat(outcome.context()).as("prompt context for %s", caseId)
                     .containsExactlyElementsOf(golden.get(caseId).context());
         });
+    }
+
+    @Test
+    void retrievalRunsOnVirtualThreads() {
+        retriever.virtualThreads.clear();
+
+        searchService.ask(new AskRequest("A Clash of Kings", "golden-virtual-threads"));
+
+        // RetrievalAugmentationAdvisor submits each query's retrieval to its TaskExecutor.
+        // AiConfig passes Boot's applicationTaskExecutor, which is virtual-thread backed when
+        // spring.threads.virtual.enabled=true, instead of the advisor's platform-thread pool.
+        assertThat(retriever.virtualThreads).isNotEmpty().containsOnly(true);
     }
 
     private Outcome replay(RagEvalData.EvalCase evalCase) {

@@ -812,6 +812,30 @@ public ChatClient ragChatClient(ChatModel chatModel,
   nowhere all degrade to the retriever's RRF order.
 - **Field projection**: `id,content,metadata_*` — excludes the 1536-dim `vector` field, which
   Solr would otherwise return on every hit under the default `fl=*`
+- **Task executor**: `ragChatClient` passes Spring Boot's `applicationTaskExecutor` to
+  `RetrievalAugmentationAdvisor.builder().taskExecutor(...)`. Per-query retrieval therefore runs on
+  virtual threads (`spring.threads.virtual.enabled=true`) instead of the advisor's private 4-16
+  platform-thread pool. `spring.task.execution.propagate-context=true` carries the trace onto
+  those threads.
+- **Precomputed vectors**: when `Query.context()` holds a `float[]` under `rag.vector`,
+  `HybridDocumentRetriever` hands it to `SearchRepository.executeHybridRerankSearch(..., queryVector)`
+  and the kNN leg makes no embedding call.
+- **Context keys**: stages exchange per-query data through `Query.context()` using the constants in
+  `search.rag.RagContextKeys`: `rag.standalone`, `rag.keywordQuery`, `rag.vectorText`,
+  `rag.vector`, `rag.filters`, `rag.leg`, `rag.legRank`.
+- **Observations**: each stage is a Micrometer observation, so each gets its own span and timer:
+  - `rag.retrieve` (tag `leg`);
+  - `rag.join`;
+  - `rag.postprocess` (tag `processor`);
+  - `rag.plan`.
+
+  Percentile histograms come from `management.metrics.distribution.percentiles-histogram.rag=true`.
+  Grafana's *Search & AI Performance* dashboard has a *RAG Pipeline Stages* row (p50/p95 per
+  stage).
+- **Pipeline docs**: `docs/rag-pipeline.md` describes every stage (what, why, properties,
+  failure behaviour). Each modular-RAG PR adds its section there.
+- **Regression guard**: `RagGoldenRegressionIT` (no API keys) asserts that `/ask` returns the
+  golden documents in the golden order with all new flags off.
 
 **Sources**: `AskResponse.sources` reports the IDs of documents actually placed in the prompt
 context, read from `RetrievalAugmentationAdvisor.DOCUMENT_CONTEXT` in the response context.

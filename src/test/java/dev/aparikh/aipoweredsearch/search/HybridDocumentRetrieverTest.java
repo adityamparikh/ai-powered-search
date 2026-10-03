@@ -1,6 +1,9 @@
 package dev.aparikh.aipoweredsearch.search;
 
 import dev.aparikh.aipoweredsearch.search.model.SearchResponse;
+import dev.aparikh.aipoweredsearch.search.rag.RagContextKeys;
+import dev.aparikh.aipoweredsearch.search.rag.RagObservations;
+import io.micrometer.observation.tck.TestObservationRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -18,6 +21,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
+import static io.micrometer.observation.tck.TestObservationRegistryAssert.assertThat;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -34,11 +39,13 @@ class HybridDocumentRetrieverTest {
     @Mock
     private SearchRepository searchRepository;
 
+    private final TestObservationRegistry observationRegistry = TestObservationRegistry.create();
+
     private HybridDocumentRetriever retriever;
 
     @BeforeEach
     void setUp() {
-        retriever = new HybridDocumentRetriever(searchRepository, COLLECTION, TOP_K);
+        retriever = new HybridDocumentRetriever(searchRepository, COLLECTION, TOP_K, observationRegistry);
     }
 
     private static Map<String, Object> solrDoc(String id, String content, Map<String, Object> extras) {
@@ -53,7 +60,7 @@ class HybridDocumentRetrieverTest {
 
     private void stubHybridResults(List<Map<String, Object>> documents) {
         when(searchRepository.executeHybridRerankSearch(
-                any(), any(), anyInt(), any(), any(), any()))
+                any(), any(), anyInt(), any(), any(), any(), any()))
                 .thenReturn(new SearchResponse(documents, Map.of(), Map.of(), null));
     }
 
@@ -126,7 +133,7 @@ class HybridDocumentRetrieverTest {
 
         ArgumentCaptor<String> fieldsCaptor = ArgumentCaptor.forClass(String.class);
         verify(searchRepository).executeHybridRerankSearch(
-                eq(COLLECTION), eq("q"), eq(TOP_K), any(), fieldsCaptor.capture(), any());
+                eq(COLLECTION), eq("q"), eq(TOP_K), any(), fieldsCaptor.capture(), any(), any());
 
         // A null/"*" field list makes Solr return the 1536-dim vector field on every hit.
         assertThat(fieldsCaptor.getValue()).isNotNull();
@@ -141,7 +148,7 @@ class HybridDocumentRetrieverTest {
         retriever.retrieve(Query.builder().text("machine learning frameworks").build());
 
         verify(searchRepository).executeHybridRerankSearch(
-                eq(COLLECTION), eq("machine learning frameworks"), eq(TOP_K), any(), any(), any());
+                eq(COLLECTION), eq("machine learning frameworks"), eq(TOP_K), any(), any(), any(), any());
     }
 
     @Test
@@ -162,5 +169,50 @@ class HybridDocumentRetrieverTest {
         List<Document> documents = retriever.retrieve(Query.builder().text("q").build());
 
         assertThat(documents).extracting(Document::getId).containsExactly("has-content");
+    }
+
+    @Test
+    void passesAPrecomputedVectorFromTheQueryContextToTheRepository() {
+        stubHybridResults(List.of());
+        float[] vector = {0.1f, 0.2f};
+
+        retriever.retrieve(Query.builder().text("q").context(Map.of(RagContextKeys.VECTOR, vector)).build());
+
+        verify(searchRepository).executeHybridRerankSearch(
+                eq(COLLECTION), eq("q"), eq(TOP_K), any(), any(), any(), eq(vector));
+    }
+
+    @Test
+    void embedsAsBeforeWhenNoVectorIsInTheContext() {
+        stubHybridResults(List.of());
+
+        retriever.retrieve(Query.builder().text("q").build());
+
+        verify(searchRepository).executeHybridRerankSearch(
+                eq(COLLECTION), eq("q"), eq(TOP_K), any(), any(), any(), isNull());
+    }
+
+    @Test
+    void ignoresAContextVectorOfTheWrongType() {
+        stubHybridResults(List.of());
+
+        retriever.retrieve(Query.builder().text("q").context(Map.of(RagContextKeys.VECTOR, List.of(0.1f))).build());
+
+        verify(searchRepository).executeHybridRerankSearch(
+                eq(COLLECTION), eq("q"), eq(TOP_K), any(), any(), any(), isNull());
+    }
+
+    @Test
+    void recordsARetrieveObservationTaggedWithTheLeg() {
+        stubHybridResults(List.of(solrDoc("doc-1", "content", Map.of())));
+
+        retriever.retrieve(Query.builder().text("q").build());
+
+        assertThat(observationRegistry)
+                .hasObservationWithNameEqualTo(RagObservations.RETRIEVE)
+                .that()
+                .hasLowCardinalityKeyValue(RagObservations.LEG_TAG, "hybrid")
+                .hasBeenStarted()
+                .hasBeenStopped();
     }
 }

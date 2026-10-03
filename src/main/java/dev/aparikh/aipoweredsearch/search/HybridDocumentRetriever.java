@@ -1,12 +1,16 @@
 package dev.aparikh.aipoweredsearch.search;
 
 import dev.aparikh.aipoweredsearch.search.model.SearchResponse;
+import dev.aparikh.aipoweredsearch.search.rag.RagContextKeys;
+import dev.aparikh.aipoweredsearch.search.rag.RagObservations;
+import io.micrometer.observation.ObservationRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.jspecify.annotations.Nullable;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.rag.Query;
 import org.springframework.ai.rag.retrieval.search.DocumentRetriever;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -35,6 +39,14 @@ import java.util.Set;
  * {@code ConcatenationDocumentJoiner} re-sorts by each document's own score and would
  * silently discard the fusion.</p>
  *
+ * <p><strong>Per-query inputs.</strong> The retriever reads optional values from
+ * {@link Query#context()} (see {@link RagContextKeys}). When {@link RagContextKeys#VECTOR} holds
+ * a precomputed {@code float[]} embedding, the vector leg uses it and makes no embedding call;
+ * otherwise the query text is embedded exactly as before.</p>
+ *
+ * <p>Each retrieval is recorded as a {@value RagObservations#RETRIEVE} observation tagged
+ * {@code leg=hybrid}.</p>
+ *
  * @see SearchRepository#executeHybridRerankSearch
  * @see RrfMerger
  */
@@ -58,35 +70,56 @@ public class HybridDocumentRetriever implements DocumentRetriever {
 
     private static final Logger log = LoggerFactory.getLogger(HybridDocumentRetriever.class);
 
+    static final String HYBRID_LEG = "hybrid";
+
     private final SearchRepository searchRepository;
     private final String collection;
     private final int topK;
+    private final ObservationRegistry observationRegistry;
+
+    /**
+     * Creates a retriever bound to a single Solr collection, without observations.
+     *
+     * @see #HybridDocumentRetriever(SearchRepository, String, int, ObservationRegistry)
+     */
+    public HybridDocumentRetriever(SearchRepository searchRepository, String collection, int topK) {
+        this(searchRepository, collection, topK, ObservationRegistry.NOOP);
+    }
 
     /**
      * Creates a retriever bound to a single Solr collection.
      *
-     * @param searchRepository executes the hybrid search
-     * @param collection       the Solr collection holding the indexed corpus
-     * @param topK             how many fused documents to hand downstream. This is a
-     *                         candidate count, not a context size: reranking is expected
-     *                         to trim it. With reranking disabled, every one of these
-     *                         goes into the prompt, so lower it accordingly.
+     * @param searchRepository    executes the hybrid search
+     * @param collection          the Solr collection holding the indexed corpus
+     * @param topK                how many fused documents to hand downstream. This is a
+     *                            candidate count, not a context size: reranking is expected
+     *                            to trim it. With reranking disabled, every one of these
+     *                            goes into the prompt, so lower it accordingly.
+     * @param observationRegistry records the {@value RagObservations#RETRIEVE} observation
      */
+    @Autowired
     public HybridDocumentRetriever(SearchRepository searchRepository,
                                    @Value("${solr.default.collection:books}") String collection,
-                                   @Value("${search.rag.hybrid.top-k:20}") int topK) {
+                                   @Value("${search.rag.hybrid.top-k:20}") int topK,
+                                   ObservationRegistry observationRegistry) {
         this.searchRepository = searchRepository;
         this.collection = collection;
         this.topK = topK;
+        this.observationRegistry = observationRegistry;
     }
 
     @Override
     public List<Document> retrieve(Query query) {
+        return RagObservations.observe(observationRegistry, RagObservations.RETRIEVE,
+                RagObservations.LEG_TAG, HYBRID_LEG, () -> retrieveHybrid(query));
+    }
+
+    private List<Document> retrieveHybrid(Query query) {
         // The raw question goes straight to Solr. SearchService.hybridSearch() prepends an
         // LLM call to synthesise Solr query parameters; that is worth it for a search API
         // but is pure latency on a RAG turn, where the model already has the question.
         SearchResponse response = searchRepository.executeHybridRerankSearch(
-                collection, query.text(), topK, null, PROJECTED_FIELDS, null);
+                collection, query.text(), topK, null, PROJECTED_FIELDS, null, precomputedVector(query));
 
         List<Document> documents = response.documents().stream()
                 .map(this::toDocument)
@@ -96,6 +129,13 @@ public class HybridDocumentRetriever implements DocumentRetriever {
         log.debug("Hybrid retrieval for '{}' returned {} documents from collection '{}'",
                 query.text(), documents.size(), collection);
         return documents;
+    }
+
+    /**
+     * The embedding an earlier stage already computed for this query, if any.
+     */
+    static float @Nullable [] precomputedVector(Query query) {
+        return query.context().get(RagContextKeys.VECTOR) instanceof float[] vector ? vector : null;
     }
 
     /**

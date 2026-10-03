@@ -266,6 +266,28 @@ public class SearchRepository {
                                                     @Nullable String filterExpression,
                                                     @Nullable String fieldsCsv,
                                                     @Nullable Double minScore) {
+        return executeHybridRerankSearch(collection, query, topK, filterExpression, fieldsCsv, minScore, null);
+    }
+
+    /**
+     * Executes hybrid search as {@link #executeHybridRerankSearch(String, String, int, String, String, Double)},
+     * optionally reusing an embedding the caller already has.
+     *
+     * <p>When {@code queryVector} is non-null the vector leg (and the vector-only fallback) use it
+     * as-is and make no embedding call. This is how a RAG pipeline that embeds all of its queries
+     * in one batched request avoids paying for one embedding request per query. When it is null,
+     * the query text is embedded exactly as before.</p>
+     *
+     * @param queryVector optional precomputed embedding of the query; must match the dimension of
+     *                    the collection's vector field
+     */
+    public SearchResponse executeHybridRerankSearch(String collection,
+                                                    String query,
+                                                    int topK,
+                                                    @Nullable String filterExpression,
+                                                    @Nullable String fieldsCsv,
+                                                    @Nullable Double minScore,
+                                                    float @Nullable [] queryVector) {
         log.debug("Performing hybrid search (client-side RRF) in collection: {} with query: {}", collection, query);
 
         int fetchSize = topK * OVER_FETCH_MULTIPLIER;
@@ -283,7 +305,7 @@ public class SearchRepository {
                 Future<List<Map<String, Object>>> keywordLeg = executor.submit(() ->
                         executeKeywordSearch(collection, query, fetchSize, filterExpression, fieldsCsv));
                 Future<List<Map<String, Object>>> vectorLeg = executor.submit(() ->
-                        executeVectorSearch(collection, query, fetchSize, filterExpression, fieldsCsv));
+                        executeVectorSearch(collection, query, fetchSize, filterExpression, fieldsCsv, queryVector));
 
                 // Either get() may throw ExecutionException; the surrounding catch degrades to
                 // the fallback cascade exactly as it did when these ran inline.
@@ -318,7 +340,7 @@ public class SearchRepository {
 
             // Fallback cascade
             log.warn("Hybrid search returned no results, attempting fallback");
-            return fallbackSearch(collection, query, topK, filterExpression, fieldsCsv, minScore);
+            return fallbackSearch(collection, query, topK, filterExpression, fieldsCsv, minScore, queryVector);
 
         } catch (InterruptedException e) {
             // An interrupt means this caller is being cancelled. Falling back would issue more
@@ -330,7 +352,7 @@ public class SearchRepository {
         } catch (Exception e) {
             log.error("Error performing hybrid search with RRF in collection: {}", collection, e);
             log.warn("Hybrid search failed, attempting fallback");
-            return fallbackSearch(collection, query, topK, filterExpression, fieldsCsv, minScore);
+            return fallbackSearch(collection, query, topK, filterExpression, fieldsCsv, minScore, queryVector);
         }
     }
 
@@ -380,7 +402,25 @@ public class SearchRepository {
                                                   int rows,
                                                   @Nullable String filterExpression,
                                                   @Nullable String fieldsCsv) throws Exception {
-        String vectorString = embeddingService.embedAndFormatForSolr(query);
+        return executeVectorSearch(collection, query, rows, filterExpression, fieldsCsv, null);
+    }
+
+    /**
+     * Executes vector-only search, using {@code queryVector} when given instead of embedding
+     * {@code query}.
+     *
+     * @param queryVector optional precomputed embedding of the query; when null the query text is
+     *                    embedded
+     */
+    List<Map<String, Object>> executeVectorSearch(String collection,
+                                                  String query,
+                                                  int rows,
+                                                  @Nullable String filterExpression,
+                                                  @Nullable String fieldsCsv,
+                                                  float @Nullable [] queryVector) throws Exception {
+        String vectorString = queryVector != null
+                ? embeddingService.formatVectorForSolr(queryVector)
+                : embeddingService.embedAndFormatForSolr(query);
 
         ModifiableSolrParams params = new ModifiableSolrParams();
         params.set("q", SolrQueryUtils.buildKnnQuery(FIELD_VECTOR, rows, vectorString));
@@ -405,7 +445,8 @@ public class SearchRepository {
                                           int topK,
                                           @Nullable String filterExpression,
                                           @Nullable String fieldsCsv,
-                                          @Nullable Double minScore) {
+                                          @Nullable Double minScore,
+                                          float @Nullable [] queryVector) {
         // Try keyword-only first. minScore is NOT applied here: BM25 scores are unbounded,
         // so a [0..1] threshold would silently discard perfectly good keyword matches.
         try {
@@ -423,7 +464,7 @@ public class SearchRepository {
         // Try vector-only as last resort. minScore applies here — these are cosine similarities.
         try {
             List<Map<String, Object>> vectorResults = filterByMinScore(executeVectorSearch(
-                    collection, query, topK, filterExpression, fieldsCsv), minScore);
+                    collection, query, topK, filterExpression, fieldsCsv, queryVector), minScore);
 
             if (!vectorResults.isEmpty()) {
                 log.info("Vector-only fallback returned {} results", vectorResults.size());
