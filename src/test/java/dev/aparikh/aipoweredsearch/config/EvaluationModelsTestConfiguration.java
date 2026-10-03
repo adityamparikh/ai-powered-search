@@ -13,8 +13,7 @@ import org.testcontainers.utility.DockerImageName;
  * <p>Solr is deliberately <em>not</em> defined here. Evaluation tests import
  * {@link SolrTestConfiguration} alongside this class, which also points the application's
  * {@code solr.url} at the container, so the app under test and the test itself see the same
- * Solr. (An earlier version defined a second {@code solrContainer} bean here, which collided with
- * {@link SolrTestConfiguration} as soon as both were imported.)</p>
+ * Solr.</p>
  *
  * <p>The Ollama container is {@link Lazy}: Testcontainers starts it only when a test actually asks
  * for it. That lets an evaluation run skip the judge, or use an Ollama server that already holds

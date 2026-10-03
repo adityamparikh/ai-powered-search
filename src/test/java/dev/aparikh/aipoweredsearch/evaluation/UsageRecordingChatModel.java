@@ -19,17 +19,17 @@ import java.util.concurrent.atomic.AtomicLong;
  */
 public class UsageRecordingChatModel implements ChatModel {
 
-    /** Token totals since the last {@link #reset()}. */
-    public record Totals(long calls, long promptTokens, long completionTokens) {
-        public long totalTokens() {
-            return promptTokens + completionTokens;
-        }
+    /**
+     * Token totals since the last {@link #reset()}.
+     *
+     * @param tokens prompt plus completion tokens
+     */
+    public record Totals(long calls, long tokens) {
     }
 
     private final ChatModel delegate;
     private final AtomicLong calls = new AtomicLong();
-    private final AtomicLong promptTokens = new AtomicLong();
-    private final AtomicLong completionTokens = new AtomicLong();
+    private final AtomicLong tokens = new AtomicLong();
 
     public UsageRecordingChatModel(ChatModel delegate) {
         this.delegate = delegate;
@@ -39,12 +39,10 @@ public class UsageRecordingChatModel implements ChatModel {
     public ChatResponse call(Prompt prompt) {
         ChatResponse response = delegate.call(prompt);
         calls.incrementAndGet();
-        if (response != null && response.getMetadata() != null) {
-            Usage usage = response.getMetadata().getUsage();
-            if (usage != null) {
-                promptTokens.addAndGet(nullToZero(usage.getPromptTokens()));
-                completionTokens.addAndGet(nullToZero(usage.getCompletionTokens()));
-            }
+        // Metadata is never null, but a provider can set a null Usage on it.
+        Usage usage = response.getMetadata().getUsage();
+        if (usage != null) {
+            tokens.addAndGet(nullToZero(usage.getPromptTokens()) + nullToZero(usage.getCompletionTokens()));
         }
         return response;
     }
@@ -60,13 +58,12 @@ public class UsageRecordingChatModel implements ChatModel {
     }
 
     public Totals snapshot() {
-        return new Totals(calls.get(), promptTokens.get(), completionTokens.get());
+        return new Totals(calls.get(), tokens.get());
     }
 
     public void reset() {
         calls.set(0);
-        promptTokens.set(0);
-        completionTokens.set(0);
+        tokens.set(0);
     }
 
     private static long nullToZero(Integer value) {

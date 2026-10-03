@@ -31,6 +31,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class RetrievalAugmentationAdvisorContractTest {
 
     private static final String STANDALONE_KEY = "rag.standalone";
+    private static final String STANDALONE_TEXT = "Books by George R.R. Martin cheaper than A Game of Thrones";
 
     private final AtomicReference<Query> retrieved = new AtomicReference<>();
     private final AtomicReference<Query> postProcessed = new AtomicReference<>();
@@ -44,9 +45,9 @@ class RetrievalAugmentationAdvisorContractTest {
 
     /** An expander that writes into the original query's context and returns a rewritten query. */
     private final QueryExpander handOffExpander = query -> {
-        query.context().put(STANDALONE_KEY, "Books by George R.R. Martin cheaper than A Game of Thrones");
+        query.context().put(STANDALONE_KEY, STANDALONE_TEXT);
         return List.of(query.mutate()
-                .text("Books by George R.R. Martin cheaper than A Game of Thrones")
+                .text(STANDALONE_TEXT)
                 .context(new HashMap<>(query.context()))
                 .build());
     };
@@ -92,7 +93,7 @@ class RetrievalAugmentationAdvisorContractTest {
     void postProcessorsReceiveTheOriginalQueryNotTheExpandedOne() {
         advisor(handOffExpander).before(twoTurnRequest(), null);
 
-        assertThat(retrieved.get().text()).isEqualTo("Books by George R.R. Martin cheaper than A Game of Thrones");
+        assertThat(retrieved.get().text()).isEqualTo(STANDALONE_TEXT);
         // This is the bug #36 fixes: the reranker judges against the context-free follow-up.
         assertThat(postProcessed.get().text()).isEqualTo("Anything cheaper by the same author?");
     }
@@ -104,10 +105,10 @@ class RetrievalAugmentationAdvisorContractTest {
         // The original query's context is the advisor's own mutable map: the expander's write is
         // visible to post-processors, which run on the caller thread after every retrieval joins.
         assertThat(postProcessed.get().context())
-                .containsEntry(STANDALONE_KEY, "Books by George R.R. Martin cheaper than A Game of Thrones");
+                .containsEntry(STANDALONE_KEY, STANDALONE_TEXT);
         // ...and it is the same map that becomes the response context.
         assertThat(augmented.context())
-                .containsEntry(STANDALONE_KEY, "Books by George R.R. Martin cheaper than A Game of Thrones")
+                .containsEntry(STANDALONE_KEY, STANDALONE_TEXT)
                 .containsKey(RetrievalAugmentationAdvisor.DOCUMENT_CONTEXT);
     }
 

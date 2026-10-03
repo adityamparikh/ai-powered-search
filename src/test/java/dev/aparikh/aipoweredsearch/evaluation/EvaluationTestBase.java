@@ -3,7 +3,6 @@ package dev.aparikh.aipoweredsearch.evaluation;
 import dev.aparikh.aipoweredsearch.embedding.EmbeddingService;
 import dev.aparikh.aipoweredsearch.fixtures.BookDatasetGenerator;
 import org.apache.solr.client.solrj.SolrClient;
-import org.apache.solr.client.solrj.impl.HttpJdkSolrClient;
 import org.apache.solr.common.SolrInputDocument;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.BeforeEach;
@@ -61,6 +60,8 @@ public abstract class EvaluationTestBase {
     /** Null when {@link #judgeEnabled()} is false. */
     protected @Nullable RelevancyEvaluator relevancyEvaluator;
 
+    /** The application's client, which {@code SolrTestConfiguration} points at the container. */
+    @Autowired
     protected SolrClient solrClient;
 
     protected static final String BOOKS_COLLECTION = "books";
@@ -70,9 +71,6 @@ public abstract class EvaluationTestBase {
         if (judgeEnabled()) {
             setUpJudge();
         }
-
-        String solrUrl = "http://" + solr.getHost() + ":" + solr.getSolrPort() + "/solr";
-        solrClient = new HttpJdkSolrClient.Builder(solrUrl).build();
 
         createBooksCollection();
         loadBooks();
@@ -91,7 +89,7 @@ public abstract class EvaluationTestBase {
         if (external != null && !external.isBlank()) {
             baseUrl = external;
             System.out.println("Using external Ollama at " + baseUrl + "; pulling " + BESPOKE_MINICHECK + " if absent...");
-            RestClient.builder().baseUrl(baseUrl).requestFactory(new JdkClientHttpRequestFactory()).build()
+            jdkRestClient(baseUrl).build()
                     .post().uri("/api/pull")
                     .body(Map.of("model", BESPOKE_MINICHECK, "stream", false))
                     .retrieve().toBodilessEntity();
@@ -102,10 +100,7 @@ public abstract class EvaluationTestBase {
             baseUrl = container.getEndpoint();
         }
 
-        // Create Ollama API with JDK HttpClient (to avoid Jetty conflicts)
-        RestClient.Builder restClientBuilder = RestClient.builder()
-                .baseUrl(baseUrl)
-                .requestFactory(new JdkClientHttpRequestFactory());
+        RestClient.Builder restClientBuilder = jdkRestClient(baseUrl);
 
         OllamaApi ollamaApi = OllamaApi.builder()
                 .baseUrl(baseUrl)
@@ -125,6 +120,11 @@ public abstract class EvaluationTestBase {
 
         factCheckingEvaluator = FactCheckingEvaluator.builder(ChatClient.builder(chatModel)).build();
         relevancyEvaluator = RelevancyEvaluator.builder().chatClientBuilder(ChatClient.builder(chatModel)).build();
+    }
+
+    /** A RestClient on the JDK HttpClient (to avoid Jetty conflicts). */
+    private static RestClient.Builder jdkRestClient(String baseUrl) {
+        return RestClient.builder().baseUrl(baseUrl).requestFactory(new JdkClientHttpRequestFactory());
     }
 
     /**

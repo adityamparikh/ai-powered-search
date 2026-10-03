@@ -82,8 +82,8 @@ tasks.withType<Test> {
     useJUnitPlatform()
     finalizedBy(tasks.jacocoTestReport)
     maxHeapSize = "2g"
-    // Forward -Drag.* to the test JVM: RagEvaluationIT (rag.eval.*) and the golden /ask
-    // regression (rag.golden.record) read their options from system properties.
+    // Forward -Drag.* to the test JVM: the RAG evaluation tests read their options from
+    // system properties.
     System.getProperties().stringPropertyNames()
         .filter { it.startsWith("rag.") }
         .forEach { systemProperty(it, System.getProperty(it)) }

@@ -13,6 +13,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.function.ToDoubleFunction;
 
 /**
@@ -71,6 +72,7 @@ public final class RagEvalReport {
 
     static CategorySummary summarise(String category, List<CaseResult> results) {
         List<CaseResult> ok = results.stream().filter(r -> r.error() == null).toList();
+        List<Double> latencies = ok.stream().map(CaseResult::latencyMs).toList();
         return new CategorySummary(
                 category,
                 results.size(),
@@ -79,9 +81,9 @@ public final class RagEvalReport {
                 mean(ok, CaseResult::parity),
                 mean(ok, CaseResult::precision),
                 ok.stream().mapToLong(CaseResult::injections).sum(),
-                RagMetrics.percentile(ok.stream().map(CaseResult::latencyMs).toList(), 50),
-                RagMetrics.percentile(ok.stream().map(CaseResult::latencyMs).toList(), 95),
-                mean(ok, r -> r.tokens()),
+                RagMetrics.percentile(latencies, 50),
+                RagMetrics.percentile(latencies, 95),
+                mean(ok, CaseResult::tokens),
                 passRate(ok.stream().map(CaseResult::relevant).toList()),
                 passRate(ok.stream().map(CaseResult::faithful).toList()));
     }
@@ -89,8 +91,8 @@ public final class RagEvalReport {
     public static void write(Report report, Path directory) throws IOException {
         Files.createDirectories(directory);
         JsonMapper mapper = JsonMapper.builder().enable(SerializationFeature.INDENT_OUTPUT).build();
-        // Jackson emits undefined metrics as a bare NaN token, which is not valid JSON.
-        String json = mapper.writeValueAsString(report).replaceAll("(?<=[:\\[,]\\s?)NaN(?=\\s*[,\\]}])", "null");
+        // Undefined metrics are written as the string "NaN" (Jackson's WRITE_NAN_AS_STRINGS default).
+        String json = mapper.writeValueAsString(report);
         String markdown = toMarkdown(report);
         Files.writeString(directory.resolve("report.json"), json);
         Files.writeString(directory.resolve("report.md"), markdown);
@@ -145,11 +147,11 @@ public final class RagEvalReport {
     }
 
     private static double mean(List<CaseResult> results, ToDoubleFunction<CaseResult> metric) {
-        return RagMetrics.mean(results.stream().map(r -> metric.applyAsDouble(r)).toList());
+        return RagMetrics.mean(results.stream().map(metric::applyAsDouble).toList());
     }
 
     private static double passRate(List<@Nullable Boolean> verdicts) {
-        List<Boolean> judged = verdicts.stream().filter(java.util.Objects::nonNull).toList();
+        List<Boolean> judged = verdicts.stream().filter(Objects::nonNull).toList();
         if (judged.isEmpty()) {
             return Double.NaN;
         }

@@ -1,6 +1,5 @@
 package dev.aparikh.aipoweredsearch.evaluation;
 
-import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -85,7 +84,7 @@ public final class RagMetrics {
         if (percentile <= 0 || percentile > 100) {
             throw new IllegalArgumentException("percentile must be in (0, 100], got: " + percentile);
         }
-        List<Double> sorted = new ArrayList<>(values.stream().filter(v -> !v.isNaN()).sorted().toList());
+        List<Double> sorted = values.stream().filter(v -> !v.isNaN()).sorted().toList();
         if (sorted.isEmpty()) {
             return Double.NaN;
         }

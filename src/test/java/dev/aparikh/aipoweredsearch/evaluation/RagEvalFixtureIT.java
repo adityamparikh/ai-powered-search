@@ -118,9 +118,10 @@ class RagEvalFixtureIT {
         String updateHandler = solr.execInContainer("curl", "-s",
                 "http://localhost:8983/solr/" + COLLECTION + "/config/updateHandler?wt=json").getStdout();
 
-        JsonNode segmentInfo = new ObjectMapper().readTree(segments).path("segments");
+        ObjectMapper mapper = new ObjectMapper();
+        JsonNode segmentInfo = mapper.readTree(segments).path("segments");
         assertThat(segmentInfo.size()).as(segments).isEqualTo(1);
-        JsonNode handler = new ObjectMapper().readTree(updateHandler).path("config").path("updateHandler");
+        JsonNode handler = mapper.readTree(updateHandler).path("config").path("updateHandler");
         assertThat(handler.path("autoSoftCommit").path("maxTime").asInt()).as(updateHandler).isEqualTo(-1);
         assertThat(handler.path("autoCommit").path("maxTime").asInt()).as(updateHandler).isEqualTo(-1);
     }

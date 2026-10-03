@@ -20,7 +20,7 @@ import java.util.Map;
 /**
  * Builds the evaluation collection the same way production does.
  *
- * <p>Two details matter for the numbers to mean anything:</p>
+ * <p>Three details matter for the numbers to mean anything:</p>
  * <ul>
  *   <li><strong>The project configset, not {@code _default}.</strong> Solr's {@code _default}
  *       configset leaves {@code copyField * -> _text_} commented out, so the BM25 leg (which

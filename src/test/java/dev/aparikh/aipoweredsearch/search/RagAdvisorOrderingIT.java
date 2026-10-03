@@ -28,6 +28,7 @@ import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.tuple;
 
 /**
  * W0 finding A1, proven against the real {@code AiConfig.ragChatClient} wiring: on turn 2 of a
@@ -98,9 +99,9 @@ class RagAdvisorOrderingIT {
                 .filteredOn(message -> message.getMessageType() != MessageType.SYSTEM)
                 .extracting(Message::getMessageType, Message::getText)
                 .containsExactly(
-                        org.assertj.core.groups.Tuple.tuple(MessageType.USER, "Recommend an epic fantasy series with political intrigue."),
-                        org.assertj.core.groups.Tuple.tuple(MessageType.ASSISTANT, STUB_ANSWER),
-                        org.assertj.core.groups.Tuple.tuple(MessageType.USER, "Anything cheaper by the same author?"));
+                        tuple(MessageType.USER, "Recommend an epic fantasy series with political intrigue."),
+                        tuple(MessageType.ASSISTANT, STUB_ANSWER),
+                        tuple(MessageType.USER, "Anything cheaper by the same author?"));
         assertThat(turnTwo.context()).containsEntry(ChatMemory.CONVERSATION_ID, conversationId);
     }
 

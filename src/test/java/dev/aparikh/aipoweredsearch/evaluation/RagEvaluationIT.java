@@ -35,6 +35,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.Callable;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -221,7 +222,7 @@ class RagEvaluationIT extends EvaluationTestBase {
                     parity,
                     RagMetrics.precision(context, relevant),
                     RagMetrics.injectionCount(context),
-                    latencyMs, tokens.totalTokens(), tokens.calls(),
+                    latencyMs, tokens.tokens(), tokens.calls(),
                     relevantVerdict, faithfulVerdict, candidates, context, null);
         } catch (Exception e) {
             log.warn("[rag-eval] case {} failed: {}", evalCase.id(), e.toString());
@@ -230,7 +231,7 @@ class RagEvaluationIT extends EvaluationTestBase {
         }
     }
 
-    private static @Nullable Boolean judge(java.util.concurrent.Callable<Boolean> verdict) {
+    private static @Nullable Boolean judge(Callable<Boolean> verdict) {
         try {
             return verdict.call();
         } catch (Exception e) {
