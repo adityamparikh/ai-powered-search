@@ -4,10 +4,9 @@ import com.anthropic.models.messages.Model;
 import dev.aparikh.aipoweredsearch.search.HybridDocumentRetriever;
 import dev.aparikh.aipoweredsearch.search.RerankingDocumentPostProcessor;
 import dev.aparikh.aipoweredsearch.search.rag.ObservedDocumentJoiner;
-import dev.aparikh.aipoweredsearch.search.rag.ObservedDocumentPostProcessor;
 import dev.aparikh.aipoweredsearch.search.rag.QueryPlanningExpander;
+import dev.aparikh.aipoweredsearch.search.rag.RagPostProcessors;
 import dev.aparikh.aipoweredsearch.search.rag.RrfDocumentJoiner;
-import dev.aparikh.aipoweredsearch.search.rag.StandaloneQueryAwarePostProcessor;
 import io.micrometer.observation.ObservationRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -69,7 +68,7 @@ public class AiConfig {
      * <p>Spring AI 2.x removed the {@code AnthropicApi.ChatModel} enum when it moved to the
      * official Anthropic Java SDK, so the model is now identified by its string id.</p>
      */
-    private static final String ANTHROPIC_CHAT_MODEL = "claude-sonnet-4-5";
+    static final String ANTHROPIC_CHAT_MODEL = "claude-sonnet-4-5";
 
     /**
      * Creates default AnthropicChatOptions with prompt caching enabled.
@@ -221,14 +220,12 @@ public class AiConfig {
      * @param hybridDocumentRetriever retrieves RAG context using RRF-fused hybrid search
      * @param cachingEnabled whether prompt caching is enabled
      * @param chatOptions the chat options with caching configured (optional, may be null if caching disabled)
-     * @param reranker the reranking post-processor, absent when {@code search.rag.rerank.enabled=false}
+     * @param postProcessors the ordered post-processors: Jev filter (opt-in) then reranker
      * @param applicationTaskExecutor Spring Boot's {@code applicationTaskExecutor}. Per-query retrieval
      *        runs on it rather than on the advisor's private 4-16 platform-thread pool; with
      *        {@code spring.threads.virtual.enabled=true} it runs each task on a virtual thread
      * @param observationRegistry records the {@code rag.join} and {@code rag.postprocess} observations
-     * @param fusionTopK fused candidates kept by the joiner ({@code search.rag.fusion.top-k},
-     *        defaulting to {@code search.rag.hybrid.top-k})
-     * @param rrfK RRF smoothing constant ({@code search.rag.fusion.rrf-k})
+     * @param ragDocumentJoiner fuses the per-query result lists, see {@link #ragDocumentJoiner}
      * @param queryPlanner the query planner, present only when {@code search.rag.planner.enabled=true}
      * @return configured ChatClient instance with RAG capabilities
      */
@@ -238,11 +235,10 @@ public class AiConfig {
                                     HybridDocumentRetriever hybridDocumentRetriever,
                                     @Value("${spring.ai.anthropic.prompt-caching.enabled:true}") boolean cachingEnabled,
                                     @Autowired(required = false) @Qualifier("anthropicChatOptionsWithCaching") AnthropicChatOptions.@Nullable Builder chatOptions,
-                                    @Autowired(required = false) @Nullable RerankingDocumentPostProcessor reranker,
+                                    RagPostProcessors postProcessors,
                                     @Qualifier("applicationTaskExecutor") ObjectProvider<TaskExecutor> applicationTaskExecutor,
                                     ObjectProvider<ObservationRegistry> observationRegistry,
-                                    @Value("${search.rag.fusion.top-k:${search.rag.hybrid.top-k:20}}") int fusionTopK,
-                                    @Value("${search.rag.fusion.rrf-k:60}") int rrfK,
+                                    @Qualifier("ragDocumentJoiner") DocumentJoiner ragDocumentJoiner,
                                     @Autowired(required = false) @Nullable QueryPlanningExpander queryPlanner) {
         ChatClient.Builder builder = ChatClient.builder(chatModel);
 
@@ -252,23 +248,6 @@ public class AiConfig {
         }
 
         ObservationRegistry observations = observationRegistry.getIfAvailable(() -> ObservationRegistry.NOOP);
-
-        // Fusion. The retriever returns each leg's hits unfused and RrfDocumentJoiner fuses every
-        // leg of every query in ONE RRF pass, de-duplicating and capping at fusion.top-k. With a
-        // single query this is exactly the per-query fused order the retriever used to produce.
-        //
-        // The default ConcatenationDocumentJoiner is deliberately not used: it re-sorts documents
-        // by their individual score, and raw BM25 and cosine scores are not comparable, so it
-        // would scramble the ranking. With fusion disabled (search.rag.fusion.enabled=false) the
-        // retriever fuses per query and a pass-through joiner keeps that order for the same reason.
-        // The joiner follows the retriever's mode rather than re-reading the property, so the two
-        // cannot disagree.
-        DocumentJoiner joiner = hybridDocumentRetriever.defersFusion()
-                ? new RrfDocumentJoiner(rrfK, fusionTopK)
-                : documentsForQuery -> documentsForQuery.values().stream()
-                        .flatMap(List::stream)
-                        .flatMap(List::stream)
-                        .toList();
 
         RetrievalAugmentationAdvisor.Builder ragAdvisor =
                 RetrievalAugmentationAdvisor.builder()
@@ -280,7 +259,7 @@ public class AiConfig {
                                 .queryAugmenter(ContextualQueryAugmenter.builder()
                                         .allowEmptyContext(true)
                                         .build())
-                                .documentJoiner(new ObservedDocumentJoiner(joiner, observations));
+                                .documentJoiner(new ObservedDocumentJoiner(ragDocumentJoiner, observations));
 
         // Without an executor the advisor retrieves on its own 4-16 platform-thread pool.
         // Boot's applicationTaskExecutor is virtual-thread backed when virtual threads are
@@ -301,18 +280,13 @@ public class AiConfig {
             ragAdvisor.queryExpander(queryPlanner);
         }
 
-        // Reranking is the third and last place the pipeline can improve context quality:
-        // the retriever decides what is a candidate, and this decides what actually reaches
-        // the prompt. Absent when search.rag.rerank.enabled=false.
-        //
-        // The advisor hands post-processors the ORIGINAL question; StandaloneQueryAwarePostProcessor
-        // substitutes the planner's standalone rewrite when there is one, so "Anything cheaper by
-        // the same author?" is judged as the question it really is. With the planner off it is a
-        // no-op.
-        if (reranker != null) {
-            ragAdvisor.documentPostProcessors(new ObservedDocumentPostProcessor(
-                    new StandaloneQueryAwarePostProcessor(reranker), observations,
-                    ObservedDocumentPostProcessor.processorName(reranker.getClass())));
+        // Post-processing (W4): an opt-in Jev passage filter, then the reranker (Claude by default,
+        // or Jev). Reranking is the last place the pipeline can improve context quality: the
+        // retriever decides what is a candidate, and this decides what reaches the prompt. Each
+        // stage judges against the planner's standalone question when there is one, because the
+        // advisor hands post-processors the ORIGINAL question. See RagPostProcessingConfig.
+        if (!postProcessors.processors().isEmpty()) {
+            ragAdvisor.documentPostProcessors(postProcessors.processors());
         }
 
         return builder.defaultAdvisors(
@@ -327,6 +301,41 @@ public class AiConfig {
     }
 
     /**
+     * Joins the per-query retrieval results of a RAG turn into one candidate list (W3).
+     *
+     * <p>The retriever returns each leg's hits unfused, and {@link RrfDocumentJoiner} fuses every
+     * leg of every query in ONE RRF pass, de-duplicating and capping at
+     * {@code search.rag.fusion.top-k}. With a single query this is exactly the per-query fused
+     * order the retriever used to produce.</p>
+     *
+     * <p>The default {@code ConcatenationDocumentJoiner} is deliberately not used: it re-sorts
+     * documents by their individual score, and raw BM25 and cosine scores are not comparable, so it
+     * would scramble the ranking. With fusion disabled ({@code search.rag.fusion.enabled=false}) the
+     * retriever fuses per query and a pass-through joiner keeps that order for the same reason.
+     * The joiner follows the retriever's mode rather than re-reading the property, so the two
+     * cannot disagree.</p>
+     *
+     * @param hybridDocumentRetriever the retriever whose mode ({@code search.rag.fusion.enabled})
+     *        decides between RRF fusion and pass-through
+     * @param fusionTopK fused candidates kept ({@code search.rag.fusion.top-k}, defaulting to
+     *        {@code search.rag.hybrid.top-k})
+     * @param rrfK       RRF smoothing constant ({@code search.rag.fusion.rrf-k})
+     * @return the joiner
+     */
+    @Bean
+    public DocumentJoiner ragDocumentJoiner(HybridDocumentRetriever hybridDocumentRetriever,
+                                            @Value("${search.rag.fusion.top-k:${search.rag.hybrid.top-k:20}}") int fusionTopK,
+                                            @Value("${search.rag.fusion.rrf-k:60}") int rrfK) {
+        if (hybridDocumentRetriever.defersFusion()) {
+            return new RrfDocumentJoiner(rrfK, fusionTopK);
+        }
+        return documentsForQuery -> documentsForQuery.values().stream()
+                .flatMap(List::stream)
+                .flatMap(List::stream)
+                .toList();
+    }
+
+    /**
      * Creates the LLM-based reranker that trims retrieved context down to the most relevant
      * documents.
      *
@@ -337,13 +346,25 @@ public class AiConfig {
      *
      * @param chatModel the ChatModel used to judge relevance
      * @param topK      how many documents survive reranking
+     * @param model     the reranking model ({@code search.rag.rerank.model})
      * @return the reranking post-processor
      */
     @Bean
     @ConditionalOnProperty(name = "search.rag.rerank.enabled", havingValue = "true", matchIfMissing = true)
     public RerankingDocumentPostProcessor rerankingDocumentPostProcessor(
             ChatModel chatModel,
-            @Value("${search.rag.rerank.top-k:5}") int topK) {
-        return new RerankingDocumentPostProcessor(ChatClient.builder(chatModel).build(), topK);
+            @Value("${search.rag.rerank.top-k:5}") int topK,
+            @Value("${search.rag.rerank.model:" + ANTHROPIC_CHAT_MODEL + "}") String model) {
+        return new RerankingDocumentPostProcessor(rerankChatClient(chatModel, model), topK);
+    }
+
+    /**
+     * The Claude reranker's client: no advisors, and the model from {@code search.rag.rerank.model}
+     * (default {@value #ANTHROPIC_CHAT_MODEL}, the model the reranker has always used).
+     */
+    public static ChatClient rerankChatClient(ChatModel chatModel, String model) {
+        return ChatClient.builder(chatModel)
+                .defaultOptions(AnthropicChatOptions.builder().model(model))
+                .build();
     }
 }

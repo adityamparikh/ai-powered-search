@@ -251,6 +251,8 @@ The repository includes several helper scripts for common tasks:
 - `ANTHROPIC_PROMPT_CACHING_ENABLED`: Enable Anthropic prompt caching (defaults to 'true')
 - `ANTHROPIC_PROMPT_CACHING_STRATEGY`: Cache strategy (defaults to 'SYSTEM_AND_TOOLS')
 - `OPENAI_API_KEY`: Required for OpenAI embeddings (vector search and indexing)
+- `TYPESAFE_API_KEY`: Optional. Only for TypeSafe Jev passage screening or reranking
+  (`search.rag.jev.enabled=true` or `search.rag.rerank.provider=jev`); the app starts without it
 - `POSTGRES_USER`: PostgreSQL username (defaults to 'postgres')
 - `POSTGRES_PASSWORD`: PostgreSQL password (defaults to 'postgres')
 
@@ -834,6 +836,19 @@ public ChatClient ragChatClient(ChatModel chatModel,
   - `EmbeddingBatcher` embeds every planned query in one `EmbeddingModel.embed(List)` call, so a
     turn makes one embedding request regardless of the number of queries. A failed or invalid batch leaves
     vectors unset, and each leg then embeds individually.
+- **Post-processors** (W4): `RagPostProcessingConfig` assembles `RagPostProcessors`.
+  - **Order:** the optional `JevDocumentFilter` (`search.rag.jev.enabled`, default `false`;
+    fail-open via `FailOpenPostProcessor`, bounded by `search.rag.jev.timeout`), then the
+    reranker.
+  - **Reranker:** `search.rag.rerank.provider` is `claude` (default; model from
+    `search.rag.rerank.model`, default `claude-sonnet-4-5`) or `jev` (`JevDocumentReranker`).
+  - **Short-circuit:** `RerankShortCircuit` skips the reranker when candidates ≤ `rerank.top-k`.
+    `search.rag.rerank.short-circuit` defaults to `search.rag.jev.enabled`.
+  - **Standalone question:** every stage judges against it via `StandaloneQueryAwarePostProcessor`.
+  - **TypeSafe setup:** the starter's auto-configuration is excluded (an empty
+    `spring.ai.typesafe.api-key` would fail startup). The client is built only when a Jev stage is
+    on and `TYPESAFE_API_KEY` is set, otherwise Jev is skipped with a WARN.
+  - **Fusion joiner:** now the `ragDocumentJoiner` bean.
 - **Typed filter fields**: `solr-config/conf/managed-schema.xml` declares `metadata_author`
   (`strings`), `metadata_price` (`pdouble`) and `metadata_year` (`pint`), so planner filters get
   exact author matches and numeric ranges. Without them, `metadata_*` is `text_general`. These

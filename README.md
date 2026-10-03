@@ -105,6 +105,9 @@ export POSTGRES_PASSWORD="postgres"
 # Optional: Anthropic Prompt Caching (enabled by default)
 export ANTHROPIC_PROMPT_CACHING_ENABLED=true
 export ANTHROPIC_PROMPT_CACHING_STRATEGY=SYSTEM_AND_TOOLS
+
+# Optional: TypeSafe Jev passage screening for /ask (off unless search.rag.jev.enabled=true)
+export TYPESAFE_API_KEY="your-typesafe-key"
 ```
 
 ### 3. Start External Services
@@ -359,6 +362,13 @@ question itself. Every query in a turn is embedded in a single request.
 > (`pdouble`) and `metadata_year` (`pint`), whether or not the planner is enabled. Re-upload the
 > configset and reindex existing collections. Documents whose `price` or `year` metadata is not a
 > single number (for example `"N/A"`) are then rejected by Solr.
+
+**Prompt-injection screening (optional):** with `search.rag.jev.enabled=true` and a
+`TYPESAFE_API_KEY`, every candidate passage is screened by TypeSafe's Jev model before it reaches
+Claude. Passages that try to inject instructions, contradict the question or don't answer it are
+dropped. Jev is entirely optional: the app starts and answers without it, and if the TypeSafe
+API is unavailable, candidates simply pass through. Reranking can also use Jev instead of Claude
+(`search.rag.rerank.provider=jev`).
 
 ## 🔍 Usage Examples
 

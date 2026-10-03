@@ -11,8 +11,8 @@ import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Remembers the candidate documents handed to the first post-processor, i.e. the fused
- * retrieval output before reranking trims it, keyed by conversation id.
+ * Remembers, per conversation, the fused candidates (the joiner's output, before any
+ * post-processor screens or reranks them) and what the reranker was handed.
  *
  * <p>{@code RetrievalAugmentationAdvisor} builds {@code Query.context()} from the request
  * context, which carries the {@link ChatMemory#CONVERSATION_ID} advisor parameter. That is
@@ -32,6 +32,17 @@ public class CandidateRecorder {
     }
 
     private final Map<String, Capture> lastByConversation = new ConcurrentHashMap<>();
+    private final Map<String, List<String>> lastJoinedByConversation = new ConcurrentHashMap<>();
+
+    /** Records the joiner's output: the candidates after fusion. */
+    public void recordJoined(Map<Query, List<List<Document>>> documentsForQuery, List<Document> joined) {
+        documentsForQuery.keySet().stream()
+                .map(query -> query.context().get(ChatMemory.CONVERSATION_ID))
+                .filter(Objects::nonNull)
+                .findFirst()
+                .ifPresent(conversationId -> lastJoinedByConversation.put(conversationId.toString(),
+                        joined.stream().map(Document::getId).filter(Objects::nonNull).toList()));
+    }
 
     public void record(Query query, List<Document> documents) {
         Object conversationId = query.context().get(ChatMemory.CONVERSATION_ID);
@@ -47,7 +58,15 @@ public class CandidateRecorder {
         return Optional.ofNullable(lastByConversation.get(conversationId));
     }
 
+    /**
+     * The latest turn's fused candidates: the joiner's output when it was recorded, otherwise what
+     * the reranker was handed.
+     */
     public List<String> lastCandidates(String conversationId) {
+        List<String> joined = lastJoinedByConversation.get(conversationId);
+        if (joined != null) {
+            return joined;
+        }
         return last(conversationId).map(Capture::candidateIds).orElse(List.of());
     }
 }

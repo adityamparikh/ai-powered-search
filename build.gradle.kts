@@ -39,6 +39,11 @@ dependencies {
     implementation("org.springframework.ai:spring-ai-vector-store-advisor")
     // Modular RAG: RetrievalAugmentationAdvisor, DocumentRetriever, DocumentJoiner
     implementation("org.springframework.ai:spring-ai-rag")
+    // TypeSafe Jev: optional passage screening and reranking for RAG (W4). Its auto-configuration is
+    // excluded in application.properties; RagPostProcessingConfig builds the client only when a Jev
+    // stage is enabled and TYPESAFE_API_KEY is set.
+    implementation("org.springaicommunity:spring-ai-starter-typesafe:0.3.0")
+    implementation("org.springaicommunity:typesafe-spring-ai:0.3.0")
     implementation("org.postgresql:postgresql")
     // Apache Solr client. SolrJ 10 dropped Jetty in favour of the JDK HttpClient
     // (HttpJdkSolrClient), so no Jetty artifacts or version pinning are needed.

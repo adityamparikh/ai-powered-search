@@ -34,8 +34,8 @@ flowchart TD
 | Gate + planner | `QueryExpander` | `QueryPlanningExpander` (opt-in) | W1; gate W6 |
 | Retrieval | `DocumentRetriever` | `HybridDocumentRetriever`, with per-leg inputs | in place; per-leg W2 |
 | Fusion | `DocumentJoiner` | `RrfDocumentJoiner` | W3 |
-| Filter | `DocumentPostProcessor` | `JevDocumentFilter` (opt-in) | W4 |
-| Rerank | `DocumentPostProcessor` | `RerankingDocumentPostProcessor`, judged against the standalone query | in place; configurable W4 |
+| Filter | `DocumentPostProcessor` | `JevDocumentFilter` (opt-in, fail-open) | W4 |
+| Rerank | `DocumentPostProcessor` | `RerankingDocumentPostProcessor` (Claude, model configurable) or `JevDocumentReranker`; judged against the standalone query | W4 |
 | Augment | `QueryAugmenter` | `ContextualQueryAugmenter` | in place |
 
 ## How a request flows today
@@ -323,19 +323,77 @@ A leg that fails is logged at WARN and contributes nothing; this is how
 The default `ConcatenationDocumentJoiner` is not used: it re-sorts documents by their own score,
 and raw BM25 and cosine scores are not comparable.
 
-## Post-processing: reranking
+## Passage screening and reranking (W4)
 
-`RerankingDocumentPostProcessor` asks Claude to rank the candidates against the question, keeps
-the best `search.rag.rerank.top-k` (default `5`), and discards the rest. Discarding is what pays
-for the call: fewer, more relevant chunks compete for the model's attention.
+Patterns: Christian Tzolov, [Spring AI Modular RAG and TypeSafe Jev](https://spring.io/blog/2026/10/02/spring-ai-modular-rag-typesafe-jev)
+(`JevDocumentFilter`, `JevDocumentReranker`), and Craig Walls,
+[Better RAG Results with Reranking](https://medium.com/@thetalkingapp/spring-ai-recipe-better-rag-results-with-reranking-37c76fb325da).
 
-- **Properties:** `search.rag.rerank.enabled` (default `true`), `search.rag.rerank.top-k`
-  (default `5`).
-- **Failure:** any error, or an unusable ranking, keeps the retrieval order truncated to `top-k`.
-  It never fails the request.
-- **Standalone question (W1):** the reranker is wrapped in `StandaloneQueryAwarePostProcessor`,
-  so when the planner is on it judges against the standalone rewrite rather than the raw
-  follow-up.
+**Why.** Before W4, one uncached Sonnet call reranked all 20 candidates on every turn, and nothing
+screened indexed text for prompt injection (P5). A document saying "Ignore previous
+instructions…" could reach the prompt.
+
+**The chain** (`RagPostProcessingConfig` → `RagPostProcessors`):
+
+```
+[JevDocumentFilter]       if search.rag.jev.enabled: fail-open, bounded by search.rag.jev.timeout
+      ↓
+[reranker]                Claude (default) or Jev, per search.rag.rerank.provider;
+                          skipped when candidates ≤ search.rag.rerank.top-k (short-circuit)
+```
+
+Both stages judge against the standalone question when the planner produced one
+(`StandaloneQueryAwarePostProcessor`). Each is recorded as a `rag.postprocess` observation tagged
+with the underlying class: `JevDocumentFilter`, `RerankingDocumentPostProcessor` or
+`JevDocumentReranker`.
+
+**Jev filter** (opt-in). TypeSafe's Jev scores each passage against the question for
+prompt-injection, contradiction, relevance and answer evidence, and drops the ones that fail
+(`JevDocumentFilter.Policy.defaults()`). Calls run `search.rag.jev.concurrency` at a time. It
+runs **before** the reranker, so the reranker only reads passages that survived screening.
+
+**Reranker.**
+- `claude` (default): `RerankingDocumentPostProcessor` on `search.rag.rerank.model`. The default
+  `claude-sonnet-4-5` is the model it has always used. The model ranks the candidates, keeps
+  `search.rag.rerank.top-k` (5) and discards the rest. Any error or unusable ranking keeps the
+  retrieval order, truncated.
+- `jev`: `JevDocumentReranker` scores each passage on "does this answer the query" and keeps the
+  top `search.rag.rerank.top-k`.
+
+**Short-circuit.** Reranking earns its cost by discarding, so reranking `top-k` or fewer
+candidates only reorders them. `RerankShortCircuit` skips the reranker in that case. It is on
+whenever the Jev filter is on (`search.rag.rerank.short-circuit` defaults to
+`search.rag.jev.enabled`), because that is when survivors routinely drop to `top-k` or below.
+With Jev off it stays off, so today's behaviour is unchanged.
+
+**External API, failure behaviour and cost.**
+- Jev calls TypeSafe's hosted API. Candidate passages and the standalone question leave the
+  application.
+- **Fail-open:** if the API errors, is unreachable, or doesn't answer within
+  `search.rag.jev.timeout`, the filter passes every candidate through with a WARN, and the
+  reranker carries on alone. `/ask` never fails because of Jev. If `search.rag.rerank.provider=jev`
+  is set but TypeSafe isn't configured, the Claude reranker is used.
+- **Never needed at startup:** the TypeSafe starter's auto-configuration is excluded in
+  `application.properties`. It activates on the mere *presence* of `spring.ai.typesafe.api-key`,
+  and an empty key (an unset `TYPESAFE_API_KEY`) fails startup (W0 finding A2).
+  `RagPostProcessingConfig` builds the client itself, only when a Jev stage is enabled and the
+  key is set; otherwise it logs a WARN and runs without Jev.
+- **Cost:** up to `search.rag.fusion.top-k` (20) Jev calls per turn after the fusion cap, plus
+  0–1 rerank calls over the survivors, instead of one Sonnet call over all 20 candidates.
+
+| Property | Default | Meaning |
+|---|---|---|
+| `search.rag.jev.enabled` | `false` | Screen candidates with `JevDocumentFilter` |
+| `search.rag.jev.concurrency` | `4` | Parallel Jev calls |
+| `search.rag.jev.timeout` | `5s` | Upper bound on screening; then fail open |
+| `search.rag.rerank.enabled` | `true` | Rerank at all |
+| `search.rag.rerank.provider` | `claude` | `claude` or `jev` |
+| `search.rag.rerank.model` | `claude-sonnet-4-5` | Claude reranker model |
+| `search.rag.rerank.top-k` | `5` | Documents kept by the reranker |
+| `search.rag.rerank.short-circuit` | `${search.rag.jev.enabled}` | Skip reranking when candidates ≤ top-k |
+| `spring.ai.typesafe.api-key` | `${TYPESAFE_API_KEY:}` | TypeSafe API key |
+| `spring.ai.typesafe.base-url` | TypeSafe default | Override, e.g. for a proxy |
+| `spring.ai.typesafe.timeout` | `10s` | HTTP timeout per Jev call |
 
 ## Augmentation
 

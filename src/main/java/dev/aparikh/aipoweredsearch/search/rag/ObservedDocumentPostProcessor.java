@@ -59,6 +59,16 @@ public final class ObservedDocumentPostProcessor implements DocumentPostProcesso
         return named.getSimpleName();
     }
 
+    /** The tag value this processor is recorded under. */
+    public String processorName() {
+        return processorName;
+    }
+
+    /** The timed post-processor. */
+    public DocumentPostProcessor delegate() {
+        return delegate;
+    }
+
     @Override
     public List<Document> process(Query query, List<Document> documents) {
         return RagObservations.observe(registry, RagObservations.POSTPROCESS,

@@ -1,10 +1,11 @@
 package dev.aparikh.aipoweredsearch.evaluation;
 
+import dev.aparikh.aipoweredsearch.config.AiConfig;
 import dev.aparikh.aipoweredsearch.search.RerankingDocumentPostProcessor;
-import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.rag.Query;
+import org.springframework.ai.rag.retrieval.join.DocumentJoiner;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.beans.factory.config.BeanPostProcessor;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -21,12 +22,11 @@ import java.util.List;
  * <ul>
  *   <li>Every {@link ChatModel} bean is wrapped in a {@link UsageRecordingChatModel} so token
  *       usage can be totalled per {@code /ask}.</li>
- *   <li>A {@code @Primary} reranker that records its input is offered to
- *       {@code AiConfig.ragChatClient}. It is built exactly as
- *       {@code AiConfig.rerankingDocumentPostProcessor} builds the real one, so the pipeline
- *       under test is unchanged; it just notes the fused candidates on the way through. With
- *       {@code search.rag.rerank.enabled=false} there is no reranker to record, so
- *       {@link RagEvaluationIT} fails those cases rather than report recall over nothing.</li>
+ *   <li>The {@code ragDocumentJoiner} bean is decorated to record its output, i.e. the
+ *       candidates after fusion and before any screening or reranking.</li>
+ *   <li>A {@code @Primary} reranker that records its input (and the question it judges against)
+ *       is offered to the post-processor chain. It is built exactly as
+ *       {@code AiConfig.rerankingDocumentPostProcessor} builds the real one.</li>
  * </ul>
  */
 @TestConfiguration(proxyBeanMethods = false)
@@ -46,8 +46,25 @@ public class RagEvalTestConfiguration {
     }
 
     @Bean
-    CandidateRecorder candidateRecorder() {
+    static CandidateRecorder candidateRecorder() {
         return new CandidateRecorder();
+    }
+
+    @Bean
+    static BeanPostProcessor recordingJoinerPostProcessor(CandidateRecorder candidateRecorder) {
+        return new BeanPostProcessor() {
+            @Override
+            public Object postProcessAfterInitialization(Object bean, String beanName) {
+                if ("ragDocumentJoiner".equals(beanName) && bean instanceof DocumentJoiner joiner) {
+                    return (DocumentJoiner) documentsForQuery -> {
+                        List<Document> joined = joiner.join(documentsForQuery);
+                        candidateRecorder.recordJoined(documentsForQuery, joined);
+                        return joined;
+                    };
+                }
+                return bean;
+            }
+        };
     }
 
     @Bean
@@ -56,8 +73,9 @@ public class RagEvalTestConfiguration {
     RerankingDocumentPostProcessor recordingRerankingDocumentPostProcessor(
             ChatModel chatModel,
             @Value("${search.rag.rerank.top-k:5}") int topK,
+            @Value("${search.rag.rerank.model:claude-sonnet-4-5}") String model,
             CandidateRecorder candidateRecorder) {
-        return new RerankingDocumentPostProcessor(ChatClient.builder(chatModel).build(), topK) {
+        return new RerankingDocumentPostProcessor(AiConfig.rerankChatClient(chatModel, model), topK) {
             @Override
             public List<Document> process(Query query, List<Document> documents) {
                 candidateRecorder.record(query, documents);
