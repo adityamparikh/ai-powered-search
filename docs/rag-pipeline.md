@@ -31,7 +31,7 @@ flowchart TD
 
 | Stage | Spring AI interface | Implementation | Status |
 |---|---|---|---|
-| Gate + planner | `QueryExpander` | `QueryPlanningExpander` (opt-in) | W1; gate W6 |
+| Gate + planner | `QueryExpander` | `QueryPlanningExpander` (opt-in) with `QueryGate` (opt-in) | W1, W6 |
 | Retrieval | `DocumentRetriever` | `HybridDocumentRetriever`, with per-leg inputs | in place; per-leg W2 |
 | Fusion | `DocumentJoiner` | `RrfDocumentJoiner` | W3 |
 | Filter | `DocumentPostProcessor` | `JevDocumentFilter` (opt-in, fail-open) | W4 |
@@ -46,7 +46,8 @@ flowchart TD
    - text: the user's message;
    - history: every prompt message;
    - context: a mutable copy of the request context.
-3. With the planner on (W1), the query is expanded into a standalone query plus variants.
+3. With the planner on (W1), the query is expanded into a standalone query plus variants, unless
+   the gate (W6) decides it is a standalone lookup that planning cannot improve.
 4. Each query is retrieved on the task executor, the result lists are joined, the joined list goes
    through the post-processors, and the survivors are added to the user message as context.
 5. Claude answers with the augmented prompt. The documents used are returned as `sources`.
@@ -153,6 +154,55 @@ minimum cacheable prompt is 4,096 tokens, and the planner's system prompt is abo
 | `search.rag.planner.history-messages` | `10` | Most recent user/assistant messages the planner sees |
 | `search.rag.planner.filters.enabled` | `false` | Turn planner filters into validated `fq` clauses |
 | `search.rag.planner.filters.field-cache-ttl` | `5m` | How long field introspection is cached |
+
+## Gating: `QueryGate` (W6)
+
+Pattern: adaptive retrieval: send simple queries down the cheap path, as in
+[Adaptive-RAG (Jeong et al. 2024)](https://arxiv.org/abs/2403.14403).
+
+**Why.** A first-turn lookup like "A Clash of Kings" gains nothing from rewriting, variants or
+HyDE, but would pay the planner's sequential model call.
+
+**What.** With `search.rag.gate.enabled=true` (and the planner on), `QueryPlanningExpander`
+returns the original query **without calling the planner** when all of these hold:
+
+1. the conversation has no earlier user or assistant turns;
+2. the question has at most `search.rag.gate.max-tokens` whitespace tokens;
+3. the question contains none of `search.rag.gate.markers`, matched case-insensitively with edge
+   punctuation and apostrophes ignored. The defaults are pronouns and comparatives that refer
+   back to something: `it, its, that, those, them, same, more, another, else, cheaper, newer,
+   older`.
+
+A gated question takes exactly the planner-off path: one query, embedded once, retrieved on its
+raw text. `QueryGateIT` shows a gated lookup returns the golden documents in the golden order
+with zero planner calls.
+
+**Metric.** Every decision increments `rag.gate{outcome=skipped|planned}`. The skipped share is
+the gate's hit rate.
+
+**Hit rate on the evaluation set** (deterministic, from `QueryGateTest`):
+
+| Category | Gated (skipped) |
+|---|---|
+| keyword | 10/10 |
+| filter | 7/10 |
+| injection | 2/5 |
+| follow-up | 0/15 |
+| vocab-gap | 0/10 |
+| **all** | **19/50 (38%)** |
+
+**Caveat: gating and planner filters.** Short constraint questions such as "Books by George R.R.
+Martin under $9" are six tokens with no default marker, so they skip the planner, and with it
+the filter extraction. If you enable `search.rag.planner.filters.enabled` together with the gate,
+add constraint words to the markers, for example
+`search.rag.gate.markers=it,its,that,those,them,same,more,another,else,cheaper,newer,older,under,over,below,above,before,after,since`,
+or lower `max-tokens`. The defaults follow issue #39 and favour latency.
+
+| Property | Default | Meaning |
+|---|---|---|
+| `search.rag.gate.enabled` | `false` | Skip the planner for standalone keyword lookups |
+| `search.rag.gate.max-tokens` | `6` | Longest question that can skip planning |
+| `search.rag.gate.markers` | `it,its,that,those,them,same,more,another,else,cheaper,newer,older` | Words that force planning |
 
 ## Per-leg queries and HyDE (W2)
 

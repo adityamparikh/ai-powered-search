@@ -63,6 +63,10 @@ import java.util.regex.Pattern;
  * query's kNN text is then embedded in one {@link EmbeddingBatcher} request, and the vector is
  * set as {@link RagContextKeys#VECTOR}.</p>
  *
+ * <p><strong>Gating (W6).</strong> With a {@link QueryGate}, a first-turn question that is short
+ * and has no conversational markers ("A Clash of Kings") is returned unchanged without calling the
+ * planner: no added latency for lookups that planning cannot improve.</p>
+ *
  * <p><strong>Fails safe.</strong> On a timeout, an exception, an unparseable reply or a blank
  * standalone query, the expander logs a WARN and returns {@code List.of(originalQuery)}. That is
  * exactly today's behaviour, as in Spring AI's {@code MultiQueryExpander}, and each such fallback
@@ -97,6 +101,7 @@ public final class QueryPlanningExpander implements QueryExpander {
     private final ObservationRegistry observationRegistry;
     private final boolean hydeEnabled;
     private final @Nullable EmbeddingBatcher embeddingBatcher;
+    private final @Nullable QueryGate gate;
     private final ContextSnapshotFactory contextSnapshotFactory = ContextSnapshotFactory.builder().build();
 
     private QueryPlanningExpander(Builder builder) {
@@ -113,6 +118,7 @@ public final class QueryPlanningExpander implements QueryExpander {
         this.observationRegistry = builder.observationRegistry;
         this.hydeEnabled = builder.hydeEnabled;
         this.embeddingBatcher = builder.embeddingBatcher;
+        this.gate = builder.gate;
     }
 
     public static Builder builder() {
@@ -121,6 +127,13 @@ public final class QueryPlanningExpander implements QueryExpander {
 
     @Override
     public List<Query> expand(Query query) {
+        // Adaptive gating (W6): a standalone keyword lookup on the first turn skips the planner
+        // entirely and is retrieved exactly as with the planner off.
+        if (gate != null && gate.skipPlanning(query.text(), !priorTurns(query).isEmpty())) {
+            log.debug("Gate: retrieving '{}' without planning", query.text());
+            return List.of(query);
+        }
+
         QueryPlan accepted;
         try {
             // A rejected plan is thrown inside the observation, so every fallback is counted
@@ -341,8 +354,15 @@ public final class QueryPlanningExpander implements QueryExpander {
         private ObservationRegistry observationRegistry = ObservationRegistry.NOOP;
         private boolean hydeEnabled;
         private @Nullable EmbeddingBatcher embeddingBatcher;
+        private @Nullable QueryGate gate;
 
         private Builder() {
+        }
+
+        /** Skip planning for standalone keyword lookups (W6); null plans every question. */
+        public Builder gate(@Nullable QueryGate gate) {
+            this.gate = gate;
+            return this;
         }
 
         /** Use the plan's HyDE passage as the standalone query's kNN text ({@code search.rag.hyde.enabled}). */

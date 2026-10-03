@@ -3,7 +3,10 @@ package dev.aparikh.aipoweredsearch.config;
 import dev.aparikh.aipoweredsearch.search.SearchRepository;
 import dev.aparikh.aipoweredsearch.search.rag.EmbeddingBatcher;
 import dev.aparikh.aipoweredsearch.search.rag.FilterValidator;
+import dev.aparikh.aipoweredsearch.search.rag.QueryGate;
 import dev.aparikh.aipoweredsearch.search.rag.QueryPlanningExpander;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Metrics;
 import io.micrometer.observation.ObservationRegistry;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
@@ -24,6 +27,7 @@ import org.springframework.core.io.Resource;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.List;
 
 /**
  * Beans for the RAG query planner (W1, #36). Nothing here exists unless
@@ -39,6 +43,9 @@ import java.time.Duration;
  *   <li>{@code search.rag.planner.filters.enabled} (default {@code false})</li>
  *   <li>{@code search.rag.planner.filters.field-cache-ttl} (default {@code 5m})</li>
  *   <li>{@code search.rag.hyde.enabled} (default {@code false}, W2)</li>
+ *   <li>{@code search.rag.gate.enabled} (default {@code false}, W6), {@code search.rag.gate.max-tokens}
+ *       (default {@code 6}), {@code search.rag.gate.markers} (default: pronouns and comparatives,
+ *       see {@link QueryGate#DEFAULT_MARKERS})</li>
  * </ul>
  */
 @Configuration
@@ -106,6 +113,20 @@ public class RagPlannerConfig {
         return new EmbeddingBatcher(embeddingModel);
     }
 
+    /**
+     * Decides which questions skip the planner (W6). With {@code search.rag.gate.enabled=false} it
+     * plans everything, but still counts {@code rag.gate{outcome=planned}}.
+     */
+    @Bean
+    @ConditionalOnProperty(name = "search.rag.planner.enabled", havingValue = "true")
+    public QueryGate queryGate(@Value("${search.rag.gate.enabled:false}") boolean enabled,
+                               @Value("${search.rag.gate.max-tokens:6}") int maxTokens,
+                               @Value("${search.rag.gate.markers:it,its,that,those,them,same,more,another,else,cheaper,newer,older}")
+                               List<String> markers,
+                               ObjectProvider<MeterRegistry> meterRegistry) {
+        return new QueryGate(enabled, maxTokens, markers, meterRegistry.getIfAvailable(() -> Metrics.globalRegistry));
+    }
+
     @Bean
     @ConditionalOnProperty(name = "search.rag.planner.enabled", havingValue = "true")
     public QueryPlanningExpander queryPlanningExpander(
@@ -118,7 +139,8 @@ public class RagPlannerConfig {
             @Value("${search.rag.planner.timeout:3s}") Duration timeout,
             @Value("${search.rag.planner.history-messages:10}") int historyMessages,
             @Value("${search.rag.hyde.enabled:false}") boolean hydeEnabled,
-            EmbeddingBatcher embeddingBatcher) throws IOException {
+            EmbeddingBatcher embeddingBatcher,
+            QueryGate queryGate) throws IOException {
         @Nullable FilterValidator validator = filterValidator.getIfAvailable();
         return QueryPlanningExpander.builder()
                 .plannerChatClient(plannerChatClient)
@@ -131,6 +153,7 @@ public class RagPlannerConfig {
                 .observationRegistry(observationRegistry.getIfAvailable(() -> ObservationRegistry.NOOP))
                 .hydeEnabled(hydeEnabled)
                 .embeddingBatcher(embeddingBatcher)
+                .gate(queryGate)
                 .build();
     }
 }
