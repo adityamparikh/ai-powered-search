@@ -1,5 +1,7 @@
 package dev.aparikh.aipoweredsearch.search.rag;
 
+import io.micrometer.observation.Observation;
+import io.micrometer.observation.ObservationHandler;
 import io.micrometer.observation.ObservationRegistry;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.document.Document;
@@ -9,6 +11,7 @@ import org.springframework.ai.rag.postretrieval.document.DocumentPostProcessor;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.IntStream;
@@ -31,6 +34,14 @@ class RagPostProcessorsTest {
         public List<Document> process(Query query, List<Document> documents) {
             seen.set(query);
             return documents.stream().filter(d -> !d.getId().startsWith("inj-")).toList();
+        }
+    }
+
+    /** A Jev filter whose API is down. A named class, because the chain names processors by class. */
+    static final class UnavailableJevFilter implements DocumentPostProcessor {
+        @Override
+        public List<Document> process(Query query, List<Document> documents) {
+            throw new IllegalStateException("TypeSafe API unavailable");
         }
     }
 
@@ -158,5 +169,42 @@ class RagPostProcessorsTest {
         assertThat(ids(guard.process(new Query("q"), docs("a", "inj-01", "b")))).containsExactly("a", "b");
         assertThat(guard.process(new Query("q"), List.of())).isEmpty();
         assertThat(guard.delegate()).isInstanceOf(FakeJevFilter.class);
+    }
+
+    /** A registry that records "<observation>.<event>" for every observation event. */
+    private static ObservationRegistry recordingEvents(List<String> events) {
+        ObservationRegistry registry = ObservationRegistry.create();
+        registry.observationConfig().observationHandler(new ObservationHandler<>() {
+            @Override
+            public boolean supportsContext(Observation.Context context) {
+                return true;
+            }
+
+            @Override
+            public void onEvent(Observation.Event event, Observation.Context context) {
+                events.add(context.getName() + "." + event.getName());
+            }
+        });
+        return registry;
+    }
+
+    @Test
+    void failingOpenIsCountedOnThePostprocessObservation() {
+        List<String> events = new CopyOnWriteArrayList<>();
+        RagPostProcessors chain = RagPostProcessors.assemble(new UnavailableJevFilter(), TIMEOUT, null, 5, false, recordingEvents(events));
+        List<Document> input = docs("a", "b");
+
+        assertThat(chain.processors().getFirst().process(new Query("q"), input)).isSameAs(input);
+        assertThat(events).containsExactly("rag.postprocess.fail.open");
+    }
+
+    @Test
+    void aFilterThatDiscardsEverythingLeavesNoContextAndIsCounted() {
+        List<String> events = new CopyOnWriteArrayList<>();
+        RagPostProcessors chain = RagPostProcessors.assemble(new FakeJevFilter(), TIMEOUT, null, 5, false,
+                recordingEvents(events));
+
+        assertThat(chain.processors().getFirst().process(new Query("q"), docs("inj-01", "inj-02"))).isEmpty();
+        assertThat(events).containsExactly("rag.postprocess.discarded.all");
     }
 }

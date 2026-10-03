@@ -352,13 +352,23 @@ prompt-injection, contradiction, relevance and answer evidence, and drops the on
 (`JevDocumentFilter.Policy.defaults()`). Calls run `search.rag.jev.concurrency` at a time. It
 runs **before** the reranker, so the reranker only reads passages that survived screening.
 
+If Jev drops **every** candidate, the empty list stands: the reranker has nothing to judge and the
+prompt gets no retrieved context (`ContextualQueryAugmenter.allowEmptyContext(true)`), so Claude
+answers ungrounded. This is logged at WARN and counted as `rag.postprocess.discarded.all`. In the
+2026-10-03 evaluation reports it happened on 6 of 50 cases, which is a reason to keep Jev off by
+default. Falling back to the unfiltered candidates would avoid it, but would also let injected
+passages through whenever every candidate is flagged.
+
 **Reranker.**
 - `claude` (default): `RerankingDocumentPostProcessor` on `search.rag.rerank.model`. The default
   `claude-sonnet-4-5` is the model it has always used. The model ranks the candidates, keeps
   `search.rag.rerank.top-k` (5) and discards the rest. Any error or unusable ranking keeps the
   retrieval order, truncated.
 - `jev`: `JevDocumentReranker` scores each passage on "does this answer the query" and keeps the
-  top `search.rag.rerank.top-k`.
+  top `search.rag.rerank.top-k`. It has no `search.rag.jev.timeout`: a passage Jev fails to score
+  is kept after the scored ones, so it never throws, and each call is bounded by
+  `spring.ai.typesafe.timeout`. Passing all candidates through on a timeout, as the filter does,
+  would put every candidate in the prompt.
 
 **Short-circuit (opt-in).** With `search.rag.rerank.short-circuit=true`, `RerankShortCircuit` skips
 the reranker when `top-k` or fewer candidates remain, saving a model call. It is **off by
@@ -376,15 +386,24 @@ Skipping let every Jev survivor into the prompt; keyword precision fell 19 point
 **External API, failure behaviour and cost.**
 - Jev calls TypeSafe's hosted API. Candidate passages and the standalone question leave the
   application.
-- **Fail-open:** if the API errors, is unreachable, or doesn't answer within
-  `search.rag.jev.timeout`, the filter passes every candidate through with a WARN, and the
-  reranker carries on alone. `/ask` never fails because of Jev. If `search.rag.rerank.provider=jev`
-  is set but TypeSafe isn't configured, the Claude reranker is used.
-- **Never needed at startup:** the TypeSafe starter's auto-configuration is excluded in
-  `application.properties`. It activates on the mere *presence* of `spring.ai.typesafe.api-key`,
-  and an empty key (an unset `TYPESAFE_API_KEY`) fails startup (W0 finding A2).
-  `RagPostProcessingConfig` builds the client itself, only when a Jev stage is enabled and the
-  key is set; otherwise it logs a WARN and runs without Jev.
+- **Fail-open, so screening is best-effort:** if the API errors, is unreachable, or doesn't answer
+  within `search.rag.jev.timeout`, the filter passes every candidate through with a WARN, and the
+  reranker carries on alone. Each pass-through is counted as `rag.postprocess.fail.open` (tag
+  `processor=JevDocumentFilter`); alert on it if you rely on screening. `/ask` never fails because
+  of Jev. If `search.rag.rerank.provider=jev` is set but TypeSafe isn't configured, the Claude
+  reranker is used.
+- **Timeouts:** `search.rag.jev.timeout` (5 s) bounds the whole filter: 20 candidates at
+  concurrency 4 is 5 waves of calls. `spring.ai.typesafe.timeout` (10 s) bounds each call, so
+  one slow call can trip the filter timeout. Calls in flight when it fires are not cancelled; they
+  finish, and are billed, in the background. If `rag.postprocess.fail.open` climbs, raise the
+  filter timeout or the concurrency.
+- **Never needed at startup:** the TypeSafe starter's auto-configuration is excluded on
+  `AiPoweredSearchApplication` (`@SpringBootApplication(exclude = ...)`, not
+  `spring.autoconfigure.exclude`, which another property source would replace). It activates on
+  the mere *presence* of `spring.ai.typesafe.api-key`, and an empty key (an unset
+  `TYPESAFE_API_KEY`) fails startup (W0 finding A2). `RagPostProcessingConfig` builds the client
+  itself, only when a Jev stage is enabled and the key is set; otherwise it logs a WARN and runs
+  without Jev.
 - **Cost:** up to `search.rag.fusion.top-k` (20) Jev calls per turn after the fusion cap, plus
   0–1 rerank calls over the survivors, instead of one Sonnet call over all 20 candidates.
 

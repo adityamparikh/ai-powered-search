@@ -44,7 +44,7 @@ public record RagPostProcessors(List<DocumentPostProcessor> processors) {
         List<DocumentPostProcessor> chain = new ArrayList<>(2);
         if (jevFilter != null) {
             DocumentPostProcessor guarded = new FailOpenPostProcessor(
-                    new StandaloneQueryAwarePostProcessor(jevFilter), jevTimeout, "jev-filter");
+                    new StandaloneQueryAwarePostProcessor(jevFilter), jevTimeout, "jev-filter", observations);
             chain.add(new ObservedDocumentPostProcessor(guarded, observations,
                     ObservedDocumentPostProcessor.processorName(jevFilter.getClass())));
         }

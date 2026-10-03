@@ -252,7 +252,8 @@ The repository includes several helper scripts for common tasks:
 - `ANTHROPIC_PROMPT_CACHING_STRATEGY`: Cache strategy (defaults to 'SYSTEM_AND_TOOLS')
 - `OPENAI_API_KEY`: Required for OpenAI embeddings (vector search and indexing)
 - `TYPESAFE_API_KEY`: Optional. Only for TypeSafe Jev passage screening or reranking
-  (`search.rag.jev.enabled=true` or `search.rag.rerank.provider=jev`); the app starts without it
+  (`search.rag.jev.enabled=true` or `search.rag.rerank.provider=jev`); the app starts without it.
+  With Jev on, candidate passages and the question are sent to TypeSafe's hosted API
 - `POSTGRES_USER`: PostgreSQL username (defaults to 'postgres')
 - `POSTGRES_PASSWORD`: PostgreSQL password (defaults to 'postgres')
 
@@ -838,15 +839,18 @@ public ChatClient ragChatClient(ChatModel chatModel,
     vectors unset, and each leg then embeds individually.
 - **Post-processors** (W4): `RagPostProcessingConfig` assembles `RagPostProcessors`.
   - **Order:** the optional `JevDocumentFilter` (`search.rag.jev.enabled`, default `false`;
-    fail-open via `FailOpenPostProcessor`, bounded by `search.rag.jev.timeout`), then the
-    reranker.
+    fail-open via `FailOpenPostProcessor`, bounded by `search.rag.jev.timeout`, counted as
+    `rag.postprocess.fail.open`), then the reranker. If the filter drops every candidate the
+    prompt gets no context (WARN, `rag.postprocess.discarded.all`).
   - **Reranker:** `search.rag.rerank.provider` is `claude` (default; model from
     `search.rag.rerank.model`, default `claude-sonnet-4-5`) or `jev` (`JevDocumentReranker`).
-  - **Short-circuit:** `RerankShortCircuit` skips the reranker when candidates ≤ `rerank.top-k`.
+  - **Short-circuit:** `RerankShortCircuit` skips the reranker when candidates ≤ `rerank.top-k`,
+    which also skips the Claude reranker's discarding of irrelevant candidates.
     `search.rag.rerank.short-circuit` defaults to `false`: with Jev on, skipping the reranker cost
     context precision in evaluation (0.631 vs 0.770 with reranking always on).
   - **Standalone question:** every stage judges against it via `StandaloneQueryAwarePostProcessor`.
-  - **TypeSafe setup:** the starter's auto-configuration is excluded (an empty
+  - **TypeSafe setup:** the starter's auto-configuration is excluded on
+    `AiPoweredSearchApplication`, not via `spring.autoconfigure.exclude` (an empty
     `spring.ai.typesafe.api-key` would fail startup). The client is built only when a Jev stage is
     on and `TYPESAFE_API_KEY` is set, otherwise Jev is skipped with a WARN.
   - **Fusion joiner:** now the `ragDocumentJoiner` bean.

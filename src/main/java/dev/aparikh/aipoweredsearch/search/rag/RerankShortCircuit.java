@@ -11,9 +11,11 @@ import java.util.List;
 /**
  * Skips a reranker when there is nothing left for it to trim (W4, #38).
  *
- * <p>A reranker earns its cost by <em>discarding</em>: reranking {@code top-k} or fewer documents
- * down to {@code top-k} only reorders them. When the Jev filter has already cut the candidates to
- * {@code top-k} or fewer, this wrapper returns them as they are and saves a model call.</p>
+ * <p>A reranker earns its cost by <em>discarding</em>. When the Jev filter has already cut the
+ * candidates to {@code top-k} or fewer, this wrapper returns them as they are and saves a model
+ * call. That is not free: the Claude reranker can also reject candidates it judges irrelevant, even
+ * below {@code top-k}, and skipping it lets every survivor into the prompt. Hence opt-in
+ * ({@code search.rag.rerank.short-circuit}, default {@code false}).</p>
  */
 public final class RerankShortCircuit implements DocumentPostProcessor {
 
@@ -40,7 +42,7 @@ public final class RerankShortCircuit implements DocumentPostProcessor {
     }
 
     /** The wrapped reranker. */
-    public DocumentPostProcessor delegate() {
+    DocumentPostProcessor delegate() {
         return reranker;
     }
 }

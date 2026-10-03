@@ -64,11 +64,6 @@ public final class ObservedDocumentPostProcessor implements DocumentPostProcesso
         return processorName;
     }
 
-    /** The timed post-processor. */
-    public DocumentPostProcessor delegate() {
-        return delegate;
-    }
-
     @Override
     public List<Document> process(Query query, List<Document> documents) {
         return RagObservations.observe(registry, RagObservations.POSTPROCESS,

@@ -24,7 +24,7 @@ import java.util.Locale;
  * passage filter, then the reranker.
  *
  * <h2>Jev is optional and never required at startup</h2>
- * <p>The TypeSafe starter's auto-configuration is excluded in {@code application.properties}. It
+ * <p>The TypeSafe starter's auto-configuration is excluded on {@code AiPoweredSearchApplication}. It
  * activates whenever {@code spring.ai.typesafe.api-key} is <em>present</em>, and an empty value,
  * which is what {@code ${TYPESAFE_API_KEY:}} resolves to when the variable is unset, fails
  * startup (W0 finding A2). This class builds the {@link TypeSafeClient} itself, and only when a
@@ -34,9 +34,9 @@ import java.util.Locale;
  * <ul>
  *   <li>{@code search.rag.jev.enabled} (default {@code false}): screen candidates with
  *       {@code JevDocumentFilter} before reranking</li>
- *   <li>{@code search.rag.jev.concurrency} (default {@code 4}): parallel Jev calls</li>
- *   <li>{@code search.rag.jev.timeout} (default {@code 5s}): upper bound on the filter; on expiry
- *       the candidates pass through</li>
+ *   <li>{@code search.rag.jev.concurrency} (default {@code 4}, at least 1): parallel Jev calls</li>
+ *   <li>{@code search.rag.jev.timeout} (default {@code 5s}, positive): upper bound on the filter; on
+ *       expiry the candidates pass through</li>
  *   <li>{@code search.rag.rerank.provider} (default {@code claude}): {@code claude} or {@code jev}</li>
  *   <li>{@code search.rag.rerank.model} (default {@code claude-sonnet-4-5}): the Claude reranker's
  *       model, see {@code AiConfig#rerankingDocumentPostProcessor}</li>
@@ -71,6 +71,10 @@ public class RagPostProcessingConfig {
             @Value("${spring.ai.typesafe.base-url:}") String typeSafeBaseUrl,
             @Value("${spring.ai.typesafe.timeout:10s}") Duration typeSafeTimeout) {
 
+        if (jevTimeout.isNegative() || jevTimeout.isZero()) {
+            // Otherwise every screening would time out at once and silently fail open.
+            throw new IllegalArgumentException("search.rag.jev.timeout must be positive, got: " + jevTimeout);
+        }
         String rerankProvider = provider.strip().toLowerCase(Locale.ROOT);
         if (!CLAUDE.equals(rerankProvider) && !JEV.equals(rerankProvider)) {
             throw new IllegalArgumentException(
@@ -78,6 +82,7 @@ public class RagPostProcessingConfig {
         }
         boolean jevNeeded = jevEnabled || (rerankEnabled && JEV.equals(rerankProvider));
         @Nullable TypeSafeClient typeSafe = jevNeeded ? typeSafeClient(typeSafeApiKey, typeSafeBaseUrl, typeSafeTimeout) : null;
+        // Rejects a concurrency below 1. A non-positive rerank top-k is rejected by each reranker.
         JevBatchOptions batchOptions = JevBatchOptions.ofConcurrency(jevConcurrency);
 
         @Nullable DocumentPostProcessor jevFilter = null;

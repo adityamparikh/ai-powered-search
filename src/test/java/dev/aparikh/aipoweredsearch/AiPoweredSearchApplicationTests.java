@@ -36,8 +36,8 @@ class AiPoweredSearchApplicationTests {
     @Test
     void startsWithoutTypeSafeAndWithoutJevByDefault() {
         // application.properties maps spring.ai.typesafe.api-key=${TYPESAFE_API_KEY:}, which is empty
-        // here. The starter's auto-configuration would fail on that (W0 finding A2), so it is excluded,
-        // and no Jev stage is assembled unless enabled.
+        // here. The starter's auto-configuration would fail on that (W0 finding A2), so
+        // AiPoweredSearchApplication excludes it, and no Jev stage is assembled unless enabled.
         assertThat(context.getBeanNamesForType(TypeSafeClient.class)).isEmpty();
         assertThat(context.getBean(RagPostProcessors.class).processors()).hasSize(1);
     }

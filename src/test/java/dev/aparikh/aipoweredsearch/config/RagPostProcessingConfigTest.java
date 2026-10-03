@@ -1,5 +1,6 @@
 package dev.aparikh.aipoweredsearch.config;
 
+import dev.aparikh.aipoweredsearch.AiPoweredSearchApplication;
 import dev.aparikh.aipoweredsearch.search.RerankingDocumentPostProcessor;
 import dev.aparikh.aipoweredsearch.search.rag.ObservedDocumentPostProcessor;
 import dev.aparikh.aipoweredsearch.search.rag.RagPostProcessors;
@@ -8,8 +9,10 @@ import org.springaicommunity.typesafe.TypeSafeClient;
 import org.springaicommunity.typesafe.autoconfigure.TypeSafeAutoConfiguration;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
+import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.convert.ApplicationConversionService;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import org.springframework.core.annotation.AnnotatedElementUtils;
 
 import java.util.List;
 
@@ -91,10 +94,26 @@ class RagPostProcessingConfigTest {
     }
 
     @Test
+    void anUnusableJevTimeoutOrConcurrencyFailsFast() {
+        runner.withPropertyValues("search.rag.jev.timeout=0s")
+                .run(context -> assertThat(context).hasFailed()
+                        .getFailure().rootCause().hasMessageContaining("search.rag.jev.timeout"));
+        runner.withPropertyValues("search.rag.jev.concurrency=0")
+                .run(context -> assertThat(context).hasFailed()
+                        .getFailure().rootCause().hasMessageContaining("concurrency"));
+    }
+
+    @Test
     void theStarterAutoConfigurationWouldFailOnAnEmptyKeySoItIsExcluded() {
         // W0 finding A2: an empty spring.ai.typesafe.api-key, which is what ${TYPESAFE_API_KEY:}
-        // resolves to without the env var, breaks TypeSafeAutoConfiguration. application.properties
-        // excludes it, and RagPostProcessingConfig builds the client only when needed.
+        // resolves to without the env var, breaks TypeSafeAutoConfiguration. The application class
+        // excludes it (an annotation exclude is not replaced by a spring.autoconfigure.exclude set
+        // elsewhere), and RagPostProcessingConfig builds the client only when needed.
+        EnableAutoConfiguration autoConfiguration = AnnotatedElementUtils.findMergedAnnotation(
+                AiPoweredSearchApplication.class, EnableAutoConfiguration.class);
+        assertThat(autoConfiguration).isNotNull();
+        assertThat(autoConfiguration.exclude()).contains(TypeSafeAutoConfiguration.class);
+
         new ApplicationContextRunner()
                 .withConfiguration(AutoConfigurations.of(TypeSafeAutoConfiguration.class))
                 .withPropertyValues("spring.ai.typesafe.api-key=")

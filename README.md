@@ -367,8 +367,9 @@ question itself. Every query in a turn is embedded in a single request.
 `TYPESAFE_API_KEY`, every candidate passage is screened by TypeSafe's Jev model before it reaches
 Claude. Passages that try to inject instructions, contradict the question or don't answer it are
 dropped. Jev is entirely optional: the app starts and answers without it, and if the TypeSafe
-API is unavailable, candidates simply pass through. Reranking can also use Jev instead of Claude
-(`search.rag.rerank.provider=jev`).
+API is unavailable, candidates simply pass through, so screening is best-effort. Enabling it sends
+the candidate passages and the question to TypeSafe's hosted API. Reranking can also use Jev
+instead of Claude (`search.rag.rerank.provider=jev`).
 
 ## 🔍 Usage Examples
 
