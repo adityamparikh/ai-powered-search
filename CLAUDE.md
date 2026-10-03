@@ -45,7 +45,7 @@ The application follows a **package-by-feature** structure organized around main
 - **Spring Boot 4.1.1** with Spring AI 2.0.1
 - **Anthropic Claude AI** (claude-sonnet-4-5) for query generation and chat
 - **OpenAI** (text-embedding-3-small) for vector embeddings (1536 dimensions)
-- **SolrJ 10.0.0** client against **Apache Solr 9.10.0** server, with dense vector support
+- **SolrJ 10.0.0** client against **Apache Solr 9.10.1** server, with dense vector support
 - **ZooKeeper 3.9** for SolrCloud coordination
 - **PostgreSQL 16** for chat memory persistence
 - **Testcontainers** for integration testing with Solr, PostgreSQL, and Ollama
@@ -277,7 +277,7 @@ docker-compose logs solr  # View Solr logs
 
 **Services started:**
 
-- Solr 9.10.0 on port 8983 (with ZooKeeper coordination)
+- Solr 9.10.1 on port 8983 (with ZooKeeper coordination)
 - ZooKeeper 3.9 on port 2181
 - PostgreSQL 16 on port 5432
 
