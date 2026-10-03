@@ -846,7 +846,8 @@ public ChatClient ragChatClient(ChatModel chatModel,
 
   Counter: `rag.gate{outcome=skipped|planned}`. Hit rate on the eval set is 38%: keyword 10/10,
   follow-up 0/15, filter 7/10. Because short constraint questions get gated, add words like
-  `under,over,before,after` to the markers when planner filters are on.
+  `under,over,before,after` (`QueryGate.CONSTRAINT_MARKERS`) to the markers when planner filters
+  are on; startup logs a WARN if you don't.
 - **Post-processors** (W4): `RagPostProcessingConfig` assembles `RagPostProcessors`.
   - **Order:** the optional `JevDocumentFilter` (`search.rag.jev.enabled`, default `false`;
     fail-open via `FailOpenPostProcessor`, bounded by `search.rag.jev.timeout`, counted as

@@ -6,7 +6,6 @@ import dev.aparikh.aipoweredsearch.search.rag.FilterValidator;
 import dev.aparikh.aipoweredsearch.search.rag.QueryGate;
 import dev.aparikh.aipoweredsearch.search.rag.QueryPlanningExpander;
 import io.micrometer.core.instrument.MeterRegistry;
-import io.micrometer.core.instrument.Metrics;
 import io.micrometer.observation.ObservationRegistry;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
@@ -28,6 +27,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * Beans for the RAG query planner (W1, #36). Nothing here exists unless
@@ -116,15 +116,27 @@ public class RagPlannerConfig {
     /**
      * Decides which questions skip the planner (W6). With {@code search.rag.gate.enabled=false} it
      * plans everything, but still counts {@code rag.gate{outcome=planned}}.
+     *
+     * <p>Gated questions never reach the planner, so they get no planner filters either. With
+     * planner filters on and none of {@link QueryGate#CONSTRAINT_MARKERS} among the markers, short
+     * constraint questions ("novels after 2000") lose their filters, and a WARN says so.</p>
      */
     @Bean
     @ConditionalOnProperty(name = "search.rag.planner.enabled", havingValue = "true")
     public QueryGate queryGate(@Value("${search.rag.gate.enabled:false}") boolean enabled,
                                @Value("${search.rag.gate.max-tokens:6}") int maxTokens,
-                               @Value("${search.rag.gate.markers:it,its,that,those,them,same,more,another,else,cheaper,newer,older}")
+                               @Value("${search.rag.gate.markers:#{T(dev.aparikh.aipoweredsearch.search.rag.QueryGate).DEFAULT_MARKERS}}")
                                List<String> markers,
-                               ObjectProvider<MeterRegistry> meterRegistry) {
-        return new QueryGate(enabled, maxTokens, markers, meterRegistry.getIfAvailable(() -> Metrics.globalRegistry));
+                               @Value("${search.rag.planner.filters.enabled:false}") boolean filtersEnabled,
+                               MeterRegistry meterRegistry) {
+        if (enabled && filtersEnabled && markers.stream()
+                .noneMatch(marker -> QueryGate.CONSTRAINT_MARKERS.contains(marker.strip().toLowerCase(Locale.ROOT)))) {
+            log.warn("search.rag.gate.enabled and search.rag.planner.filters.enabled are both on, but "
+                    + "search.rag.gate.markers has none of {}: short constraint questions will skip the planner "
+                    + "and its filters. Add them to the markers, or lower search.rag.gate.max-tokens.",
+                    QueryGate.CONSTRAINT_MARKERS);
+        }
+        return new QueryGate(enabled, maxTokens, markers, meterRegistry);
     }
 
     @Bean

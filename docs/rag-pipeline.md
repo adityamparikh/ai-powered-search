@@ -166,7 +166,9 @@ HyDE, but would pay the planner's sequential model call.
 **What.** With `search.rag.gate.enabled=true` (and the planner on), `QueryPlanningExpander`
 returns the original query **without calling the planner** when all of these hold:
 
-1. the conversation has no earlier user or assistant turns;
+1. the conversation has no earlier user or assistant turns. This counts the whole history, not
+   just the last `search.rag.planner.history-messages`, so a cap of `0` cannot make a follow-up
+   look like a first turn;
 2. the question has at most `search.rag.gate.max-tokens` whitespace tokens;
 3. the question contains none of `search.rag.gate.markers`, matched case-insensitively with edge
    punctuation and apostrophes ignored. The defaults are pronouns and comparatives that refer
@@ -178,7 +180,8 @@ raw text. `QueryGateIT` shows a gated lookup returns the golden documents in the
 with zero planner calls.
 
 **Metric.** Every decision increments `rag.gate{outcome=skipped|planned}`. The skipped share is
-the gate's hit rate.
+the gate's hit rate. With the gate off (but the planner on), every turn counts as `planned`, so
+the ratio only means something with the gate on.
 
 **Hit rate on the evaluation set** (deterministic, from `QueryGateTest`):
 
@@ -191,17 +194,26 @@ the gate's hit rate.
 | vocab-gap | 0/10 |
 | **all** | **19/50 (38%)** |
 
+Follow-ups are scored with their history, so their 0/15 is guaranteed by the history check rather
+than measured. The other figures reflect this set's titles: real queries containing a marker
+(the novel *It*, or any question with "that") are planned, so expect a lower hit rate in practice.
+
 **Caveat: gating and planner filters.** Short constraint questions such as "Books by George R.R.
 Martin under $9" are six tokens with no default marker, so they skip the planner, and with it
 the filter extraction. If you enable `search.rag.planner.filters.enabled` together with the gate,
-add constraint words to the markers, for example
+add constraint words (`QueryGate.CONSTRAINT_MARKERS`) to the markers, for example
 `search.rag.gate.markers=it,its,that,those,them,same,more,another,else,cheaper,newer,older,under,over,below,above,before,after,since`,
-or lower `max-tokens`. The defaults follow issue #39 and favour latency.
+or lower `max-tokens`. The defaults follow issue #39 and favour latency, and startup logs a WARN
+when both are on and the markers contain none of those words.
+
+**Caveat: tokenisation and language.** Tokens are whitespace-separated and the default markers
+are English. Unspaced scripts such as Chinese or Japanese count a whole sentence as one token, so
+any first-turn question in them without a marker is gated.
 
 | Property | Default | Meaning |
 |---|---|---|
 | `search.rag.gate.enabled` | `false` | Skip the planner for standalone keyword lookups |
-| `search.rag.gate.max-tokens` | `6` | Longest question that can skip planning |
+| `search.rag.gate.max-tokens` | `6` | Longest question that can skip planning; at least `1` |
 | `search.rag.gate.markers` | `it,its,that,those,them,same,more,another,else,cheaper,newer,older` | Words that force planning |
 
 ## Per-leg queries and HyDE (W2)

@@ -128,8 +128,10 @@ public final class QueryPlanningExpander implements QueryExpander {
     @Override
     public List<Query> expand(Query query) {
         // Adaptive gating (W6): a standalone keyword lookup on the first turn skips the planner
-        // entirely and is retrieved exactly as with the planner off.
-        if (gate != null && gate.skipPlanning(query.text(), !priorTurns(query).isEmpty())) {
+        // entirely and is retrieved exactly as with the planner off. Earlier turns are counted
+        // before the history-messages cap, so history-messages=0 cannot make a follow-up look
+        // like a first turn.
+        if (gate != null && gate.skipPlanning(query.text(), !allPriorTurns(query).isEmpty())) {
             log.debug("Gate: retrieving '{}' without planning", query.text());
             return List.of(query);
         }
@@ -248,9 +250,15 @@ public final class QueryPlanningExpander implements QueryExpander {
 
     /**
      * Earlier user and assistant turns, most recent last, without system messages and without
-     * the current question (which the history ends with).
+     * the current question (which the history ends with); at most {@code historyMessages}.
      */
     List<Message> priorTurns(Query query) {
+        List<Message> turns = allPriorTurns(query);
+        return turns.size() <= historyMessages ? turns : turns.subList(turns.size() - historyMessages, turns.size());
+    }
+
+    /** {@link #priorTurns(Query)} without the {@code historyMessages} cap. */
+    private static List<Message> allPriorTurns(Query query) {
         List<Message> turns = new ArrayList<>();
         for (Message message : query.history()) {
             MessageType type = message.getMessageType();
@@ -264,7 +272,7 @@ public final class QueryPlanningExpander implements QueryExpander {
                 turns.removeLast();
             }
         }
-        return turns.size() <= historyMessages ? turns : turns.subList(turns.size() - historyMessages, turns.size());
+        return turns;
     }
 
     /**

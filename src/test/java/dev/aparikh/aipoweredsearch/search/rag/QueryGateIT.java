@@ -114,6 +114,7 @@ class QueryGateIT {
     @Test
     void aGatedLookupMakesNoPlannerCallAndMatchesTheBaseline() throws Exception {
         int before = OfflineModels.PLANNER_CALLS.get();
+        double skippedBefore = gateCount(QueryGate.SKIPPED);
 
         AskResponse response = searchService.ask(new AskRequest("A Clash of Kings", "gate-lookup"));
 
@@ -121,20 +122,25 @@ class QueryGateIT {
         Map<String, List<String>> golden = golden("k-01");
         assertThat(candidateRecorder.lastCandidates("gate-lookup")).containsExactlyElementsOf(golden.get("candidates"));
         assertThat(response.sources()).containsExactlyElementsOf(golden.get("context"));
-        assertThat(meterRegistry.get(QueryGate.METRIC).tag(QueryGate.OUTCOME_TAG, QueryGate.SKIPPED).counter().count())
-                .isGreaterThanOrEqualTo(1);
+        assertThat(gateCount(QueryGate.SKIPPED)).isEqualTo(skippedBefore + 1);
     }
 
     @Test
     void aFollowUpIsStillPlanned() {
         searchService.ask(new AskRequest("Recommend an epic fantasy series with political intrigue.", "gate-follow-up"));
         int before = OfflineModels.PLANNER_CALLS.get();
+        double plannedBefore = gateCount(QueryGate.PLANNED);
 
-        searchService.ask(new AskRequest("Anything cheaper by the same author?", "gate-follow-up"));
+        // Short and marker-free: only the conversation history, loaded by the memory advisor before
+        // retrieval, tells the gate this is a follow-up.
+        searchService.ask(new AskRequest("Which one is the shortest?", "gate-follow-up"));
 
         assertThat(OfflineModels.PLANNER_CALLS.get()).isEqualTo(before + 1);
-        assertThat(meterRegistry.get(QueryGate.METRIC).tag(QueryGate.OUTCOME_TAG, QueryGate.PLANNED).counter().count())
-                .isGreaterThanOrEqualTo(1);
+        assertThat(gateCount(QueryGate.PLANNED)).isEqualTo(plannedBefore + 1);
+    }
+
+    private double gateCount(String outcome) {
+        return meterRegistry.get(QueryGate.METRIC).tag(QueryGate.OUTCOME_TAG, outcome).counter().count();
     }
 
     private Map<String, List<String>> golden(String caseId) throws Exception {
