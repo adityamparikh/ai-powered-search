@@ -5,7 +5,9 @@ import dev.aparikh.aipoweredsearch.search.HybridDocumentRetriever;
 import dev.aparikh.aipoweredsearch.search.RerankingDocumentPostProcessor;
 import dev.aparikh.aipoweredsearch.search.rag.ObservedDocumentJoiner;
 import dev.aparikh.aipoweredsearch.search.rag.ObservedDocumentPostProcessor;
+import dev.aparikh.aipoweredsearch.search.rag.QueryPlanningExpander;
 import dev.aparikh.aipoweredsearch.search.rag.RrfDocumentJoiner;
+import dev.aparikh.aipoweredsearch.search.rag.StandaloneQueryAwarePostProcessor;
 import io.micrometer.observation.ObservationRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -227,6 +229,7 @@ public class AiConfig {
      * @param fusionTopK fused candidates kept by the joiner ({@code search.rag.fusion.top-k},
      *        defaulting to {@code search.rag.hybrid.top-k})
      * @param rrfK RRF smoothing constant ({@code search.rag.fusion.rrf-k})
+     * @param queryPlanner the query planner, present only when {@code search.rag.planner.enabled=true}
      * @return configured ChatClient instance with RAG capabilities
      */
     @Bean
@@ -239,7 +242,8 @@ public class AiConfig {
                                     @Qualifier("applicationTaskExecutor") ObjectProvider<TaskExecutor> applicationTaskExecutor,
                                     ObjectProvider<ObservationRegistry> observationRegistry,
                                     @Value("${search.rag.fusion.top-k:${search.rag.hybrid.top-k:20}}") int fusionTopK,
-                                    @Value("${search.rag.fusion.rrf-k:60}") int rrfK) {
+                                    @Value("${search.rag.fusion.rrf-k:60}") int rrfK,
+                                    @Autowired(required = false) @Nullable QueryPlanningExpander queryPlanner) {
         ChatClient.Builder builder = ChatClient.builder(chatModel);
 
         // Set default options if caching is enabled
@@ -290,11 +294,25 @@ public class AiConfig {
                     + "4-16 platform-thread pool, without virtual threads");
         }
 
+        // Query planning (W1): one small-model call rewrites a follow-up as a standalone query,
+        // adds variant phrasings and extracts validated filters. Absent unless
+        // search.rag.planner.enabled=true, in which case the advisor retrieves on the raw question.
+        if (queryPlanner != null) {
+            ragAdvisor.queryExpander(queryPlanner);
+        }
+
         // Reranking is the third and last place the pipeline can improve context quality:
         // the retriever decides what is a candidate, and this decides what actually reaches
         // the prompt. Absent when search.rag.rerank.enabled=false.
+        //
+        // The advisor hands post-processors the ORIGINAL question; StandaloneQueryAwarePostProcessor
+        // substitutes the planner's standalone rewrite when there is one, so "Anything cheaper by
+        // the same author?" is judged as the question it really is. With the planner off it is a
+        // no-op.
         if (reranker != null) {
-            ragAdvisor.documentPostProcessors(ObservedDocumentPostProcessor.of(reranker, observations));
+            ragAdvisor.documentPostProcessors(new ObservedDocumentPostProcessor(
+                    new StandaloneQueryAwarePostProcessor(reranker), observations,
+                    ObservedDocumentPostProcessor.processorName(reranker.getClass())));
         }
 
         return builder.defaultAdvisors(

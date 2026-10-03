@@ -71,6 +71,12 @@ import java.util.concurrent.Future;
  * ERROR, as the cascade's failed fallbacks are, so an outage is distinguishable from a query with
  * no hits.</p>
  *
+ * <p><strong>Filters.</strong> Validated filter queries in {@link RagContextKeys#FILTERS} (from the
+ * query planner, W1) are applied as {@code fq} on <em>both</em> legs. If the filtered retrieval
+ * finds fewer than {@value #MIN_FILTERED_CANDIDATES} distinct documents, it is re-run without
+ * filters: a too-strict filter must not starve the prompt, and the retry costs Solr queries only,
+ * no model call.</p>
+ *
  * <p>Each retrieval is recorded as a {@value RagObservations#RETRIEVE} observation: one per leg
  * ({@code leg=keyword}, {@code leg=vector}) in unfused mode, one {@code leg=hybrid} in fused
  * mode.</p>
@@ -103,6 +109,9 @@ public class HybridDocumentRetriever implements DocumentRetriever {
     static final String VECTOR_LEG = RrfDocumentJoiner.VECTOR_LEG;
 
     private static final String SCORE_FIELD = "score";
+
+    /** Below this many distinct filtered candidates, retrieval is re-run without filters. */
+    static final int MIN_FILTERED_CANDIDATES = 3;
 
     private final SearchRepository searchRepository;
     private final String collection;
@@ -175,18 +184,50 @@ public class HybridDocumentRetriever implements DocumentRetriever {
 
     @Override
     public List<Document> retrieve(Query query) {
+        String filterQuery = filterQuery(query);
+        List<Document> documents = retrieve(query, filterQuery);
+        if (filterQuery != null && distinctIds(documents) < MIN_FILTERED_CANDIDATES) {
+            log.info("Filtered retrieval for '{}' found {} candidates with fq '{}'; retrying without filters",
+                    query.text(), distinctIds(documents), filterQuery);
+            documents = retrieve(query, null);
+        }
+        return documents;
+    }
+
+    private List<Document> retrieve(Query query, @Nullable String filterQuery) {
         if (deferFusion) {
-            return retrieveLegs(query);
+            return retrieveLegs(query, filterQuery);
         }
         return RagObservations.observe(observationRegistry, RagObservations.RETRIEVE,
-                RagObservations.LEG_TAG, HYBRID_LEG, () -> retrieveHybrid(query));
+                RagObservations.LEG_TAG, HYBRID_LEG, () -> retrieveHybrid(query, filterQuery));
+    }
+
+    /**
+     * The validated filters from the query context joined into one {@code fq}, or null if none.
+     * Each clause is a single {@code field:value}, {@code field:"phrase"} or range (see
+     * {@code FilterValidator}), so joining them with {@code AND} is well-formed.
+     */
+    static @Nullable String filterQuery(Query query) {
+        if (!(query.context().get(RagContextKeys.FILTERS) instanceof List<?> filters)) {
+            return null;
+        }
+        List<String> clauses = filters.stream()
+                .filter(String.class::isInstance)
+                .map(String.class::cast)
+                .filter(clause -> !clause.isBlank())
+                .toList();
+        return clauses.isEmpty() ? null : String.join(" AND ", clauses);
+    }
+
+    private static long distinctIds(List<Document> documents) {
+        return documents.stream().map(Document::getId).distinct().count();
     }
 
     /**
      * Unfused mode: runs both legs concurrently and returns their hits, keyword first, each
      * tagged with its leg and leg rank.
      */
-    private List<Document> retrieveLegs(Query query) {
+    private List<Document> retrieveLegs(Query query, @Nullable String filterQuery) {
         int fetchSize = topK * SearchRepository.OVER_FETCH_MULTIPLIER;
         // The legs run on fresh virtual threads; the snapshot carries the current observation
         // across, so each leg's rag.retrieve span nests under the request. This deliberately
@@ -195,9 +236,9 @@ public class HybridDocumentRetriever implements DocumentRetriever {
         ContextSnapshot snapshot = contextSnapshotFactory.captureAll();
         try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
             Future<List<Document>> keyword = executor.submit(snapshot.wrap(observedLeg(KEYWORD_LEG, () ->
-                    searchRepository.executeKeywordSearch(collection, query.text(), fetchSize, null, PROJECTED_FIELDS))));
+                    searchRepository.executeKeywordSearch(collection, query.text(), fetchSize, filterQuery, PROJECTED_FIELDS))));
             Future<List<Document>> vector = executor.submit(snapshot.wrap(observedLeg(VECTOR_LEG, () ->
-                    searchRepository.executeVectorSearch(collection, query.text(), fetchSize, null, PROJECTED_FIELDS,
+                    searchRepository.executeVectorSearch(collection, query.text(), fetchSize, filterQuery, PROJECTED_FIELDS,
                             precomputedVector(query)))));
 
             List<Document> keywordHits = awaitLeg(KEYWORD_LEG, keyword, query);
@@ -268,12 +309,12 @@ public class HybridDocumentRetriever implements DocumentRetriever {
         return documents;
     }
 
-    private List<Document> retrieveHybrid(Query query) {
+    private List<Document> retrieveHybrid(Query query, @Nullable String filterQuery) {
         // The raw question goes straight to Solr. SearchService.hybridSearch() prepends an
         // LLM call to synthesise Solr query parameters; that is worth it for a search API
         // but is pure latency on a RAG turn, where the model already has the question.
         SearchResponse response = searchRepository.executeHybridRerankSearch(
-                collection, query.text(), topK, null, PROJECTED_FIELDS, null, precomputedVector(query));
+                collection, query.text(), topK, filterQuery, PROJECTED_FIELDS, null, precomputedVector(query));
 
         List<Document> documents = response.documents().stream()
                 .map(this::toDocument)

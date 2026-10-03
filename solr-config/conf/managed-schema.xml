@@ -90,6 +90,16 @@
   <!-- Multi-valued Field -->
   <field name="tags" type="strings" indexed="true" stored="true" multiValued="true"/>
 
+  <!-- TYPED METADATA FIELDS FOR RAG FILTERS (epic #32, W0 finding A7)
+       Metadata indexed through /api/v1/index lands in metadata_<key>, which the metadata_*
+       dynamic field types as text_general: ranges there compare tokens lexically and names are
+       tokenised. Explicit fields take precedence over dynamic ones, so these give the query
+       planner's filters exact author matches and numeric ranges. Author is multi-valued so a
+       book with several authors still indexes. Price and year must be numeric. -->
+  <field name="metadata_author" type="strings" indexed="true" stored="true" multiValued="true"/>
+  <field name="metadata_price" type="pdouble" indexed="true" stored="true" multiValued="false"/>
+  <field name="metadata_year" type="pint" indexed="true" stored="true" multiValued="false"/>
+
   <!-- DYNAMIC FIELDS (Fallback for additional metadata) -->
 
   <dynamicField name="metadata_*" type="text_general" indexed="true" stored="true" multiValued="true"/>

@@ -346,6 +346,13 @@ Fusion pass, so documents several searches agree on rise to the top and duplicat
 top candidates are then reranked by Claude before they reach the prompt. The full pipeline is
 described in [docs/rag-pipeline.md](docs/rag-pipeline.md).
 
+**Follow-up questions (opt-in):** with `search.rag.planner.enabled=true`, a small Claude model
+first rewrites each question using the conversation. "Anything cheaper by the same author?"
+becomes "Books by George R.R. Martin cheaper than A Game of Thrones". The planner also adds
+alternative phrasings, and with `search.rag.planner.filters.enabled=true` it turns explicit
+constraints (author, price, year) into validated Solr filters. If the planner is slow or fails,
+the question is answered exactly as before.
+
 ## 🔍 Usage Examples
 
 ### Semantic Search Examples

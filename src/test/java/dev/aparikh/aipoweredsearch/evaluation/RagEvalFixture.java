@@ -16,6 +16,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * Builds the evaluation collection the same way production does.
@@ -85,7 +87,13 @@ public final class RagEvalFixture {
                 .withProperty("solr.autoSoftCommit.maxTime", "-1")
                 .withProperty("solr.autoCommit.maxTime", "-1")
                 .process(client);
+        Set<String> declared = new SchemaRequest.Fields().process(client, collection).getFields().stream()
+                .map(field -> String.valueOf(field.get("name")))
+                .collect(Collectors.toSet());
         for (Map.Entry<String, String> field : TYPED_FIELDS.entrySet()) {
+            if (declared.contains(field.getKey())) {
+                continue; // the project configset declares it already (since W1)
+            }
             new SchemaRequest.AddField(Map.of(
                     "name", field.getKey(),
                     "type", field.getValue(),

@@ -805,6 +805,28 @@ public ChatClient ragChatClient(ChatModel chatModel,
   - `search.rag.fusion.top-k` (defaults to `search.rag.hybrid.top-k`, 20; keep them equal for
     the planner-off invariant);
   - `search.rag.fusion.rrf-k` (default `60`).
+- **Query planner** (W1, off by default): `QueryPlanningExpander` makes one call to a small
+  model, through `plannerChatClient` (no chat memory, logger only), and returns a standalone
+  rewrite of the question plus variants. Each query carries `rag.standalone`, `rag.keywordQuery`
+  and validated `rag.filters`. The standalone text is also written into the *original* query's
+  context, and `StandaloneQueryAwarePostProcessor` makes the reranker judge against it.
+  `FilterValidator` admits only single `field:value`, `field:"phrase"` or numeric/date
+  `field:[a TO b]` clauses on known filterable fields. If filters leave fewer than 3 candidates,
+  the retriever retries without them. Every failure (timeout, model error, bad JSON, blank
+  standalone, wrong variant count) falls back to the original query with a WARN. Duplicate
+  queries are dropped, because `RetrievalAugmentationAdvisor` would crash on them. Beans live in
+  `config/RagPlannerConfig`; the prompt is `prompts/query-planner.st`.
+- **Planner properties**:
+  - `search.rag.planner.enabled` (`false`)
+  - `search.rag.planner.model` (`claude-haiku-4-5`)
+  - `search.rag.planner.variants` (`2`)
+  - `search.rag.planner.timeout` (`3s`)
+  - `search.rag.planner.history-messages` (`10`)
+  - `search.rag.planner.filters.enabled` (`false`)
+  - `search.rag.planner.filters.field-cache-ttl` (`5m`)
+- **Typed filter fields**: `solr-config/conf/managed-schema.xml` declares `metadata_author`
+  (`strings`), `metadata_price` (`pdouble`) and `metadata_year` (`pint`), so planner filters get
+  exact author matches and numeric ranges. Without them, `metadata_*` is `text_general`.
 - **RrfMerger**: `fuse(List<Ranking<T>>, idOf)` is the generic N-way algorithm. The search API's
   two-list `merge(keyword, vector)` delegates to it unchanged.
 - **MessageChatMemoryAdvisor**: Maintains conversation context across multiple questions

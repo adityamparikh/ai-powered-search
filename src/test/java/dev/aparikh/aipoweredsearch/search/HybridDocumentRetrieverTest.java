@@ -28,6 +28,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static io.micrometer.observation.tck.TestObservationRegistryAssert.assertThat;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -353,5 +354,70 @@ class HybridDocumentRetrieverTest {
     void exposesItsModeSoTheJoinerCanFollowIt() {
         assertThat(unfusedRetriever().defersFusion()).isTrue();
         assertThat(retriever.defersFusion()).isFalse();
+    }
+
+    // ==================== Filters (W1) ====================
+
+    private static Query filtered(List<String> filters) {
+        return Query.builder().text("q").context(Map.of(RagContextKeys.FILTERS, filters)).build();
+    }
+
+    @Test
+    void validatedFiltersAreAppliedToBothLegsAsOneFilterQuery() throws Exception {
+        stubLegs(List.of(solrDoc("a", "a", Map.of()), solrDoc("b", "b", Map.of()), solrDoc("c", "c", Map.of())), List.of());
+
+        unfusedRetriever().retrieve(filtered(List.of("metadata_author:\"George R.R. Martin\"", "metadata_price:[* TO 9]")));
+
+        String fq = "metadata_author:\"George R.R. Martin\" AND metadata_price:[* TO 9]";
+        verify(searchRepository).executeKeywordSearch(eq(COLLECTION), eq("q"), anyInt(), eq(fq), any());
+        verify(searchRepository).executeVectorSearch(eq(COLLECTION), eq("q"), anyInt(), eq(fq), any(), any());
+    }
+
+    @Test
+    void fewerThanThreeFilteredCandidatesRetriesWithoutFilters() throws Exception {
+        when(searchRepository.executeKeywordSearch(any(), any(), anyInt(), any(), any()))
+                .thenReturn(List.of(solrDoc("only", "a", Map.of())))
+                .thenReturn(List.of(solrDoc("x", "x", Map.of()), solrDoc("y", "y", Map.of()), solrDoc("z", "z", Map.of())));
+        when(searchRepository.executeVectorSearch(any(), any(), anyInt(), any(), any(), any()))
+                .thenReturn(List.of(solrDoc("only", "a", Map.of())))
+                .thenReturn(List.of());
+
+        List<Document> hits = unfusedRetriever().retrieve(filtered(List.of("metadata_year:2011")));
+
+        assertThat(hits).extracting(Document::getId).containsExactly("x", "y", "z");
+        verify(searchRepository).executeKeywordSearch(any(), any(), anyInt(), eq("metadata_year:2011"), any());
+        verify(searchRepository).executeKeywordSearch(any(), any(), anyInt(), isNull(), any());
+    }
+
+    @Test
+    void threeOrMoreFilteredCandidatesAreKept() throws Exception {
+        stubLegs(List.of(solrDoc("a", "a", Map.of()), solrDoc("b", "b", Map.of())), List.of(solrDoc("c", "c", Map.of())));
+
+        unfusedRetriever().retrieve(filtered(List.of("metadata_year:2011")));
+
+        verify(searchRepository, times(1)).executeKeywordSearch(any(), any(), anyInt(), any(), any());
+    }
+
+    @Test
+    void fusedModeAlsoAppliesFiltersAndTheFallback() {
+        when(searchRepository.executeHybridRerankSearch(any(), any(), anyInt(), any(), any(), any(), any()))
+                .thenReturn(new SearchResponse(List.of(), Map.of(), Map.of(), null))
+                .thenReturn(new SearchResponse(List.of(solrDoc("a", "a", Map.of())), Map.of(), Map.of(), null));
+
+        List<Document> hits = retriever.retrieve(filtered(List.of("metadata_year:2011")));
+
+        assertThat(hits).extracting(Document::getId).containsExactly("a");
+        verify(searchRepository).executeHybridRerankSearch(any(), any(), anyInt(), eq("metadata_year:2011"), any(), any(), any());
+        verify(searchRepository).executeHybridRerankSearch(any(), any(), anyInt(), isNull(), any(), any(), any());
+    }
+
+    @Test
+    void absentEmptyOrMalformedFiltersMeanNoFilterQuery() {
+        assertThat(HybridDocumentRetriever.filterQuery(new Query("q"))).isNull();
+        assertThat(HybridDocumentRetriever.filterQuery(filtered(List.of()))).isNull();
+        assertThat(HybridDocumentRetriever.filterQuery(
+                Query.builder().text("q").context(Map.of(RagContextKeys.FILTERS, "metadata_year:2011")).build())).isNull();
+        assertThat(HybridDocumentRetriever.filterQuery(
+                Query.builder().text("q").context(Map.of(RagContextKeys.FILTERS, List.of(" ", 7))).build())).isNull();
     }
 }

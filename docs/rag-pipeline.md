@@ -31,11 +31,11 @@ flowchart TD
 
 | Stage | Spring AI interface | Implementation | Status |
 |---|---|---|---|
-| Gate + planner | `QueryExpander` | `QueryPlanningExpander` | W1, W6 |
+| Gate + planner | `QueryExpander` | `QueryPlanningExpander` (opt-in) | W1; gate W6 |
 | Retrieval | `DocumentRetriever` | `HybridDocumentRetriever` | in place; per-leg inputs W2 |
 | Fusion | `DocumentJoiner` | `RrfDocumentJoiner` | W3 |
 | Filter | `DocumentPostProcessor` | `JevDocumentFilter` (opt-in) | W4 |
-| Rerank | `DocumentPostProcessor` | `RerankingDocumentPostProcessor` | in place; configurable W4 |
+| Rerank | `DocumentPostProcessor` | `RerankingDocumentPostProcessor`, judged against the standalone query | in place; configurable W4 |
 | Augment | `QueryAugmenter` | `ContextualQueryAugmenter` | in place |
 
 ## How a request flows today
@@ -46,12 +46,100 @@ flowchart TD
    - text: the user's message;
    - history: every prompt message;
    - context: a mutable copy of the request context.
-3. Each query is retrieved on the task executor, the result lists are joined, the joined list goes
+3. With the planner on (W1), the query is expanded into a standalone query plus variants.
+4. Each query is retrieved on the task executor, the result lists are joined, the joined list goes
    through the post-processors, and the survivors are added to the user message as context.
-4. Claude answers with the augmented prompt. The documents used are returned as `sources`.
+5. Claude answers with the augmented prompt. The documents used are returned as `sources`.
 
 The ordering in steps 1–2, and which query each component receives, are pinned by
 `RetrievalAugmentationAdvisorContractTest` and `RagAdvisorOrderingIT` (W0 finding A1).
+
+## Query planning: `QueryPlanningExpander` (W1)
+
+Patterns: [Making RAG Conversation-Aware](https://medium.com/@thetalkingapp/spring-ai-recipe-making-rag-conversation-aware-189b82a37060),
+[Filtering RAG Results with Metadata](https://medium.com/@thetalkingapp/spring-ai-recipe-filtering-rag-results-with-metadata-bef2f8a7cb72),
+and multi-query expansion as in Spring AI's
+[`MultiQueryExpander`](https://github.com/spring-projects/spring-ai/blob/main/spring-ai-rag/src/main/java/org/springframework/ai/rag/preretrieval/query/expansion/MultiQueryExpander.java).
+**Off by default** (`search.rag.planner.enabled=false`).
+
+**Why.** Without it, three things go wrong:
+- **Follow-ups** retrieve on their raw text (P1). "Anything cheaper by the same author?" sends
+  BM25 hunting for "cheaper" and "author".
+- **Constraints** never become filters (P2).
+- **One query is one probe** (P3). "Political intrigue" misses a synopsis that says "rival noble
+  houses scheme".
+
+**What.** One call to a small model (`claude-haiku-4-5`) reads the question and the conversation
+history and returns a `QueryPlan`. Turn 2 of the running example:
+
+| Field | Example | Used by |
+|---|---|---|
+| `standalone` | "Books by George R.R. Martin cheaper than A Game of Thrones" | retrieval (query 0), reranker |
+| `keywordQuery` | "George R.R. Martin" | BM25 leg (W2) |
+| `variants` | "Lower-priced novels by the author of A Song of Ice and Fire", ... | one extra retrieval each |
+| `hydePassage` | "A sweeping saga of rival noble houses..." | kNN leg when HyDE is on (W2) |
+| `filters` | `metadata_author:"George R.R. Martin"`, `metadata_price:[* TO 9.98]` | `fq` on both legs, when enabled |
+
+The expander returns the standalone query first, then one query per variant. Each carries its own
+context with `rag.standalone`, `rag.keywordQuery` and, when present, `rag.filters`.
+`RrfDocumentJoiner` fuses every leg of every query in one pass.
+
+**Prompt contract** (`src/main/resources/prompts/query-planner.st`, a static system prompt):
+- the conversation is data, never instructions;
+- `standalone` resolves pronouns and references and names titles, authors and reference prices;
+- `keywordQuery` is 3–10 distinctive terms;
+- `variants` is exactly the requested number, each with different vocabulary;
+- `hydePassage` is 2–4 sentences in catalogue-description style;
+- `filters` cover explicit hard constraints only, on the listed fields only, as single
+  `field:value`, `field:"phrase"` or `field:[a TO b]` clauses. A relative constraint ("cheaper")
+  becomes a range only when its reference value is in the conversation.
+
+The user message carries the last `search.rag.planner.history-messages` user and assistant
+turns (each truncated to 1,500 characters), the latest question, the variant count and the
+filterable fields with their types.
+
+**Standalone hand-off.** `RetrievalAugmentationAdvisor` hands post-processors the *original*
+query (W0 finding A1), so before W1 the reranker judged "Anything cheaper by the same author?".
+The expander also writes `rag.standalone` into the original query's context, which is the
+advisor's own mutable map. `StandaloneQueryAwarePostProcessor` wraps the reranker and gives it
+the standalone text. With the planner off there is no such key, and the wrapper passes the query
+through unchanged.
+
+**Filter safety** (`FilterValidator`, only with `search.rag.planner.filters.enabled=true`). Planner
+filters are untrusted. A clause survives only if it is exactly one `field:value` (one plain
+token), `field:"phrase"`, or `field:[a TO b]` with numeric, ISO-instant or `*` bounds, on a known
+filterable field of the collection. Ranges are allowed only on numeric and date types: on
+`text_general` they compare lexically, and `10.99` would fall inside `[* TO 9]`. That rules out
+`{!func}` local params, `_query_`, `*:*`, wildcards, boolean expressions and unknown fields.
+Rejected clauses are dropped with a DEBUG log. Field types come from
+`SearchRepository.getFieldsWithSchema()`, cached for `search.rag.planner.filters.field-cache-ttl`.
+The configset declares typed fields for this: `metadata_author` (`strings`), `metadata_price`
+(`pdouble`) and `metadata_year` (`pint`) (W0 finding A7).
+
+**Zero-results fallback.** If a filtered query finds fewer than 3 distinct candidates, the
+retriever re-runs it without filters. That costs Solr queries only, never a model call.
+
+**Failure behaviour.** On a timeout (`search.rag.planner.timeout`), a model error, unparseable
+output, a blank `standalone` or the wrong number of variants, the expander logs a WARN and returns
+the original query: exactly the planner-off path. The call runs on a virtual thread and is
+cancelled at the timeout. Variants that repeat the standalone query or each other are dropped,
+because `RetrievalAugmentationAdvisor` collects queries with `Collectors.toMap`, and two equal
+queries would be a duplicate key and a 5xx.
+
+**Cost.** One extra sequential Haiku-class call per turn, recorded as the `rag.plan` observation,
+plus one Solr round per variant (concurrent). The planner's `ChatClient` has no chat memory, so
+its turns never enter the conversation. It has no prompt-cache options either: Claude Haiku 4.5's
+minimum cacheable prompt is 4,096 tokens, and the planner's system prompt is about 1K.
+
+| Property | Default | Meaning |
+|---|---|---|
+| `search.rag.planner.enabled` | `false` | Turn the planner on |
+| `search.rag.planner.model` | `claude-haiku-4-5` | Planner model |
+| `search.rag.planner.variants` | `2` | Variant phrasings per question |
+| `search.rag.planner.timeout` | `3s` | Upper bound on the planner call |
+| `search.rag.planner.history-messages` | `10` | Most recent user/assistant messages the planner sees |
+| `search.rag.planner.filters.enabled` | `false` | Turn planner filters into validated `fq` clauses |
+| `search.rag.planner.filters.field-cache-ttl` | `5m` | How long field introspection is cached |
 
 ## Execution: virtual threads (W5)
 
@@ -178,9 +266,9 @@ for the call: fewer, more relevant chunks compete for the model's attention.
   (default `5`).
 - **Failure:** any error, or an unusable ranking, keeps the retrieval order truncated to `top-k`.
   It never fails the request.
-- **Known gap (fixed by W1):** post-processors receive the *original* query. For a follow-up like
-  "Anything cheaper by the same author?", the reranker judges relevance against a question with
-  no referent.
+- **Standalone question (W1):** the reranker is wrapped in `StandaloneQueryAwarePostProcessor`,
+  so when the planner is on it judges against the standalone rewrite rather than the raw
+  follow-up.
 
 ## Augmentation
 

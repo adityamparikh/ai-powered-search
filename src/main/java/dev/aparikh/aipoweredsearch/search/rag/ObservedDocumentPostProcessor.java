@@ -41,7 +41,11 @@ public final class ObservedDocumentPostProcessor implements DocumentPostProcesso
         return new ObservedDocumentPostProcessor(delegate, registry, processorName(delegate.getClass()));
     }
 
-    static String processorName(Class<?> type) {
+    /**
+     * A low-cardinality name for a post-processor class: its simple name, or for an anonymous
+     * subclass its nearest named superclass's.
+     */
+    public static String processorName(Class<?> type) {
         Class<?> named = type;
         while (named.getSimpleName().isEmpty() && named.getSuperclass() != null) {
             named = named.getSuperclass();
