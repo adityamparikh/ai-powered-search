@@ -45,7 +45,7 @@ Client
           ▼            ▼            ▼
    ┌───────────┐ ┌───────────┐ ┌───────────┐
    │  Solr     │ │ Anthropic │ │  OpenAI   │
-   │  9.10.0   │ │ Claude    │ │ Embedding │
+   │  9.10.1   │ │ Claude    │ │ Embedding │
    │ +ZooKeeper│ │ Sonnet4.5 │ │ 3-small   │
    └───────────┘ └───────────┘ └───────────┘
 ```

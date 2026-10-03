@@ -1,13 +1,13 @@
 import net.ltgt.gradle.errorprone.errorprone
 
 val errorProneVersion = "2.50.0"
-val nullawayVersion = "0.14.0"
+val nullawayVersion = "0.14.2"
 
 plugins {
     java
     id("org.springframework.boot") version "4.1.1"
     id("io.spring.dependency-management") version "1.1.7"
-    id("org.sonarqube") version "7.4.0.8496"
+    id("org.sonarqube") version "7.5.0.8588"
     jacoco
     id("net.ltgt.errorprone") version "5.1.1"
 }
@@ -45,11 +45,11 @@ dependencies {
     implementation("org.apache.solr:solr-solrj:10.0.0")
 
     // Swagger UI / OpenAPI documentation
-    implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:3.1.0")
+    implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:3.1.1")
 
     // Additional Solr dependencies
     implementation("commons-io:commons-io:2.22.0")
-    implementation("org.apache.commons:commons-lang3:3.20.0")
+    implementation("org.apache.commons:commons-lang3:3.21.0")
 
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("org.springframework.boot:spring-boot-starter-webmvc-test")

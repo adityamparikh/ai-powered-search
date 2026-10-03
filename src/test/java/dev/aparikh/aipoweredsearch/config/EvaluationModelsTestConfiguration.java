@@ -17,7 +17,7 @@ import org.testcontainers.utility.DockerImageName;
  * <p>Containers are configured for:
  * <ul>
  *   <li>Ollama: For LLM-based evaluation (fact-checking, relevancy)</li>
- *   <li>Solr 9.10.0: For search operations with native RRF support</li>
+ *   <li>Solr 9.10.1: For search operations with native RRF support</li>
  * </ul>
  */
 @TestConfiguration(proxyBeanMethods = false)
@@ -63,7 +63,7 @@ public class EvaluationModelsTestConfiguration {
      *
      * <p>Container configuration:
      * <ul>
-     *   <li>Image: solr:9.10.0 (with native RRF support)</li>
+     *   <li>Image: solr:9.10.1 (with native RRF support)</li>
      *   <li>Heap: 512m (sufficient for evaluation tests)</li>
      *   <li>Reuse: enabled for faster test execution</li>
      *   <li>Scope: @RestartScope for sharing across test classes</li>
@@ -76,7 +76,7 @@ public class EvaluationModelsTestConfiguration {
     @Bean
     @RestartScope
     public SolrContainer solrContainer() {
-        return new SolrContainer(DockerImageName.parse("solr:9.10.0"))
+        return new SolrContainer(DockerImageName.parse("solr:9.10.1"))
                 .withEnv("SOLR_HEAP", "512m")
                 .withReuse(true);
     }

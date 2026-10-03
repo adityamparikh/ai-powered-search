@@ -13,7 +13,7 @@ public class SolrTestConfiguration {
     @Bean(initMethod = "start", destroyMethod = "stop")
     @RestartScope
     SolrContainer solrContainer() {
-        return new SolrContainer(DockerImageName.parse("solr:9.10.0"))
+        return new SolrContainer(DockerImageName.parse("solr:9.10.1"))
                 .withEnv("SOLR_HEAP", "512m");
     }
 
