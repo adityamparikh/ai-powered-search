@@ -734,27 +734,29 @@ class RrfMergerTest {
     @Nested
     class MergedDocumentTest {
 
+        // These pinned the internal MergedDocument helper before W3 replaced it with the N-way
+        // fuse(); they now assert the same behaviour through the public merge API.
+
         @Test
         void shouldTrackKeywordAndVectorScoresSeparately() {
-            RrfMerger.MergedDocument merged = new RrfMerger.MergedDocument("1", new HashMap<>(Map.of("id", "1")));
-            merged.addKeywordScore(0.016, 1, 10.0);
-            merged.addVectorScore(0.015, 2, 0.95);
+            Map<String, Object> merged = merger.merge(
+                    List.of(new HashMap<>(Map.of("id", "1", "score", 10.0))),
+                    List.of(new HashMap<>(Map.of("id", "x", "score", 0.99)), new HashMap<>(Map.of("id", "1", "score", 0.95))))
+                    .get(0);
 
-            assertEquals(0.031, merged.rrfScore, 1e-10);
-            assertEquals(10.0, merged.keywordOriginalScore);
-            assertEquals(0.95, merged.vectorOriginalScore);
-            assertEquals(1, merged.keywordRank);
-            assertEquals(2, merged.vectorRank);
+            assertEquals(1.0 / 61 + 1.0 / 62, (Double) merged.get(RrfMerger.RRF_SCORE_FIELD), 1e-10);
+            assertEquals(10.0, merged.get(RrfMerger.KEYWORD_SCORE_FIELD));
+            assertEquals(0.95, merged.get(RrfMerger.VECTOR_SCORE_FIELD));
+            assertEquals(1, merged.get(RrfMerger.KEYWORD_RANK_FIELD));
+            assertEquals(2, merged.get(RrfMerger.VECTOR_RANK_FIELD));
         }
 
         @Test
         void shouldMergeVectorFieldsWithPrecedence() {
-            Map<String, Object> initialFields = new HashMap<>();
-            initialFields.put("id", "1");
-            initialFields.put("shared_field", "keyword_value");
-            initialFields.put("kw_only", "keyword_data");
-
-            RrfMerger.MergedDocument merged = new RrfMerger.MergedDocument("1", initialFields);
+            Map<String, Object> keywordDoc = new HashMap<>();
+            keywordDoc.put("id", "1");
+            keywordDoc.put("shared_field", "keyword_value");
+            keywordDoc.put("kw_only", "keyword_data");
 
             Map<String, Object> vectorDoc = new HashMap<>();
             vectorDoc.put("id", "1");
@@ -762,9 +764,8 @@ class RrfMergerTest {
             vectorDoc.put("vec_only", "vector_data");
             vectorDoc.put("score", 0.9);
 
-            merged.mergeVectorFields(vectorDoc);
+            Map<String, Object> result = merger.merge(List.of(keywordDoc), List.of(vectorDoc)).get(0);
 
-            Map<String, Object> result = merged.toDocument();
             assertEquals("vector_value", result.get("shared_field"), "Vector value should overwrite keyword value");
             assertEquals("keyword_data", result.get("kw_only"), "Keyword-only fields should be preserved");
             assertEquals("vector_data", result.get("vec_only"), "Vector-only fields should be added");
@@ -773,17 +774,16 @@ class RrfMergerTest {
 
         @Test
         void shouldProduceCompleteOutputDocument() {
-            RrfMerger.MergedDocument merged = new RrfMerger.MergedDocument("1",
-                    new HashMap<>(Map.of("id", "1", "title", "Test")));
-            merged.addKeywordScore(0.016, 1, 10.0);
-            merged.addVectorScore(0.015, 2, 0.95);
+            Map<String, Object> doc = merger.merge(
+                    List.of(new HashMap<>(Map.of("id", "1", "title", "Test", "score", 10.0))),
+                    List.of(new HashMap<>(Map.of("id", "x")), new HashMap<>(Map.of("id", "1", "title", "Test", "score", 0.95))))
+                    .get(0);
 
-            Map<String, Object> doc = merged.toDocument();
-
+            double expected = 1.0 / 61 + 1.0 / 62;
             assertEquals("1", doc.get("id"));
             assertEquals("Test", doc.get("title"));
-            assertEquals(0.031, (Double) doc.get(RrfMerger.RRF_SCORE_FIELD), 1e-10);
-            assertEquals(0.031, (Double) doc.get(RrfMerger.SCORE_FIELD), 1e-10);
+            assertEquals(expected, (Double) doc.get(RrfMerger.RRF_SCORE_FIELD), 1e-10);
+            assertEquals(expected, (Double) doc.get(RrfMerger.SCORE_FIELD), 1e-10);
             assertEquals(10.0, doc.get(RrfMerger.KEYWORD_SCORE_FIELD));
             assertEquals(0.95, doc.get(RrfMerger.VECTOR_SCORE_FIELD));
             assertEquals(1, doc.get(RrfMerger.KEYWORD_RANK_FIELD));
@@ -801,5 +801,92 @@ class RrfMergerTest {
         doc.put("id", id);
         doc.put("score", score);
         return doc;
+    }
+
+    // ==================== N-way fusion (W3) ====================
+
+    @Nested
+    class NWayFusion {
+
+        private RrfMerger.Ranking<String> ranking(int group, String... ids) {
+            return new RrfMerger.Ranking<>(List.of(ids), group);
+        }
+
+        @Test
+        void shouldFuseThreeRankingsWithHandComputedScores() {
+            // a: 1/61 + 1/62 + 1/63; b: 1/62 + 1/61; c: 1/63; d: 1/61
+            List<RrfMerger.Fused<String>> fused = merger.fuse(List.of(
+                    ranking(0, "a", "b", "c"),
+                    ranking(1, "b", "a"),
+                    ranking(2, "d", "x", "a")), id -> id);
+
+            assertEquals("a", fused.get(0).id());
+            assertEquals(1.0 / 61 + 1.0 / 62 + 1.0 / 63, fused.get(0).score(), 1e-12);
+            assertEquals("b", fused.get(1).id());
+            assertEquals(1.0 / 61 + 1.0 / 62, fused.get(1).score(), 1e-12);
+            assertEquals(List.of(1, 2, 3), fused.get(0).ranks());
+            assertEquals(1, fused.get(0).bestRank());
+        }
+
+        @Test
+        void shouldRankConsensusAboveASingleTopHit() {
+            List<RrfMerger.Fused<String>> fused = merger.fuse(List.of(
+                    ranking(0, "top", "c1", "consensus"),
+                    ranking(0, "c2", "c3", "consensus"),
+                    ranking(1, "c4", "c5", "consensus")), id -> id);
+
+            assertEquals("consensus", fused.get(0).id());
+        }
+
+        @Test
+        void shouldCountOnlyTheFirstPositionWithinOneRanking() {
+            List<RrfMerger.Fused<String>> fused = merger.fuse(List.of(ranking(0, "a", "a", "b")), id -> id);
+
+            assertEquals(2, fused.size());
+            assertEquals(1.0 / 61, fused.get(0).score(), 1e-12);
+        }
+
+        @Test
+        void shouldBreakTiesByBestRankThenGroupThenId() {
+            List<RrfMerger.Fused<String>> fused = merger.fuse(List.of(
+                    ranking(1, "zulu"),
+                    ranking(0, "yankee"),
+                    ranking(0, "alpha")), id -> id);
+
+            // all score 1/61 at rank 1: group 0 first (alpha before yankee by id), then group 1
+            assertEquals(List.of("alpha", "yankee", "zulu"), fused.stream().map(RrfMerger.Fused::id).toList());
+        }
+
+        @Test
+        void shouldNotDependOnRankingOrder() {
+            List<RrfMerger.Ranking<String>> forward = List.of(
+                    ranking(0, "a", "b", "c", "d"), ranking(1, "d", "c", "e"), ranking(0, "e", "a"));
+            List<RrfMerger.Ranking<String>> backward = List.of(forward.get(2), forward.get(1), forward.get(0));
+
+            List<String> one = merger.fuse(forward, id -> id).stream().map(RrfMerger.Fused::id).toList();
+            List<String> two = merger.fuse(backward, id -> id).stream().map(RrfMerger.Fused::id).toList();
+
+            assertEquals(one, two);
+        }
+
+        @Test
+        void shouldReturnEmptyForNoRankings() {
+            assertTrue(merger.fuse(List.<RrfMerger.Ranking<String>>of(), id -> id).isEmpty());
+            assertTrue(merger.merge(List.of()).isEmpty());
+        }
+
+        @Test
+        void shouldNameRankAndScoreFieldsAfterEachRanking() {
+            List<Map<String, Object>> merged = merger.merge(List.of(
+                    new RrfMerger.NamedRanking("standalone", List.of(Map.of("id", "a", "score", 3.0))),
+                    new RrfMerger.NamedRanking("variant", List.of(Map.of("id", "b"), Map.of("id", "a")))));
+
+            Map<String, Object> a = merged.get(0);
+            assertEquals("a", a.get("id"));
+            assertEquals(1, a.get("standalone_rank"));
+            assertEquals(3.0, a.get("standalone_score"));
+            assertEquals(2, a.get("variant_rank"));
+            assertFalse(a.containsKey("variant_score"));
+        }
     }
 }

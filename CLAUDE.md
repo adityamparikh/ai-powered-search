@@ -766,15 +766,9 @@ public ChatClient ragChatClient(ChatModel chatModel,
             .defaultAdvisors(
                     RetrievalAugmentationAdvisor.builder()
                             .documentRetriever(hybridDocumentRetriever)
-                            // Pass-through joiner: the default ConcatenationDocumentJoiner
-                            // re-sorts by score and would undo the RRF ranking. Wrapped to
-                            // record the rag.join observation.
-                            .documentJoiner(new ObservedDocumentJoiner(
-                                    documentsForQuery -> documentsForQuery.values().stream()
-                                            .flatMap(List::stream)
-                                            .flatMap(List::stream)
-                                            .toList(),
-                                    observations))
+                            // One N-way RRF pass over every leg of every query; the default
+                            // ConcatenationDocumentJoiner would re-sort by incomparable raw scores.
+                            .documentJoiner(new RrfDocumentJoiner(rrfK, fusionTopK))
                             // Boot's applicationTaskExecutor: virtual threads, trace propagated
                             .taskExecutor(applicationTaskExecutor)
                             .build(),
@@ -796,8 +790,20 @@ public ChatClient ragChatClient(ChatModel chatModel,
   `SearchRepository.executeHybridRerankSearch()`. Calls the repository directly, deliberately
   skipping `SearchService`'s Claude query-generation step — that is worth its latency for a
   search API but not on a RAG turn, where the model already has the question.
-- **Pass-through DocumentJoiner**: Required. The default `ConcatenationDocumentJoiner` re-sorts
-  documents by their own score, which would discard the fused RRF ordering.
+- **RrfDocumentJoiner** (W3): the retriever returns the BM25 and kNN hits *unfused*, tagged with
+  `rag.leg` and `rag.legRank`. The joiner runs one N-way RRF pass over every leg of every query,
+  de-duplicates by id, sets the fused score, and caps at `search.rag.fusion.top-k` (default 20).
+  It never thresholds. Ties go to best rank, then keyword leg, then id. With one query the
+  output is identical to the old per-query fusion (`RrfEquivalenceTest`, `RagGoldenRegressionIT`).
+  The default `ConcatenationDocumentJoiner` is not used because it re-sorts by raw scores that
+  aren't comparable across legs.
+- **Fusion properties**:
+  - `search.rag.fusion.enabled` (default `true`; `false` restores per-query fusion plus a
+    pass-through joiner);
+  - `search.rag.fusion.top-k` (default `20`; keep it equal to `search.rag.hybrid.top-k`);
+  - `search.rag.fusion.rrf-k` (default `60`).
+- **RrfMerger**: `fuse(List<Ranking<T>>, idOf)` is the generic N-way algorithm. The search API's
+  two-list `merge(keyword, vector)` delegates to it unchanged.
 - **MessageChatMemoryAdvisor**: Maintains conversation context across multiple questions
 - **SimpleLoggerAdvisor**: Logs prompts and responses for debugging
 - **PromptCacheMetricsAdvisor**: Tracks Anthropic prompt caching metrics

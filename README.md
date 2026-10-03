@@ -340,6 +340,12 @@ curl -X POST "http://localhost:8080/api/v1/search/ask" \
 }
 ```
 
+**How retrieval works:** each question is searched by keyword (BM25) and by meaning (vector
+kNN). Every result list, from every query the pipeline runs, is merged with one Reciprocal Rank
+Fusion pass, so documents several searches agree on rise to the top and duplicates collapse. The
+top candidates are then reranked by Claude before they reach the prompt. The full pipeline is
+described in [docs/rag-pipeline.md](docs/rag-pipeline.md).
+
 ## 🔍 Usage Examples
 
 ### Semantic Search Examples

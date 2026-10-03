@@ -22,6 +22,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.never;
 import static io.micrometer.observation.tck.TestObservationRegistryAssert.assertThat;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -224,5 +225,93 @@ class HybridDocumentRetrieverTest {
                 .hasLowCardinalityKeyValue(RagObservations.LEG_TAG, "hybrid")
                 .hasBeenStarted()
                 .hasBeenStopped();
+    }
+
+    // ==================== Unfused mode (W3) ====================
+
+    private HybridDocumentRetriever unfusedRetriever() {
+        return new HybridDocumentRetriever(searchRepository, COLLECTION, TOP_K, observationRegistry, true);
+    }
+
+    private void stubLegs(List<Map<String, Object>> keyword, List<Map<String, Object>> vector) throws Exception {
+        when(searchRepository.executeKeywordSearch(any(), any(), anyInt(), any(), any())).thenReturn(keyword);
+        when(searchRepository.executeVectorSearch(any(), any(), anyInt(), any(), any(), any())).thenReturn(vector);
+    }
+
+    @Test
+    void unfusedModeReturnsBothLegsTaggedWithLegAndRank() throws Exception {
+        stubLegs(List.of(solrDoc("k1", "a", Map.of("score", 9.0)), solrDoc("both", "b", Map.of("score", 7.0))),
+                List.of(solrDoc("both", "b", Map.of("score", 0.9))));
+
+        List<Document> hits = unfusedRetriever().retrieve(Query.builder().text("q").build());
+
+        assertThat(hits).extracting(Document::getId).containsExactly("k1", "both", "both");
+        assertThat(hits.get(0).getMetadata())
+                .containsEntry(RagContextKeys.LEG, "keyword")
+                .containsEntry(RagContextKeys.LEG_RANK, 1)
+                .containsEntry("keyword_score", 9.0);
+        assertThat(hits.get(2).getMetadata())
+                .containsEntry(RagContextKeys.LEG, "vector")
+                .containsEntry(RagContextKeys.LEG_RANK, 1)
+                .containsEntry("vector_score", 0.9);
+    }
+
+    @Test
+    void unfusedModeOverFetchesEachLegAndNeverCallsTheFusedSearch() throws Exception {
+        stubLegs(List.of(), List.of());
+        float[] vector = {0.5f};
+
+        unfusedRetriever().retrieve(Query.builder().text("q").context(Map.of(RagContextKeys.VECTOR, vector)).build());
+
+        verify(searchRepository).executeKeywordSearch(eq(COLLECTION), eq("q"), eq(TOP_K * 2), isNull(),
+                eq(HybridDocumentRetriever.PROJECTED_FIELDS));
+        verify(searchRepository).executeVectorSearch(eq(COLLECTION), eq("q"), eq(TOP_K * 2), isNull(),
+                eq(HybridDocumentRetriever.PROJECTED_FIELDS), eq(vector));
+        verify(searchRepository, never()).executeHybridRerankSearch(any(), any(), anyInt(), any(), any(), any(), any());
+    }
+
+    @Test
+    void aFailingLegIsSkippedAndTheOtherLegStillAnswers() throws Exception {
+        // e.g. an embedding outage: today's cascade falls back to keyword-only results.
+        when(searchRepository.executeKeywordSearch(any(), any(), anyInt(), any(), any()))
+                .thenReturn(List.of(solrDoc("k1", "a", Map.of())));
+        when(searchRepository.executeVectorSearch(any(), any(), anyInt(), any(), any(), any()))
+                .thenThrow(new IllegalStateException("embedding service down"));
+
+        List<Document> hits = unfusedRetriever().retrieve(Query.builder().text("q").build());
+
+        assertThat(hits).extracting(Document::getId).containsExactly("k1");
+    }
+
+    @Test
+    void bothLegsFailingYieldsNoDocumentsRatherThanAnError() throws Exception {
+        when(searchRepository.executeKeywordSearch(any(), any(), anyInt(), any(), any()))
+                .thenThrow(new IllegalStateException("solr down"));
+        when(searchRepository.executeVectorSearch(any(), any(), anyInt(), any(), any(), any()))
+                .thenThrow(new IllegalStateException("solr down"));
+
+        assertThat(unfusedRetriever().retrieve(Query.builder().text("q").build())).isEmpty();
+    }
+
+    @Test
+    void unfusedModeSkipsRowsWithoutContentWithoutLeavingRankGaps() throws Exception {
+        stubLegs(List.of(solrDoc("no-content", null, Map.of()), solrDoc("k2", "b", Map.of())), List.of());
+
+        List<Document> hits = unfusedRetriever().retrieve(Query.builder().text("q").build());
+
+        assertThat(hits).extracting(Document::getId).containsExactly("k2");
+        assertThat(hits.getFirst().getMetadata()).containsEntry(RagContextKeys.LEG_RANK, 1);
+    }
+
+    @Test
+    void unfusedModeRecordsOneRetrieveObservationPerLeg() throws Exception {
+        stubLegs(List.of(), List.of());
+
+        unfusedRetriever().retrieve(Query.builder().text("q").build());
+
+        assertThat(observationRegistry)
+                .hasNumberOfObservationsWithNameEqualTo(RagObservations.RETRIEVE, 2)
+                .hasAnObservationWithAKeyValue(RagObservations.LEG_TAG, "keyword")
+                .hasAnObservationWithAKeyValue(RagObservations.LEG_TAG, "vector");
     }
 }

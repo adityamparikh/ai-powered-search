@@ -33,7 +33,7 @@ flowchart TD
 |---|---|---|---|
 | Gate + planner | `QueryExpander` | `QueryPlanningExpander` | W1, W6 |
 | Retrieval | `DocumentRetriever` | `HybridDocumentRetriever` | in place; per-leg inputs W2 |
-| Fusion | `DocumentJoiner` | pass-through today; `RrfDocumentJoiner` | W3 |
+| Fusion | `DocumentJoiner` | `RrfDocumentJoiner` | W3 |
 | Filter | `DocumentPostProcessor` | `JevDocumentFilter` (opt-in) | W4 |
 | Rerank | `DocumentPostProcessor` | `RerankingDocumentPostProcessor` | in place; configurable W4 |
 | Augment | `QueryAugmenter` | `ContextualQueryAugmenter` | in place |
@@ -107,12 +107,66 @@ The kNN leg accepts a precomputed embedding. When `Query.context()` holds a `flo
 query and **makes no embedding call**. Without it, the query text is embedded exactly as before.
 This lets a later stage (W2) embed every query of a request in **one** batched request.
 
-## Fusion: the joiner
+## Fusion: `RrfDocumentJoiner` (W3)
 
-`RetrievalAugmentationAdvisor` joins the per-query result lists with a `DocumentJoiner`. Today
-there is one query per request, and the joiner is a **pass-through**. The default
-`ConcatenationDocumentJoiner` re-sorts by each document's own score, which would undo the RRF
-ranking the retriever just computed. W3 replaces this with an N-way RRF joiner.
+Pattern: [Better RAG Results with Hybrid Search](https://thetalkingapp.medium.com/spring-ai-recipe-better-rag-results-with-hybrid-search-6e6ab2d09003),
+with [Reciprocal Rank Fusion](https://plg.uwaterloo.ca/~gvcormac/cormacksigir09-rrf.pdf).
+
+**What.** The retriever returns the BM25 and kNN hits **unfused**, each tagged in metadata with
+`rag.leg` (`keyword` or `vector`) and its 1-based `rag.legRank`. `RrfDocumentJoiner` then:
+
+1. turns every leg of every query into one ranking (`Map<Query, List<List<Document>>>` →
+   rankings by query and leg);
+2. runs **one** N-way RRF pass over all of them, `score = Σ 1/(k + rank)`;
+3. keeps one instance per document id and sets `Document.score` to the fused score. Provenance
+   goes into the metadata: `rrf_score`, best `keyword_rank` / `vector_rank` across queries, and
+   each leg's own `keyword_score` / `vector_score`. The per-hit `rag.leg` / `rag.legRank` are
+   dropped;
+4. keeps the top `search.rag.fusion.top-k`;
+5. **never thresholds** the fused score. RRF scores are rank-derived and mean nothing in absolute
+   terms. `minScore` applies only to the vector leg of the search API before fusion, and the RAG
+   path passes none.
+
+**Why.** Once the planner (W1) produces several queries, concatenating per-query fused lists
+yields duplicates and an order that means nothing across queries. One RRF pass over every
+ranking rewards consensus: a document ranked well by several legs or rewrites outranks one
+ranked well by a single list.
+
+**Deterministic ties.** Ties are broken by best single rank, then **keyword leg before vector
+leg**, then document id. The keyword-first rule is what keeps the planner-off output identical
+to the old per-query fusion. An exact RRF tie can only occur between documents with the same set
+of ranks, and the old merger, which inserted keyword hits first, always put the one whose best
+rank came from the keyword list first. Contributions are summed largest-first, so the order never
+depends on the advisor's `HashMap` iteration order.
+
+**Invariant.** With a single query (planner off), the output ids and order are identical to the
+previous pipeline. This is enforced three ways:
+- `RrfEquivalenceTest`: 100 seeded random keyword/vector pairs against a frozen copy of the old
+  merger;
+- `RrfMergerTest`: the two-list merge delegates to the N-way merge;
+- `RagGoldenRegressionIT`: all 50 evaluation cases end to end.
+
+**Fallbacks.** The legs run concurrently, each on a virtual thread with the trace carried over.
+A leg that fails is logged at WARN and contributes nothing; this is how
+`executeHybridRerankSearch`'s hybrid → keyword-only → vector-only cascade maps onto unfused mode:
+
+| Situation | Old cascade | Unfused mode + joiner |
+|---|---|---|
+| Both legs return hits | RRF over 2·top-k per leg, cap top-k | same |
+| Vector leg fails (e.g. embedding outage) | keyword-only, top-k rows | keyword hits only, capped at top-k → same documents |
+| Keyword leg fails | keyword retry fails → vector-only, top-k rows | vector hits only, capped → same documents |
+| Both empty or both fail | empty | empty |
+
+**Properties.**
+
+| Property | Default | Meaning |
+|---|---|---|
+| `search.rag.fusion.enabled` | `true` | `false` restores per-query fusion in the retriever plus a pass-through joiner: the W5 pipeline, as an escape hatch |
+| `search.rag.fusion.top-k` | `20` | Fused candidates kept. Keep it equal to `search.rag.hybrid.top-k` for the planner-off invariant |
+| `search.rag.fusion.rrf-k` | `60` | RRF smoothing constant |
+
+The default `ConcatenationDocumentJoiner` is not used: it re-sorts documents by their own score,
+and raw BM25 and cosine scores are not comparable.
 
 ## Post-processing: reranking
 
@@ -160,7 +214,7 @@ timer per stage in metrics, with percentile histograms enabled by
 
 | Observation | Tags | Covers |
 |---|---|---|
-| `rag.retrieve` | `leg` = `hybrid` (`keyword` / `vector` once W3 retrieves legs separately) | one query's retrieval |
+| `rag.retrieve` | `leg` = `keyword` / `vector` (`hybrid` with `search.rag.fusion.enabled=false`) | one retrieval leg of one query |
 | `rag.join` | none | joining the per-query result lists |
 | `rag.postprocess` | `processor` = post-processor class, e.g. `RerankingDocumentPostProcessor` | one post-processor |
 | `rag.plan` | none | the planner's model call (W1) |

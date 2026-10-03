@@ -5,19 +5,21 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
-import java.util.Collections;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.function.Function;
 
 /**
- * Merges search results from multiple retrieval strategies using Reciprocal Rank Fusion (RRF).
+ * Merges ranked result lists with Reciprocal Rank Fusion (RRF).
  *
- * <p>RRF combines results from different search methods (e.g., keyword and vector search)
- * by computing a unified score based on document ranks rather than raw scores. This is more
- * robust than score averaging because it normalizes different scoring scales.</p>
+ * <p>RRF combines rankings from different retrieval strategies (keyword and vector search, or the
+ * same strategy run for several rewrites of a question) by a unified score built from document
+ * <em>ranks</em> rather than raw scores. That makes it robust to scoring scales that cannot be
+ * compared, such as BM25 and cosine similarity.</p>
  *
  * <p>The RRF formula is: {@code score = sum(1 / (k + rank))} where:
  * <ul>
@@ -27,6 +29,26 @@ import java.util.Objects;
  *
  * <p>Example: A document at rank 3 in keyword results and rank 5 in vector results:
  * {@code rrf_score = 1/(60+3) + 1/(60+5) = 0.0159 + 0.0154 = 0.0313}</p>
+ *
+ * <p>{@link #fuse(List, Function)} is the general N-way algorithm. {@link #merge(List)} and the
+ * two-list {@link #merge(List, List)} used by the search API are built on it.</p>
+ *
+ * <h2>Deterministic order</h2>
+ * <p>Fused results are ordered by:</p>
+ * <ol>
+ *   <li>fused score, descending;</li>
+ *   <li>best single rank, ascending (a document's best position in any one list);</li>
+ *   <li>the {@linkplain Ranking#tieBreakGroup() tie-break group} of the ranking holding that best
+ *       rank, ascending;</li>
+ *   <li>document id.</li>
+ * </ol>
+ * <p>The order never depends on the order in which rankings are supplied, so it is stable even
+ * when they come out of a {@code HashMap}. Each document's contributions are also summed
+ * largest-first, so equal rank sets give bit-identical scores. For two rankings with groups
+ * {@code keyword = 0, vector = 1} this reproduces, exactly, the order this class has always
+ * produced: an exact tie can only arise between documents with the same multiset of ranks, and
+ * then the one whose best rank came from the keyword list was inserted, and therefore sorted,
+ * first.</p>
  *
  * <p>This class is thread-safe and immutable after construction.</p>
  *
@@ -45,6 +67,49 @@ public class RrfMerger {
     static final String KEYWORD_RANK_FIELD = "keyword_rank";
     static final String VECTOR_RANK_FIELD = "vector_rank";
     static final String SCORE_FIELD = "score";
+
+    /** Name of the keyword ranking in the two-list merge; output fields are {@code keyword_*}. */
+    public static final String KEYWORD = "keyword";
+
+    /** Name of the vector ranking in the two-list merge; output fields are {@code vector_*}. */
+    public static final String VECTOR = "vector";
+
+    /**
+     * One ranked list to fuse.
+     *
+     * @param items          the list, best first; an item's rank is its 1-based position
+     * @param tieBreakGroup  orders documents whose score and best rank are equal: the one whose best
+     *                       rank came from the lower group sorts first
+     * @param <T>            item type
+     */
+    public record Ranking<T>(List<T> items, int tieBreakGroup) {
+    }
+
+    /**
+     * A named map-based ranking for {@link #merge(List)}. Output fields are
+     * {@code <name>_rank} and {@code <name>_score}.
+     */
+    public record NamedRanking(String name, List<Map<String, Object>> results) {
+    }
+
+    /**
+     * One fused document.
+     *
+     * @param id          document id
+     * @param score       fused RRF score
+     * @param bestRank    best (lowest) 1-based rank in any one ranking
+     * @param bestGroup   tie-break group of the ranking holding {@code bestRank}
+     * @param ranks       1-based rank per input ranking (same order as the input), or 0 when absent
+     * @param occurrences the item from each ranking that contains it, best rank first
+     * @param <T>         item type
+     */
+    public record Fused<T>(String id, double score, int bestRank, int bestGroup, List<Integer> ranks, List<T> occurrences) {
+
+        /** The item at the document's best rank. */
+        public T best() {
+            return occurrences.getFirst();
+        }
+    }
 
     private final int k;
 
@@ -79,6 +144,72 @@ public class RrfMerger {
     }
 
     /**
+     * Fuses any number of rankings with one RRF pass.
+     *
+     * <p>A document is identified by {@code idOf}. If it appears more than once in the same
+     * ranking, only its first (best) position counts. The output is de-duplicated, ordered as
+     * described in the class documentation, and never thresholded.</p>
+     *
+     * @param rankings the rankings to fuse; may be empty
+     * @param idOf     extracts a document's id
+     * @param <T>      item type
+     * @return fused documents, best first; never null
+     */
+    public <T> List<Fused<T>> fuse(List<Ranking<T>> rankings, Function<T, String> idOf) {
+        Map<String, Accumulator<T>> byId = new LinkedHashMap<>();
+        for (int r = 0; r < rankings.size(); r++) {
+            Ranking<T> ranking = rankings.get(r);
+            List<T> items = ranking.items();
+            for (int i = 0; i < items.size(); i++) {
+                T item = items.get(i);
+                String id = idOf.apply(item);
+                Accumulator<T> accumulator = byId.computeIfAbsent(id, key -> new Accumulator<>(key, rankings.size()));
+                if (accumulator.ranks[r] != 0) {
+                    continue; // repeated within one ranking: the first position counts
+                }
+                accumulator.add(r, i + 1, ranking.tieBreakGroup(), item, k);
+            }
+        }
+
+        List<Fused<T>> fused = new ArrayList<>(byId.size());
+        for (Accumulator<T> accumulator : byId.values()) {
+            fused.add(accumulator.toFused());
+        }
+        fused.sort(Comparator.<Fused<T>>comparingDouble(Fused::score).reversed()
+                .thenComparingInt(Fused::bestRank)
+                .thenComparingInt(Fused::bestGroup)
+                .thenComparing(Fused::id));
+        return fused;
+    }
+
+    /**
+     * Fuses any number of named, map-based rankings.
+     *
+     * <p>Each output map holds the document's fields, where a later ranking's value wins on
+     * conflict (except {@code id} and {@code score}). It also holds {@code rrf_score},
+     * {@code score} (same value), and per ranking {@code <name>_rank} and, when the input carried
+     * a numeric {@code score}, {@code <name>_score}. Ties go to the ranking listed first.</p>
+     *
+     * @param rankings named rankings, in tie-break order
+     * @return merged documents sorted by RRF score descending; never null
+     * @throws IllegalArgumentException if any document is missing an {@code id} field
+     */
+    public List<Map<String, Object>> merge(List<NamedRanking> rankings) {
+        List<Ranking<Map<String, Object>>> indexed = new ArrayList<>(rankings.size());
+        for (int r = 0; r < rankings.size(); r++) {
+            indexed.add(new Ranking<>(rankings.get(r).results(), r));
+        }
+
+        List<Fused<Map<String, Object>>> fused = fuse(indexed, this::extractDocId);
+        List<Map<String, Object>> merged = new ArrayList<>(fused.size());
+        for (Fused<Map<String, Object>> document : fused) {
+            merged.add(toMergedDocument(document, rankings));
+        }
+        log.debug("RRF merge complete: {} unique documents after fusion of {} rankings", merged.size(), rankings.size());
+        return merged;
+    }
+
+    /**
      * Merges keyword and vector search results using the RRF algorithm.
      *
      * <p>Documents are identified by their {@code id} field. If a document appears in both
@@ -105,66 +236,13 @@ public class RrfMerger {
      */
     public List<Map<String, Object>> merge(@Nullable List<Map<String, Object>> keywordResults,
                                            @Nullable List<Map<String, Object>> vectorResults) {
-        List<Map<String, Object>> safeKeyword = keywordResults != null ? keywordResults : Collections.emptyList();
-        List<Map<String, Object>> safeVector = vectorResults != null ? vectorResults : Collections.emptyList();
+        List<Map<String, Object>> safeKeyword = keywordResults != null ? keywordResults : List.of();
+        List<Map<String, Object>> safeVector = vectorResults != null ? vectorResults : List.of();
 
         log.debug("Merging {} keyword results and {} vector results using RRF (k={})",
                 safeKeyword.size(), safeVector.size(), k);
 
-        if (safeKeyword.isEmpty() && safeVector.isEmpty()) {
-            return Collections.emptyList();
-        }
-
-        // LinkedHashMap preserves insertion order for deterministic iteration
-        Map<String, MergedDocument> documentMap = new LinkedHashMap<>();
-
-        // Process keyword results (1-indexed ranks)
-        for (int i = 0; i < safeKeyword.size(); i++) {
-            Map<String, Object> doc = safeKeyword.get(i);
-            String docId = extractDocId(doc);
-            int rank = i + 1;
-            double rrfContribution = 1.0 / (k + rank);
-
-            MergedDocument merged = documentMap.computeIfAbsent(docId,
-                    id -> new MergedDocument(id, doc));
-            merged.addKeywordScore(rrfContribution, rank, extractScore(doc));
-
-            log.trace("Keyword doc {}: rank={}, rrf={}", docId, rank, rrfContribution);
-        }
-
-        // Process vector results (1-indexed ranks)
-        for (int i = 0; i < safeVector.size(); i++) {
-            Map<String, Object> doc = safeVector.get(i);
-            String docId = extractDocId(doc);
-            int rank = i + 1;
-            double rrfContribution = 1.0 / (k + rank);
-
-            MergedDocument merged = documentMap.get(docId);
-            if (merged == null) {
-                // Document only in vector results
-                merged = new MergedDocument(docId, doc);
-                documentMap.put(docId, merged);
-            } else {
-                // Document in both — merge fields, preferring vector values
-                merged.mergeVectorFields(doc);
-            }
-            merged.addVectorScore(rrfContribution, rank, extractScore(doc));
-
-            log.trace("Vector doc {}: rank={}, rrf={}", docId, rank, rrfContribution);
-        }
-
-        // Build final result list with all scoring metadata
-        List<Map<String, Object>> mergedResults = new ArrayList<>(documentMap.size());
-        for (MergedDocument merged : documentMap.values()) {
-            mergedResults.add(merged.toDocument());
-        }
-
-        // Sort by RRF score descending (RRF_SCORE_FIELD is always set by toDocument())
-        mergedResults.sort(Comparator.comparingDouble(
-                (Map<String, Object> d) -> ((Number) Objects.requireNonNull(d.get(RRF_SCORE_FIELD))).doubleValue()).reversed());
-
-        log.debug("RRF merge complete: {} unique documents after fusion", mergedResults.size());
-        return mergedResults;
+        return merge(List.of(new NamedRanking(KEYWORD, safeKeyword), new NamedRanking(VECTOR, safeVector)));
     }
 
     /**
@@ -191,72 +269,79 @@ public class RrfMerger {
         return null;
     }
 
+    private Map<String, Object> toMergedDocument(Fused<Map<String, Object>> document, List<NamedRanking> rankings) {
+        // Fields from each ranking in input order, later rankings winning on conflict; this is
+        // the long-standing "vector values take precedence" rule for the two-list merge.
+        Map<String, Object> fields = new LinkedHashMap<>();
+        Map<String, Object> scores = new LinkedHashMap<>();
+        Map<String, Object> ranks = new LinkedHashMap<>();
+        for (int r = 0; r < rankings.size(); r++) {
+            int rank = document.ranks().get(r);
+            if (rank == 0) {
+                continue;
+            }
+            Map<String, Object> source = rankings.get(r).results().get(rank - 1);
+            if (fields.isEmpty()) {
+                fields.putAll(source);
+            } else {
+                source.forEach((key, value) -> {
+                    if (!ID_FIELD.equals(key) && !SCORE_FIELD.equals(key)) {
+                        fields.put(key, value);
+                    }
+                });
+            }
+            String name = rankings.get(r).name();
+            Double score = extractScore(source);
+            if (score != null) {
+                scores.put(name + "_score", score);
+            }
+            ranks.put(name + "_rank", rank);
+        }
+
+        Map<String, Object> merged = new LinkedHashMap<>(fields);
+        merged.put(RRF_SCORE_FIELD, document.score());
+        merged.put(SCORE_FIELD, document.score());
+        merged.putAll(scores);
+        merged.putAll(ranks);
+        return merged;
+    }
+
     /**
-     * Tracks a single document's data during RRF merging.
+     * Collects one document's contributions while fusing.
      */
-    static class MergedDocument {
-        final String id;
-        final Map<String, Object> fields;
-        double rrfScore;
-        @Nullable Double keywordOriginalScore;
-        @Nullable Double vectorOriginalScore;
-        @Nullable Integer keywordRank;
-        @Nullable Integer vectorRank;
+    private static final class Accumulator<T> {
 
-        MergedDocument(String id, Map<String, Object> sourceDocument) {
+        private final String id;
+        private final int[] ranks;
+        private final List<Double> contributions = new ArrayList<>();
+        private final List<Occurrence<T>> occurrences = new ArrayList<>();
+
+        Accumulator(String id, int rankingCount) {
             this.id = id;
-            // Copy so we don't mutate the caller's map
-            this.fields = new LinkedHashMap<>(sourceDocument);
-            this.rrfScore = 0.0;
+            this.ranks = new int[rankingCount];
         }
 
-        void addKeywordScore(double rrfContribution, int rank, @Nullable Double originalScore) {
-            this.rrfScore += rrfContribution;
-            this.keywordRank = rank;
-            this.keywordOriginalScore = originalScore;
+        void add(int ranking, int rank, int group, T item, int k) {
+            ranks[ranking] = rank;
+            contributions.add(1.0 / (k + rank));
+            occurrences.add(new Occurrence<>(rank, group, item));
         }
 
-        void addVectorScore(double rrfContribution, int rank, @Nullable Double originalScore) {
-            this.rrfScore += rrfContribution;
-            this.vectorRank = rank;
-            this.vectorOriginalScore = originalScore;
+        Fused<T> toFused() {
+            // Largest contribution first: the sum is then independent of input order.
+            double score = contributions.stream()
+                    .sorted(Comparator.reverseOrder())
+                    .mapToDouble(Double::doubleValue)
+                    .sum();
+            List<Occurrence<T>> ordered = occurrences.stream()
+                    .sorted(Comparator.<Occurrence<T>>comparingInt(Occurrence::rank).thenComparingInt(Occurrence::group))
+                    .toList();
+            Occurrence<T> best = Objects.requireNonNull(ordered.getFirst());
+            return new Fused<>(id, score, best.rank(), best.group(), Arrays.stream(ranks).boxed().toList(),
+                    ordered.stream().map(Occurrence::item).toList());
         }
+    }
 
-        /**
-         * Merges fields from a vector search result into this document.
-         * Vector values take precedence on conflict, except for the {@code id} field.
-         */
-        void mergeVectorFields(Map<String, Object> vectorDoc) {
-            for (Map.Entry<String, Object> entry : vectorDoc.entrySet()) {
-                String key = entry.getKey();
-                if (ID_FIELD.equals(key) || SCORE_FIELD.equals(key)) {
-                    continue; // Never overwrite id; score will be replaced with RRF score
-                }
-                fields.put(key, entry.getValue());
-            }
-        }
-
-        /**
-         * Produces the final document map with all RRF scoring metadata.
-         */
-        Map<String, Object> toDocument() {
-            Map<String, Object> doc = new LinkedHashMap<>(fields);
-            doc.put(RRF_SCORE_FIELD, rrfScore);
-            doc.put(SCORE_FIELD, rrfScore);
-
-            if (keywordOriginalScore != null) {
-                doc.put(KEYWORD_SCORE_FIELD, keywordOriginalScore);
-            }
-            if (vectorOriginalScore != null) {
-                doc.put(VECTOR_SCORE_FIELD, vectorOriginalScore);
-            }
-            if (keywordRank != null) {
-                doc.put(KEYWORD_RANK_FIELD, keywordRank);
-            }
-            if (vectorRank != null) {
-                doc.put(VECTOR_RANK_FIELD, vectorRank);
-            }
-            return doc;
-        }
+    private record Occurrence<T>(int rank, int group, T item) {
     }
 }

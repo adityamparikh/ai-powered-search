@@ -48,7 +48,7 @@ public class SearchRepository {
      * Multiplier applied to topK when fetching from individual searches.
      * Over-fetching improves fusion quality by giving RRF more candidates.
      */
-    private static final int OVER_FETCH_MULTIPLIER = 2;
+    static final int OVER_FETCH_MULTIPLIER = 2;
 
     Logger log = LoggerFactory.getLogger(SearchRepository.class);
     private final SolrClient solrClient;

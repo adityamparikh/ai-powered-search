@@ -5,6 +5,7 @@ import dev.aparikh.aipoweredsearch.search.HybridDocumentRetriever;
 import dev.aparikh.aipoweredsearch.search.RerankingDocumentPostProcessor;
 import dev.aparikh.aipoweredsearch.search.rag.ObservedDocumentJoiner;
 import dev.aparikh.aipoweredsearch.search.rag.ObservedDocumentPostProcessor;
+import dev.aparikh.aipoweredsearch.search.rag.RrfDocumentJoiner;
 import io.micrometer.observation.ObservationRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -223,6 +224,11 @@ public class AiConfig {
      *        runs on it rather than on the advisor's private 4-16 platform-thread pool; with
      *        {@code spring.threads.virtual.enabled=true} it runs each task on a virtual thread
      * @param observationRegistry records the {@code rag.join} and {@code rag.postprocess} observations
+     * @param fusionEnabled whether to fuse every retrieval leg of every query with
+     *        {@link RrfDocumentJoiner} ({@code search.rag.fusion.enabled}, default true). False
+     *        restores the per-query fused retriever and the pass-through joiner.
+     * @param fusionTopK fused candidates kept by the joiner ({@code search.rag.fusion.top-k})
+     * @param rrfK RRF smoothing constant ({@code search.rag.fusion.rrf-k})
      * @return configured ChatClient instance with RAG capabilities
      */
     @Bean
@@ -233,7 +239,10 @@ public class AiConfig {
                                     @Autowired(required = false) @Qualifier("anthropicChatOptionsWithCaching") AnthropicChatOptions.@Nullable Builder chatOptions,
                                     @Autowired(required = false) @Nullable RerankingDocumentPostProcessor reranker,
                                     @Qualifier("applicationTaskExecutor") ObjectProvider<TaskExecutor> applicationTaskExecutor,
-                                    ObjectProvider<ObservationRegistry> observationRegistry) {
+                                    ObjectProvider<ObservationRegistry> observationRegistry,
+                                    @Value("${search.rag.fusion.enabled:true}") boolean fusionEnabled,
+                                    @Value("${search.rag.fusion.top-k:20}") int fusionTopK,
+                                    @Value("${search.rag.fusion.rrf-k:60}") int rrfK) {
         ChatClient.Builder builder = ChatClient.builder(chatModel);
 
         // Set default options if caching is enabled
@@ -243,14 +252,20 @@ public class AiConfig {
 
         ObservationRegistry observations = observationRegistry.getIfAvailable(() -> ObservationRegistry.NOOP);
 
-        // Pass-through joiner. The default ConcatenationDocumentJoiner re-sorts documents by
-        // their individual score, which would undo the RRF ranking the retriever just
-        // computed — our score IS the fused RRF value and is not comparable across retrieval
-        // strategies.
-        DocumentJoiner passThroughJoiner = documentsForQuery -> documentsForQuery.values().stream()
-                .flatMap(List::stream)
-                .flatMap(List::stream)
-                .toList();
+        // Fusion. The retriever returns each leg's hits unfused and RrfDocumentJoiner fuses every
+        // leg of every query in ONE RRF pass, de-duplicating and capping at fusion.top-k. With a
+        // single query this is exactly the per-query fused order the retriever used to produce.
+        //
+        // The default ConcatenationDocumentJoiner is deliberately not used: it re-sorts documents
+        // by their individual score, and raw BM25 and cosine scores are not comparable, so it
+        // would scramble the ranking. With fusion disabled the retriever fuses per query and a
+        // pass-through joiner keeps that order for the same reason.
+        DocumentJoiner joiner = fusionEnabled
+                ? new RrfDocumentJoiner(rrfK, fusionTopK)
+                : documentsForQuery -> documentsForQuery.values().stream()
+                        .flatMap(List::stream)
+                        .flatMap(List::stream)
+                        .toList();
 
         RetrievalAugmentationAdvisor.Builder ragAdvisor =
                 RetrievalAugmentationAdvisor.builder()
@@ -262,7 +277,7 @@ public class AiConfig {
                                 .queryAugmenter(ContextualQueryAugmenter.builder()
                                         .allowEmptyContext(true)
                                         .build())
-                                .documentJoiner(new ObservedDocumentJoiner(passThroughJoiner, observations));
+                                .documentJoiner(new ObservedDocumentJoiner(joiner, observations));
 
         // Without an executor the advisor retrieves on its own 4-16 platform-thread pool.
         // Boot's applicationTaskExecutor is virtual-thread backed when virtual threads are
