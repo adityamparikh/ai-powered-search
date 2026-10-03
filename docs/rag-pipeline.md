@@ -174,6 +174,10 @@ passage. The BM25 leg has the opposite need: distinctive terms, not prose.
 **BM25 never sees the HyDE passage.** Its generic prose would match almost everything lexically.
 `OneEmbeddingRequestPerAskTest` and `QueryPlannerIT` assert this on the actual `q` sent to Solr.
 
+**Fused mode** (`search.rag.fusion.enabled=false`) applies only the precomputed vector:
+`executeHybridRerankSearch` takes one text for both legs, so BM25 searches `Query.text()` and
+`rag.keywordQuery` is unused. The vector is still the HyDE embedding when HyDE is on.
+
 **HyDE** (`search.rag.hyde.enabled`, default `false`; needs the planner). `QueryPlanningExpander` sets
 `rag.vectorText = plan.hydePassage()` on the **standalone** query only. Variants keep their own
 text for the vector leg, so the fusion still sees literal phrasings.
@@ -181,12 +185,24 @@ text for the vector leg, so the fusion still sees literal phrasings.
 **One embedding request per turn.** With the planner on, `EmbeddingBatcher` embeds every planned
 query's kNN text (HyDE passage or query text) in **one** `EmbeddingModel.embed(List<String>)`
 call and sets `rag.vector` on each query. The retriever passes the vector straight to Solr (W5),
-so a turn with 1 + N queries makes one embedding request instead of 1 + N. With the planner off,
-the single query is embedded once, as before.
+so a turn with 1 + N queries makes one embedding request instead of 1 + N. Batching follows the
+planner, not `search.rag.hyde.enabled`: with HyDE off it embeds the query texts, the same vectors
+the legs would compute, so it changes request count and latency but not results. With the planner
+off, the single query is embedded once, as before.
 
-**Failure behaviour.** A failed or wrong-sized batch leaves `rag.vector` unset, and each kNN leg
-embeds its own text as before: slower, never wrong. A blank HyDE passage is ignored. A planner
-failure means one original query, embedded once.
+**Latency.** The batch runs inside the expander, before retrieval, where each kNN leg used to embed
+concurrently with BM25. The turn now waits for embedding, then for the slower leg. Batching has no
+timeout of its own: a fallback would re-embed per leg against the same provider, so it could only
+add latency, never remove it.
+
+**Failure behaviour.** A failed batch, a wrong number of vectors, or an empty or inconsistently
+sized vector leaves `rag.vector` unset, and each kNN leg embeds its own text as before: slower,
+never wrong. A blank HyDE passage is ignored. A planner failure means one original query, embedded
+once.
+
+**Security.** The HyDE passage is model output, but it goes only to the embedding model. It never
+reaches BM25, Solr query syntax or the answer prompt, so it adds no injection surface. Its length
+is bounded by the planner's `maxTokens` (1500).
 
 | Property | Default | Meaning |
 |---|---|---|

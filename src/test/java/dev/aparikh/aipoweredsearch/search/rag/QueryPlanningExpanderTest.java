@@ -423,7 +423,7 @@ class QueryPlanningExpanderTest {
 
         org.mockito.Mockito.verify(model).embed(List.of("A sweeping tale of rival houses.",
                 "Cheaper novels from the author of A Song of Ice and Fire", "Lower-priced George R.R. Martin paperbacks"));
-        assertThat(queries).allSatisfy(q -> assertThat(LegRouting.vector(q)).isNotNull());
+        assertThat(queries).hasSize(3).allSatisfy(q -> assertThat(LegRouting.vector(q)).isNotNull());
     }
 
     @Test

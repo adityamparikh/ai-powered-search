@@ -6,6 +6,8 @@ import dev.aparikh.aipoweredsearch.search.rag.FilterValidator;
 import dev.aparikh.aipoweredsearch.search.rag.QueryPlanningExpander;
 import io.micrometer.observation.ObservationRegistry;
 import org.jspecify.annotations.Nullable;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.ai.anthropic.AnthropicChatOptions;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.SimpleLoggerAdvisor;
@@ -41,6 +43,19 @@ import java.time.Duration;
  */
 @Configuration
 public class RagPlannerConfig {
+
+    private static final Logger log = LoggerFactory.getLogger(RagPlannerConfig.class);
+
+    /**
+     * Warns when HyDE is enabled without the planner: the planner writes the HyDE passage, so the
+     * flag would otherwise do nothing, silently.
+     */
+    public RagPlannerConfig(@Value("${search.rag.planner.enabled:false}") boolean plannerEnabled,
+                            @Value("${search.rag.hyde.enabled:false}") boolean hydeEnabled) {
+        if (hydeEnabled && !plannerEnabled) {
+            log.warn("search.rag.hyde.enabled=true has no effect without search.rag.planner.enabled=true");
+        }
+    }
 
     /**
      * The planner's own {@link ChatClient} on a small model.

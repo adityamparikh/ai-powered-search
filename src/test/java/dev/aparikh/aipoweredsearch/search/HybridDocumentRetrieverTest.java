@@ -468,4 +468,21 @@ class HybridDocumentRetrieverTest {
 
         verify(searchRepository).executeKeywordSearch(eq(COLLECTION), eq("q"), anyInt(), any(), any());
     }
+
+    @Test
+    void fusedModeSearchesTheQueryTextAndUsesOnlyThePrecomputedVector() {
+        stubHybridResults(List.of());
+        float[] hydeVector = {0.1f, 0.2f};
+        Query query = Query.builder().text("q")
+                .context(Map.of(RagContextKeys.KEYWORD_QUERY, "keywords",
+                        RagContextKeys.VECTOR_TEXT, "an imagined catalogue entry",
+                        RagContextKeys.VECTOR, hydeVector))
+                .build();
+
+        retriever.retrieve(query);
+
+        // executeHybridRerankSearch takes one text for both legs, so keyword query and HyDE text are unused.
+        verify(searchRepository).executeHybridRerankSearch(
+                eq(COLLECTION), eq("q"), eq(TOP_K), any(), any(), any(), eq(hydeVector));
+    }
 }

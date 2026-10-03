@@ -159,10 +159,11 @@ public final class QueryPlanningExpander implements QueryExpander {
 
         // HyDE (W2): the standalone query's kNN leg searches with an imagined catalogue entry, so a
         // passage is compared with passages. Variants keep their own text for the vector leg, and
-        // the BM25 leg never sees the passage (see LegRouting).
-        if (hydeEnabled && !isBlank(accepted.hydePassage())) {
-            queries.getFirst().context().put(RagContextKeys.VECTOR_TEXT,
-                    Objects.requireNonNull(accepted.hydePassage()).strip());
+        // the BM25 leg never sees the passage (see LegRouting). Index 0 is always the standalone
+        // query: it is added first, to an empty seen set, so de-duplication cannot drop it.
+        String hydePassage = accepted.hydePassage();
+        if (hydeEnabled && hydePassage != null && !hydePassage.isBlank()) {
+            queries.getFirst().context().put(RagContextKeys.VECTOR_TEXT, hydePassage.strip());
         }
 
         // One embedding request for every kNN leg of this turn, instead of one per query (W2).

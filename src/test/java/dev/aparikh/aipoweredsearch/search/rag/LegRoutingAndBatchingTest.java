@@ -102,6 +102,24 @@ class LegRoutingAndBatchingTest {
         assertThat(queries).allSatisfy(q -> assertThat(LegRouting.vector(q)).isNull());
     }
 
+    static Stream<Arguments> unusableVectors() {
+        return Stream.of(
+                Arguments.of(List.of(new float[0], new float[0])),
+                Arguments.of(List.of(new float[]{1f, 2f}, new float[]{3f})));
+    }
+
+    @ParameterizedTest
+    @MethodSource("unusableVectors")
+    void batcherIgnoresEmptyOrInconsistentlySizedVectors(List<float[]> vectors) {
+        EmbeddingModel model = mock(EmbeddingModel.class);
+        when(model.embed(anyList())).thenReturn(vectors);
+        List<Query> queries = List.of(query(Map.of()), query(Map.of()));
+
+        new EmbeddingBatcher(model).embed(queries);
+
+        assertThat(queries).hasSize(2).allSatisfy(q -> assertThat(LegRouting.vector(q)).isNull());
+    }
+
     @Test
     void batcherDoesNothingForNoQueries() {
         EmbeddingModel model = mock(EmbeddingModel.class);

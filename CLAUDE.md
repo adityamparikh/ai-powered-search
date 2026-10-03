@@ -832,7 +832,7 @@ public ChatClient ragChatClient(ChatModel chatModel,
   - With `search.rag.hyde.enabled=true` (default `false`; needs the planner), the standalone
     query's `rag.vectorText` is the plan's HyDE passage. Variants keep their own text.
   - `EmbeddingBatcher` embeds every planned query in one `EmbeddingModel.embed(List)` call, so a
-    turn makes one embedding request regardless of the number of queries. A failed batch leaves
+    turn makes one embedding request regardless of the number of queries. A failed or invalid batch leaves
     vectors unset, and each leg then embeds individually.
 - **Typed filter fields**: `solr-config/conf/managed-schema.xml` declares `metadata_author`
   (`strings`), `metadata_price` (`pdouble`) and `metadata_year` (`pint`), so planner filters get
