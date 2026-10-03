@@ -1,6 +1,7 @@
 package dev.aparikh.aipoweredsearch.config;
 
 import dev.aparikh.aipoweredsearch.search.SearchRepository;
+import dev.aparikh.aipoweredsearch.search.rag.EmbeddingBatcher;
 import dev.aparikh.aipoweredsearch.search.rag.FilterValidator;
 import dev.aparikh.aipoweredsearch.search.rag.QueryPlanningExpander;
 import io.micrometer.observation.ObservationRegistry;
@@ -9,6 +10,7 @@ import org.springframework.ai.anthropic.AnthropicChatOptions;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.SimpleLoggerAdvisor;
 import org.springframework.ai.chat.model.ChatModel;
+import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
@@ -34,6 +36,7 @@ import java.time.Duration;
  *   <li>{@code search.rag.planner.history-messages} (default {@code 10})</li>
  *   <li>{@code search.rag.planner.filters.enabled} (default {@code false})</li>
  *   <li>{@code search.rag.planner.filters.field-cache-ttl} (default {@code 5m})</li>
+ *   <li>{@code search.rag.hyde.enabled} (default {@code false}, W2)</li>
  * </ul>
  */
 @Configuration
@@ -79,6 +82,15 @@ public class RagPlannerConfig {
         return new FilterValidator(searchRepository, ttl);
     }
 
+    /**
+     * Embeds every planned query of a turn in one request (W2). Present with the planner.
+     */
+    @Bean
+    @ConditionalOnProperty(name = "search.rag.planner.enabled", havingValue = "true")
+    public EmbeddingBatcher embeddingBatcher(EmbeddingModel embeddingModel) {
+        return new EmbeddingBatcher(embeddingModel);
+    }
+
     @Bean
     @ConditionalOnProperty(name = "search.rag.planner.enabled", havingValue = "true")
     public QueryPlanningExpander queryPlanningExpander(
@@ -89,7 +101,9 @@ public class RagPlannerConfig {
             @Value("${solr.default.collection:books}") String collection,
             @Value("${search.rag.planner.variants:2}") int variants,
             @Value("${search.rag.planner.timeout:3s}") Duration timeout,
-            @Value("${search.rag.planner.history-messages:10}") int historyMessages) throws IOException {
+            @Value("${search.rag.planner.history-messages:10}") int historyMessages,
+            @Value("${search.rag.hyde.enabled:false}") boolean hydeEnabled,
+            EmbeddingBatcher embeddingBatcher) throws IOException {
         @Nullable FilterValidator validator = filterValidator.getIfAvailable();
         return QueryPlanningExpander.builder()
                 .plannerChatClient(plannerChatClient)
@@ -100,6 +114,8 @@ public class RagPlannerConfig {
                 .timeout(timeout)
                 .historyMessages(historyMessages)
                 .observationRegistry(observationRegistry.getIfAvailable(() -> ObservationRegistry.NOOP))
+                .hydeEnabled(hydeEnabled)
+                .embeddingBatcher(embeddingBatcher)
                 .build();
     }
 }

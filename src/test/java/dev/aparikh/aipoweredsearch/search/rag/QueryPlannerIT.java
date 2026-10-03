@@ -61,7 +61,8 @@ import static org.mockito.Mockito.verify;
         "spring.ai.openai.api-key=test-key",
         "search.rag.planner.enabled=true",
         "search.rag.planner.filters.enabled=true",
-        "search.rag.planner.variants=2"})
+        "search.rag.planner.variants=2",
+        "search.rag.hyde.enabled=true"})
 @Import({PostgresTestConfiguration.class, SolrTestConfiguration.class, RagEvalTestConfiguration.class,
         QueryPlannerIT.OfflinePlanner.class})
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
@@ -156,6 +157,9 @@ class QueryPlannerIT {
     @Autowired
     private CandidateRecorder candidateRecorder;
 
+    @Autowired
+    private EmbeddingModel embeddingModel;
+
     @BeforeAll
     void indexFixture() throws Exception {
         RagEvalFixture.uploadConfigSet(solr);
@@ -220,5 +224,26 @@ class QueryPlannerIT {
         // The raw question went through unchanged, with no filters, exactly as with the planner off.
         assertThat(capture.queryText()).isEqualTo("A Clash of Kings");
         assertThat(capture.candidateIds()).hasSize(20).first().isEqualTo("grrm-02");
+    }
+
+    @Test
+    void aPlannedTurnMakesOneEmbeddingRequestAndBm25NeverSeesTheHydePassage() throws Exception {
+        String conversation = "planner-embedding";
+        searchService.ask(new AskRequest(TURN_1, conversation));
+        HashingEmbeddingModel hashing = (HashingEmbeddingModel) embeddingModel;
+        hashing.resetCounts();
+        Mockito.clearInvocations(solrClient);
+
+        searchService.ask(new AskRequest(TURN_2, conversation));
+
+        // Three planned queries, six legs: one batched embedding request and no per-leg embedding.
+        assertThat(hashing.batchCalls()).isEqualTo(1);
+        assertThat(hashing.singleCalls()).isZero();
+
+        ArgumentCaptor<SolrParams> params = ArgumentCaptor.forClass(SolrParams.class);
+        verify(solrClient, atLeastOnce()).query(anyString(), params.capture(), any(SolrRequest.METHOD.class));
+        assertThat(params.getAllValues().stream().filter(p -> "edismax".equals(p.get("defType"))).map(p -> p.get("q")))
+                .isNotEmpty()
+                .noneMatch(q -> q.contains("sweeping saga"));
     }
 }

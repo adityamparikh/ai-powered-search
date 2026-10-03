@@ -439,4 +439,33 @@ class HybridDocumentRetrieverTest {
         assertThat(HybridDocumentRetriever.filterQuery(
                 Query.builder().text("q").context(Map.of(RagContextKeys.FILTERS, List.of(" ", 7))).build())).isNull();
     }
+
+    // ==================== Per-leg inputs (W2) ====================
+
+    @Test
+    void eachLegSearchesWithItsOwnInput() throws Exception {
+        stubLegs(List.of(), List.of());
+        Query query = Query.builder().text("Recommend an epic fantasy series with political intrigue")
+                .context(Map.of(RagContextKeys.KEYWORD_QUERY, "epic fantasy political intrigue",
+                        RagContextKeys.VECTOR_TEXT, "Rival noble houses scheme for a contested throne."))
+                .build();
+
+        unfusedRetriever().retrieve(query);
+
+        verify(searchRepository).executeKeywordSearch(eq(COLLECTION), eq("epic fantasy political intrigue"),
+                anyInt(), any(), any());
+        verify(searchRepository).executeVectorSearch(eq(COLLECTION), eq("Rival noble houses scheme for a contested throne."),
+                anyInt(), any(), any(), isNull());
+    }
+
+    @Test
+    void bm25LegFallsBackToTheQueryTextNotTheHydePassage() throws Exception {
+        stubLegs(List.of(), List.of());
+        Query query = Query.builder().text("q")
+                .context(Map.of(RagContextKeys.VECTOR_TEXT, "an imagined catalogue entry")).build();
+
+        unfusedRetriever().retrieve(query);
+
+        verify(searchRepository).executeKeywordSearch(eq(COLLECTION), eq("q"), anyInt(), any(), any());
+    }
 }

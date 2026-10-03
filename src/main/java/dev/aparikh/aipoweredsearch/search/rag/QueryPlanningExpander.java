@@ -58,6 +58,11 @@ import java.util.regex.Pattern;
  * reranker. Expansion and post-processing both run on the caller thread, so no
  * {@code ThreadLocal} is involved (W0 finding A1).</p>
  *
+ * <p><strong>Per-leg inputs (W2).</strong> With {@code search.rag.hyde.enabled}, the standalone
+ * query also carries {@link RagContextKeys#VECTOR_TEXT} = the plan's HyDE passage. Every planned
+ * query's kNN text is then embedded in one {@link EmbeddingBatcher} request, and the vector is
+ * set as {@link RagContextKeys#VECTOR}.</p>
+ *
  * <p><strong>Fails safe.</strong> On a timeout, an exception, an unparseable reply or a blank
  * standalone query, the expander logs a WARN and returns {@code List.of(originalQuery)}. That is
  * exactly today's behaviour, as in Spring AI's {@code MultiQueryExpander}, and each such fallback
@@ -90,6 +95,8 @@ public final class QueryPlanningExpander implements QueryExpander {
     private final Duration timeout;
     private final int historyMessages;
     private final ObservationRegistry observationRegistry;
+    private final boolean hydeEnabled;
+    private final @Nullable EmbeddingBatcher embeddingBatcher;
     private final ContextSnapshotFactory contextSnapshotFactory = ContextSnapshotFactory.builder().build();
 
     private QueryPlanningExpander(Builder builder) {
@@ -104,6 +111,8 @@ public final class QueryPlanningExpander implements QueryExpander {
         this.timeout = builder.timeout;
         this.historyMessages = builder.historyMessages;
         this.observationRegistry = builder.observationRegistry;
+        this.hydeEnabled = builder.hydeEnabled;
+        this.embeddingBatcher = builder.embeddingBatcher;
     }
 
     public static Builder builder() {
@@ -146,6 +155,19 @@ public final class QueryPlanningExpander implements QueryExpander {
         }
         for (String variant : variantTexts.subList(0, Math.min(variants, variantTexts.size()))) {
             addQuery(queries, seen, query, variant.strip(), variant.strip(), standalone, filters);
+        }
+
+        // HyDE (W2): the standalone query's kNN leg searches with an imagined catalogue entry, so a
+        // passage is compared with passages. Variants keep their own text for the vector leg, and
+        // the BM25 leg never sees the passage (see LegRouting).
+        if (hydeEnabled && !isBlank(accepted.hydePassage())) {
+            queries.getFirst().context().put(RagContextKeys.VECTOR_TEXT,
+                    Objects.requireNonNull(accepted.hydePassage()).strip());
+        }
+
+        // One embedding request for every kNN leg of this turn, instead of one per query (W2).
+        if (embeddingBatcher != null) {
+            embeddingBatcher.embed(queries);
         }
 
         log.debug("Planned {} queries for '{}' (standalone '{}', {} filters)",
@@ -316,8 +338,22 @@ public final class QueryPlanningExpander implements QueryExpander {
         private Duration timeout = Duration.ofSeconds(3);
         private int historyMessages = 10;
         private ObservationRegistry observationRegistry = ObservationRegistry.NOOP;
+        private boolean hydeEnabled;
+        private @Nullable EmbeddingBatcher embeddingBatcher;
 
         private Builder() {
+        }
+
+        /** Use the plan's HyDE passage as the standalone query's kNN text ({@code search.rag.hyde.enabled}). */
+        public Builder hydeEnabled(boolean hydeEnabled) {
+            this.hydeEnabled = hydeEnabled;
+            return this;
+        }
+
+        /** Embed every planned query in one request; null leaves each kNN leg to embed its own text. */
+        public Builder embeddingBatcher(@Nullable EmbeddingBatcher embeddingBatcher) {
+            this.embeddingBatcher = embeddingBatcher;
+            return this;
         }
 
         /** The planner's client: a small model, no chat memory (its turns must not enter the conversation). */

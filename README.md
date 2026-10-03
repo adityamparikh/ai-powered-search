@@ -351,7 +351,9 @@ first rewrites each question using the conversation. "Anything cheaper by the sa
 becomes "Books by George R.R. Martin cheaper than A Game of Thrones". The planner also adds
 alternative phrasings, and with `search.rag.planner.filters.enabled=true` it turns explicit
 constraints (author, price, year) into validated Solr filters. If the planner is slow or fails,
-the question is answered exactly as before.
+the question is answered exactly as before. With `search.rag.hyde.enabled=true`, the meaning
+search uses an imagined book description that would answer the question (HyDE) instead of the
+question itself. Every query in a turn is embedded in a single request.
 
 > **Migration note:** the configset now types `metadata_author` (`strings`), `metadata_price`
 > (`pdouble`) and `metadata_year` (`pint`), whether or not the planner is enabled. Re-upload the

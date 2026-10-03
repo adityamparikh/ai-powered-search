@@ -32,7 +32,7 @@ flowchart TD
 | Stage | Spring AI interface | Implementation | Status |
 |---|---|---|---|
 | Gate + planner | `QueryExpander` | `QueryPlanningExpander` (opt-in) | W1; gate W6 |
-| Retrieval | `DocumentRetriever` | `HybridDocumentRetriever` | in place; per-leg inputs W2 |
+| Retrieval | `DocumentRetriever` | `HybridDocumentRetriever`, with per-leg inputs | in place; per-leg W2 |
 | Fusion | `DocumentJoiner` | `RrfDocumentJoiner` | W3 |
 | Filter | `DocumentPostProcessor` | `JevDocumentFilter` (opt-in) | W4 |
 | Rerank | `DocumentPostProcessor` | `RerankingDocumentPostProcessor`, judged against the standalone query | in place; configurable W4 |
@@ -153,6 +153,44 @@ minimum cacheable prompt is 4,096 tokens, and the planner's system prompt is abo
 | `search.rag.planner.history-messages` | `10` | Most recent user/assistant messages the planner sees |
 | `search.rag.planner.filters.enabled` | `false` | Turn planner filters into validated `fq` clauses |
 | `search.rag.planner.filters.field-cache-ttl` | `5m` | How long field introspection is cached |
+
+## Per-leg queries and HyDE (W2)
+
+Pattern: [Better RAG Results with HyDE](https://medium.com/@thetalkingapp/spring-ai-recipe-better-rag-results-with-hyde-1d2d360a1b58)
+(Hypothetical Document Embeddings, [Gao et al. 2022](https://arxiv.org/abs/2212.10496)).
+
+**Why.** The kNN leg compares a *request* ("Recommend an epic fantasy series with political
+intrigue") with *plot synopses*: different shapes of text (P4). HyDE searches with an imagined
+answer instead, a passage written like a catalogue entry, so the comparison is passage to
+passage. The BM25 leg has the opposite need: distinctive terms, not prose.
+
+**Leg routing** (`LegRouting`, applied by `HybridDocumentRetriever` in unfused mode):
+
+| Leg | Searches with (first present) |
+|---|---|
+| BM25 | `rag.keywordQuery` → `Query.text()` |
+| kNN | precomputed `rag.vector` → embedding of `rag.vectorText` → embedding of `Query.text()` |
+
+**BM25 never sees the HyDE passage.** Its generic prose would match almost everything lexically.
+`OneEmbeddingRequestPerAskTest` and `QueryPlannerIT` assert this on the actual `q` sent to Solr.
+
+**HyDE** (`search.rag.hyde.enabled`, default `false`; needs the planner). `QueryPlanningExpander` sets
+`rag.vectorText = plan.hydePassage()` on the **standalone** query only. Variants keep their own
+text for the vector leg, so the fusion still sees literal phrasings.
+
+**One embedding request per turn.** With the planner on, `EmbeddingBatcher` embeds every planned
+query's kNN text (HyDE passage or query text) in **one** `EmbeddingModel.embed(List<String>)`
+call and sets `rag.vector` on each query. The retriever passes the vector straight to Solr (W5),
+so a turn with 1 + N queries makes one embedding request instead of 1 + N. With the planner off,
+the single query is embedded once, as before.
+
+**Failure behaviour.** A failed or wrong-sized batch leaves `rag.vector` unset, and each kNN leg
+embeds its own text as before: slower, never wrong. A blank HyDE passage is ignored. A planner
+failure means one original query, embedded once.
+
+| Property | Default | Meaning |
+|---|---|---|
+| `search.rag.hyde.enabled` | `false` | Use the plan's HyDE passage as the standalone query's kNN text |
 
 ## Execution: virtual threads (W5)
 
@@ -296,9 +334,9 @@ Every key is optional, and a stage that finds its key absent behaves as before.
 | Key | Type | Written by | Read by |
 |---|---|---|---|
 | `rag.standalone` | `String` | planner (W1), into the original query | post-processors |
-| `rag.keywordQuery` | `String` | planner (W1) | BM25 leg (W2) |
-| `rag.vectorText` | `String` | planner, HyDE (W2) | batch embedder (W2) |
-| `rag.vector` | `float[]` | batch embedder (W2) | kNN leg (W5) |
+| `rag.keywordQuery` | `String` | planner (W1) | BM25 leg (W2, `LegRouting`) |
+| `rag.vectorText` | `String` | planner, HyDE (W2) | `EmbeddingBatcher`; kNN leg when no vector |
+| `rag.vector` | `float[]` | `EmbeddingBatcher` (W2) | kNN leg (W5) |
 | `rag.filters` | `List<String>` | planner + `FilterValidator` (W1) | both legs (W1) |
 | `rag.leg` / `rag.legRank` | `String` / `Integer` (document metadata) | retriever (W3) | RRF joiner (W3) |
 

@@ -1,6 +1,7 @@
 package dev.aparikh.aipoweredsearch.search;
 
 import dev.aparikh.aipoweredsearch.search.model.SearchResponse;
+import dev.aparikh.aipoweredsearch.search.rag.LegRouting;
 import dev.aparikh.aipoweredsearch.search.rag.RagContextKeys;
 import dev.aparikh.aipoweredsearch.search.rag.RagObservations;
 import dev.aparikh.aipoweredsearch.search.rag.RrfDocumentJoiner;
@@ -49,9 +50,12 @@ import java.util.concurrent.Future;
  * silently discard the fusion.</p>
  *
  * <p><strong>Per-query inputs.</strong> The retriever reads optional values from
- * {@link Query#context()} (see {@link RagContextKeys}). When {@link RagContextKeys#VECTOR} holds
- * a precomputed {@code float[]} embedding, the vector leg uses it and makes no embedding call;
- * otherwise the query text is embedded exactly as before.</p>
+ * {@link Query#context()} (see {@link RagContextKeys} and {@link LegRouting}). The BM25 leg
+ * searches {@link RagContextKeys#KEYWORD_QUERY} when present. The kNN leg uses a precomputed
+ * {@link RagContextKeys#VECTOR} and makes no embedding call; failing that it embeds
+ * {@link RagContextKeys#VECTOR_TEXT} (a HyDE passage). Each falls back to the query text, exactly
+ * as before. In fused mode only the precomputed vector applies, because
+ * {@code executeHybridRerankSearch} takes a single text for both legs.</p>
  *
  * <p><strong>Two modes.</strong> In <em>unfused</em> mode (the default, used with
  * {@code RrfDocumentJoiner}) the BM25 and kNN legs run concurrently and their hits are returned
@@ -235,11 +239,14 @@ public class HybridDocumentRetriever implements DocumentRetriever {
         // submissions on a bounded pool could starve it.
         ContextSnapshot snapshot = contextSnapshotFactory.captureAll();
         try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            // Per-leg inputs (W2): BM25 gets the planner's keyword query, kNN a precomputed vector or
+            // the embedding of a HyDE passage. Both fall back to the query text.
             Future<List<Document>> keyword = executor.submit(snapshot.wrap(observedLeg(KEYWORD_LEG, () ->
-                    searchRepository.executeKeywordSearch(collection, query.text(), fetchSize, filterQuery, PROJECTED_FIELDS))));
+                    searchRepository.executeKeywordSearch(collection, LegRouting.keywordText(query), fetchSize,
+                            filterQuery, PROJECTED_FIELDS))));
             Future<List<Document>> vector = executor.submit(snapshot.wrap(observedLeg(VECTOR_LEG, () ->
-                    searchRepository.executeVectorSearch(collection, query.text(), fetchSize, filterQuery, PROJECTED_FIELDS,
-                            precomputedVector(query)))));
+                    searchRepository.executeVectorSearch(collection, LegRouting.vectorText(query), fetchSize,
+                            filterQuery, PROJECTED_FIELDS, LegRouting.vector(query)))));
 
             List<Document> keywordHits = awaitLeg(KEYWORD_LEG, keyword, query);
             List<Document> vectorHits = awaitLeg(VECTOR_LEG, vector, query);
@@ -314,7 +321,7 @@ public class HybridDocumentRetriever implements DocumentRetriever {
         // LLM call to synthesise Solr query parameters; that is worth it for a search API
         // but is pure latency on a RAG turn, where the model already has the question.
         SearchResponse response = searchRepository.executeHybridRerankSearch(
-                collection, query.text(), topK, filterQuery, PROJECTED_FIELDS, null, precomputedVector(query));
+                collection, query.text(), topK, filterQuery, PROJECTED_FIELDS, null, LegRouting.vector(query));
 
         List<Document> documents = response.documents().stream()
                 .map(this::toDocument)
@@ -324,26 +331,6 @@ public class HybridDocumentRetriever implements DocumentRetriever {
         log.debug("Hybrid retrieval for '{}' returned {} documents from collection '{}'",
                 query.text(), documents.size(), collection);
         return documents;
-    }
-
-    /**
-     * The embedding an earlier stage already computed for this query, if any.
-     *
-     * <p>A value that is not a non-empty {@code float[]} is ignored with a warning and the query
-     * text is embedded instead, so a contract violation by an earlier stage costs one embedding
-     * call rather than a failed kNN query.</p>
-     */
-    static float @Nullable [] precomputedVector(Query query) {
-        Object value = query.context().get(RagContextKeys.VECTOR);
-        if (value == null) {
-            return null;
-        }
-        if (value instanceof float[] vector && vector.length > 0) {
-            return vector;
-        }
-        log.warn("Ignoring {} of type {}: expected a non-empty float[]; embedding the query text instead",
-                RagContextKeys.VECTOR, value.getClass().getSimpleName());
-        return null;
     }
 
     /**

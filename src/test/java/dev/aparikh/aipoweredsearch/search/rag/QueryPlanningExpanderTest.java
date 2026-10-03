@@ -377,4 +377,64 @@ class QueryPlanningExpanderTest {
         assertThat(QueryPlanningExpander.normalise(adversarial)).isEqualTo(adversarial);
         assertThat(QueryPlanningExpander.normalise("x" + "!".repeat(200_000))).isEqualTo("x");
     }
+
+    // ==================== HyDE (W2) ====================
+
+    private QueryPlanningExpander hydeExpander(String plan, boolean hyde) {
+        return QueryPlanningExpander.builder()
+                .plannerChatClient(ChatClient.builder(replying(p -> plan)).build())
+                .systemPrompt("planner").collection("books").variants(2).hydeEnabled(hyde).build();
+    }
+
+    @Test
+    void withHydeOnTheStandaloneQueryAloneCarriesThePassageAsItsVectorText() {
+        List<Query> queries = hydeExpander(PLAN_JSON, true).expand(followUp());
+
+        assertThat(queries.getFirst().context()).containsEntry(RagContextKeys.VECTOR_TEXT, "A sweeping tale of rival houses.");
+        assertThat(queries.subList(1, queries.size()))
+                .allSatisfy(q -> assertThat(q.context()).doesNotContainKey(RagContextKeys.VECTOR_TEXT));
+    }
+
+    @Test
+    void withHydeOffNoQueryCarriesAVectorText() {
+        assertThat(hydeExpander(PLAN_JSON, false).expand(followUp()))
+                .allSatisfy(q -> assertThat(q.context()).doesNotContainKey(RagContextKeys.VECTOR_TEXT));
+    }
+
+    @Test
+    void aBlankHydePassageIsIgnored() {
+        String plan = "{\"standalone\": \"s\", \"variants\": [\"a\", \"b\"], \"hydePassage\": \" \", \"filters\": []}";
+
+        assertThat(hydeExpander(plan, true).expand(followUp()))
+                .allSatisfy(q -> assertThat(q.context()).doesNotContainKey(RagContextKeys.VECTOR_TEXT));
+    }
+
+    @Test
+    void theBatcherEmbedsTheFinalDeduplicatedQueries() {
+        org.springframework.ai.embedding.EmbeddingModel model = mock(org.springframework.ai.embedding.EmbeddingModel.class);
+        when(model.embed(org.mockito.ArgumentMatchers.anyList()))
+                .thenReturn(List.of(new float[]{1f}, new float[]{2f}, new float[]{3f}));
+        QueryPlanningExpander expander = QueryPlanningExpander.builder()
+                .plannerChatClient(ChatClient.builder(replying(p -> PLAN_JSON)).build())
+                .systemPrompt("planner").collection("books").variants(2).hydeEnabled(true)
+                .embeddingBatcher(new EmbeddingBatcher(model)).build();
+
+        List<Query> queries = expander.expand(followUp());
+
+        org.mockito.Mockito.verify(model).embed(List.of("A sweeping tale of rival houses.",
+                "Cheaper novels from the author of A Song of Ice and Fire", "Lower-priced George R.R. Martin paperbacks"));
+        assertThat(queries).allSatisfy(q -> assertThat(LegRouting.vector(q)).isNotNull());
+    }
+
+    @Test
+    void noBatchingWhenPlanningFails() {
+        org.springframework.ai.embedding.EmbeddingModel model = mock(org.springframework.ai.embedding.EmbeddingModel.class);
+        QueryPlanningExpander expander = QueryPlanningExpander.builder()
+                .plannerChatClient(ChatClient.builder(replying(p -> "not json")).build())
+                .systemPrompt("planner").collection("books").embeddingBatcher(new EmbeddingBatcher(model)).build();
+
+        expander.expand(followUp());
+
+        org.mockito.Mockito.verifyNoInteractions(model);
+    }
 }

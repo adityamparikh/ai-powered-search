@@ -825,6 +825,15 @@ public ChatClient ragChatClient(ChatModel chatModel,
   - `search.rag.planner.history-messages` (`10`)
   - `search.rag.planner.filters.enabled` (`false`)
   - `search.rag.planner.filters.field-cache-ttl` (`5m`)
+- **Per-leg inputs and HyDE** (W2):
+  - `LegRouting` gives the BM25 leg `rag.keywordQuery` and the kNN leg a precomputed
+    `rag.vector`, else the embedding of `rag.vectorText`; each falls back to the query text.
+    BM25 never sees a HyDE passage.
+  - With `search.rag.hyde.enabled=true` (default `false`; needs the planner), the standalone
+    query's `rag.vectorText` is the plan's HyDE passage. Variants keep their own text.
+  - `EmbeddingBatcher` embeds every planned query in one `EmbeddingModel.embed(List)` call, so a
+    turn makes one embedding request regardless of the number of queries. A failed batch leaves
+    vectors unset, and each leg then embeds individually.
 - **Typed filter fields**: `solr-config/conf/managed-schema.xml` declares `metadata_author`
   (`strings`), `metadata_price` (`pdouble`) and `metadata_year` (`pint`), so planner filters get
   exact author matches and numeric ranges. Without them, `metadata_*` is `text_general`. These
