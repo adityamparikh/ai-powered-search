@@ -155,14 +155,14 @@ A leg that fails is logged at WARN and contributes nothing; this is how
 | Both legs return hits | RRF over 2·top-k per leg, cap top-k | same |
 | Vector leg fails (e.g. embedding outage) | keyword-only, top-k rows | keyword hits only, capped at top-k → same documents |
 | Keyword leg fails | keyword retry fails → vector-only, top-k rows | vector hits only, capped → same documents |
-| Both empty or both fail | empty | empty |
+| Both empty or both fail | empty (failed fallbacks logged at ERROR) | empty (both legs failing logged at ERROR) |
 
 **Properties.**
 
 | Property | Default | Meaning |
 |---|---|---|
 | `search.rag.fusion.enabled` | `true` | `false` restores per-query fusion in the retriever plus a pass-through joiner: the W5 pipeline, as an escape hatch |
-| `search.rag.fusion.top-k` | `20` | Fused candidates kept. Keep it equal to `search.rag.hybrid.top-k` for the planner-off invariant |
+| `search.rag.fusion.top-k` | `search.rag.hybrid.top-k` (`20`) | Fused candidates kept. Keep it equal to `search.rag.hybrid.top-k` for the planner-off invariant |
 | `search.rag.fusion.rrf-k` | `60` | RRF smoothing constant |
 
 The default `ConcatenationDocumentJoiner` is not used: it re-sorts documents by their own score,

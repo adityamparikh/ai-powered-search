@@ -51,8 +51,10 @@ public final class RrfDocumentJoiner implements DocumentJoiner {
 
     private static final Logger log = LoggerFactory.getLogger(RrfDocumentJoiner.class);
 
-    static final String KEYWORD_LEG = "keyword";
-    static final String VECTOR_LEG = "vector";
+    /** {@link RagContextKeys#LEG} value for a BM25 hit; the retriever writes it, this joiner reads it. */
+    public static final String KEYWORD_LEG = "keyword";
+    /** {@link RagContextKeys#LEG} value for a kNN hit; the retriever writes it, this joiner reads it. */
+    public static final String VECTOR_LEG = "vector";
     static final String UNTAGGED = "untagged";
 
     static final String RRF_SCORE = "rrf_score";
@@ -114,11 +116,16 @@ public final class RrfDocumentJoiner implements DocumentJoiner {
         return rankings;
     }
 
+    /**
+     * Builds the fused document from its best occurrence. Only text, metadata and score carry
+     * over; media is dropped, which is fine for text RAG, where the retriever produces text only.
+     */
     private static Document toDocument(RrfMerger.Fused<Document> fused) {
         Document best = fused.best();
 
-        // Metadata from every occurrence, best first: the best occurrence wins on conflict, and
-        // each leg's own score (keyword_score / vector_score) survives.
+        // Metadata from every occurrence, best first (Fused.occurrences() is ordered by rank, then
+        // tie-break group): the best occurrence wins on conflict via putIfAbsent, and each leg's
+        // own score (keyword_score / vector_score) survives.
         Map<String, Object> metadata = new LinkedHashMap<>();
         Integer bestKeywordRank = null;
         Integer bestVectorRank = null;

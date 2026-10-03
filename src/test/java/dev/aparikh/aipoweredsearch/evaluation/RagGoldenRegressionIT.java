@@ -96,8 +96,8 @@ class RagGoldenRegressionIT {
                                                           @Value("${solr.default.collection}") String collection,
                                                           @Value("${search.rag.hybrid.top-k:20}") int topK,
                                                           ObservationRegistry observationRegistry,
-                                                          @Value("${search.rag.fusion.enabled:true}") boolean unfused) {
-            return new ThreadRecordingRetriever(searchRepository, collection, topK, observationRegistry, unfused);
+                                                          @Value("${search.rag.fusion.enabled:true}") boolean deferFusion) {
+            return new ThreadRecordingRetriever(searchRepository, collection, topK, observationRegistry, deferFusion);
         }
     }
 
@@ -107,8 +107,8 @@ class RagGoldenRegressionIT {
         final List<Boolean> virtualThreads = new CopyOnWriteArrayList<>();
 
         ThreadRecordingRetriever(SearchRepository searchRepository, String collection, int topK,
-                                 ObservationRegistry observationRegistry, boolean unfused) {
-            super(searchRepository, collection, topK, observationRegistry, unfused);
+                                 ObservationRegistry observationRegistry, boolean deferFusion) {
+            super(searchRepository, collection, topK, observationRegistry, deferFusion);
         }
 
         @Override

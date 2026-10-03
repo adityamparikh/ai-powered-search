@@ -3,6 +3,7 @@ package dev.aparikh.aipoweredsearch.search;
 import dev.aparikh.aipoweredsearch.search.model.SearchResponse;
 import dev.aparikh.aipoweredsearch.search.rag.RagContextKeys;
 import dev.aparikh.aipoweredsearch.search.rag.RagObservations;
+import dev.aparikh.aipoweredsearch.search.rag.RrfDocumentJoiner;
 import io.micrometer.context.ContextSnapshot;
 import io.micrometer.context.ContextSnapshotFactory;
 import io.micrometer.observation.ObservationRegistry;
@@ -66,7 +67,9 @@ import java.util.concurrent.Future;
  * vector leg fails it falls back to keyword-only results, when the keyword leg fails to
  * vector-only results, and when both legs are empty so is the cascade. After the joiner caps the
  * fused list at {@code search.rag.fusion.top-k}, the documents and their order are the same as the
- * cascade's.</p>
+ * cascade's. When both legs fail the result is empty, as the cascade's is, and it is logged at
+ * ERROR, as the cascade's failed fallbacks are, so an outage is distinguishable from a query with
+ * no hits.</p>
  *
  * <p>Each retrieval is recorded as a {@value RagObservations#RETRIEVE} observation: one per leg
  * ({@code leg=keyword}, {@code leg=vector}) in unfused mode, one {@code leg=hybrid} in fused
@@ -96,8 +99,8 @@ public class HybridDocumentRetriever implements DocumentRetriever {
     private static final Logger log = LoggerFactory.getLogger(HybridDocumentRetriever.class);
 
     static final String HYBRID_LEG = "hybrid";
-    static final String KEYWORD_LEG = "keyword";
-    static final String VECTOR_LEG = "vector";
+    static final String KEYWORD_LEG = RrfDocumentJoiner.KEYWORD_LEG;
+    static final String VECTOR_LEG = RrfDocumentJoiner.VECTOR_LEG;
 
     private static final String SCORE_FIELD = "score";
 
@@ -105,11 +108,12 @@ public class HybridDocumentRetriever implements DocumentRetriever {
     private final String collection;
     private final int topK;
     private final ObservationRegistry observationRegistry;
-    private final boolean unfused;
+    private final boolean deferFusion;
     private final ContextSnapshotFactory contextSnapshotFactory = ContextSnapshotFactory.builder().build();
 
     /**
      * Creates a fused-mode retriever bound to a single Solr collection, without observations.
+     * Note that the Spring bean defaults to unfused mode.
      *
      * <p>For subclasses that do not care about observations, such as the recording retriever in
      * {@code RagAdvisorOrderingIT}. Spring uses the {@code @Autowired} constructor.</p>
@@ -121,7 +125,8 @@ public class HybridDocumentRetriever implements DocumentRetriever {
     }
 
     /**
-     * Creates a fused-mode retriever bound to a single Solr collection.
+     * Creates a fused-mode retriever bound to a single Solr collection. Note that the Spring bean
+     * defaults to unfused mode.
      *
      * @see #HybridDocumentRetriever(SearchRepository, String, int, ObservationRegistry, boolean)
      */
@@ -142,25 +147,35 @@ public class HybridDocumentRetriever implements DocumentRetriever {
      *                            each leg fetches {@code 2 * topK} hits and the joiner applies
      *                            its own cap.
      * @param observationRegistry records the {@value RagObservations#RETRIEVE} observations
-     * @param unfused             true to return each leg's hits unfused, tagged for
-     *                            {@code RrfDocumentJoiner}; false to return the RRF-fused list
+     * @param deferFusion         true (unfused mode) to return each leg's hits unfused, tagged for
+     *                            {@code RrfDocumentJoiner} to fuse; false (fused mode) to return the
+     *                            RRF-fused list
      */
     @Autowired
     public HybridDocumentRetriever(SearchRepository searchRepository,
                                    @Value("${solr.default.collection:books}") String collection,
                                    @Value("${search.rag.hybrid.top-k:20}") int topK,
                                    ObservationRegistry observationRegistry,
-                                   @Value("${search.rag.fusion.enabled:true}") boolean unfused) {
+                                   // Fusion "enabled" means the joiner fuses, so the retriever defers it.
+                                   @Value("${search.rag.fusion.enabled:true}") boolean deferFusion) {
         this.searchRepository = searchRepository;
         this.collection = collection;
         this.topK = topK;
         this.observationRegistry = observationRegistry;
-        this.unfused = unfused;
+        this.deferFusion = deferFusion;
+    }
+
+    /**
+     * Whether this retriever returns unfused, leg-tagged hits that need {@code RrfDocumentJoiner}.
+     * The joiner is chosen from this, so the two cannot be configured inconsistently.
+     */
+    public boolean defersFusion() {
+        return deferFusion;
     }
 
     @Override
     public List<Document> retrieve(Query query) {
-        if (unfused) {
+        if (deferFusion) {
             return retrieveLegs(query);
         }
         return RagObservations.observe(observationRegistry, RagObservations.RETRIEVE,
@@ -174,7 +189,9 @@ public class HybridDocumentRetriever implements DocumentRetriever {
     private List<Document> retrieveLegs(Query query) {
         int fetchSize = topK * SearchRepository.OVER_FETCH_MULTIPLIER;
         // The legs run on fresh virtual threads; the snapshot carries the current observation
-        // across, so each leg's rag.retrieve span nests under the request.
+        // across, so each leg's rag.retrieve span nests under the request. This deliberately
+        // bypasses applicationTaskExecutor: this method already runs as a task on it, and nesting
+        // submissions on a bounded pool could starve it.
         ContextSnapshot snapshot = contextSnapshotFactory.captureAll();
         try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
             Future<List<Document>> keyword = executor.submit(snapshot.wrap(observedLeg(KEYWORD_LEG, () ->
@@ -183,8 +200,14 @@ public class HybridDocumentRetriever implements DocumentRetriever {
                     searchRepository.executeVectorSearch(collection, query.text(), fetchSize, null, PROJECTED_FIELDS,
                             precomputedVector(query)))));
 
-            List<Document> documents = new ArrayList<>(awaitLeg(KEYWORD_LEG, keyword, query));
-            documents.addAll(awaitLeg(VECTOR_LEG, vector, query));
+            List<Document> keywordHits = awaitLeg(KEYWORD_LEG, keyword, query);
+            List<Document> vectorHits = awaitLeg(VECTOR_LEG, vector, query);
+            if (keywordHits == null && vectorHits == null) {
+                log.error("Both retrieval legs failed for '{}' in collection '{}'; continuing without context",
+                        query.text(), collection);
+            }
+            List<Document> documents = new ArrayList<>(Objects.requireNonNullElse(keywordHits, List.of()));
+            documents.addAll(Objects.requireNonNullElse(vectorHits, List.of()));
             log.debug("Unfused retrieval for '{}' returned {} hits from collection '{}'",
                     query.text(), documents.size(), collection);
             return documents;
@@ -205,17 +228,22 @@ public class HybridDocumentRetriever implements DocumentRetriever {
                 });
     }
 
-    private List<Document> awaitLeg(String leg, Future<List<Document>> future, Query query) {
+    /**
+     * @return the leg's hits, or null if the leg failed
+     */
+    private @Nullable List<Document> awaitLeg(String leg, Future<List<Document>> future, Query query) {
         try {
             return future.get();
         } catch (InterruptedException e) {
             // A cancelled caller: restore the flag and propagate rather than return partial results.
+            // With the flag set, the executor's close() interrupts the in-flight legs (as
+            // shutdownNow() would) instead of waiting for them to finish.
             Thread.currentThread().interrupt();
             throw new IllegalStateException("Retrieval was interrupted", e);
         } catch (ExecutionException e) {
             log.warn("The {} retrieval leg failed for '{}'; continuing with the other leg: {}",
                     leg, query.text(), String.valueOf(e.getCause()));
-            return List.of();
+            return null;
         }
     }
 

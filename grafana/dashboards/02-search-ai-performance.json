@@ -734,7 +734,7 @@
       "id": 60,
       "type": "timeseries",
       "title": "Retrieval latency by leg (p50 / p95)",
-      "description": "rag.retrieve: one observation per query and retrieval leg (hybrid today; keyword/vector once the RRF joiner lands).",
+      "description": "rag.retrieve: one observation per query and retrieval leg (keyword and vector; hybrid when search.rag.fusion.enabled=false).",
       "datasource": {
         "uid": "prometheus",
         "type": "prometheus"

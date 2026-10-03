@@ -6,6 +6,7 @@ import dev.aparikh.aipoweredsearch.search.rag.RagObservations;
 import io.micrometer.observation.tck.TestObservationRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
@@ -16,12 +17,16 @@ import org.springframework.ai.rag.Query;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static io.micrometer.observation.tck.TestObservationRegistryAssert.assertThat;
 import static org.mockito.Mockito.verify;
@@ -313,5 +318,40 @@ class HybridDocumentRetrieverTest {
                 .hasNumberOfObservationsWithNameEqualTo(RagObservations.RETRIEVE, 2)
                 .hasAnObservationWithAKeyValue(RagObservations.LEG_TAG, "keyword")
                 .hasAnObservationWithAKeyValue(RagObservations.LEG_TAG, "vector");
+    }
+
+    @Test
+    @Timeout(10)
+    void anInterruptedCallerFailsFastAndInterruptsTheInFlightLegs() throws Exception {
+        CountDownLatch neverReleased = new CountDownLatch(1);
+        AtomicBoolean legInterrupted = new AtomicBoolean();
+        when(searchRepository.executeKeywordSearch(any(), any(), anyInt(), any(), any())).thenAnswer(invocation -> {
+            try {
+                neverReleased.await();
+                return List.of();
+            } catch (InterruptedException e) {
+                legInterrupted.set(true);
+                throw e;
+            }
+        });
+        lenient().when(searchRepository.executeVectorSearch(any(), any(), anyInt(), any(), any(), any()))
+                .thenReturn(List.of());
+
+        Thread.currentThread().interrupt();
+        try {
+            assertThatThrownBy(() -> unfusedRetriever().retrieve(Query.builder().text("q").build()))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasCauseInstanceOf(InterruptedException.class);
+            assertThat(Thread.currentThread().isInterrupted()).as("interrupt flag restored").isTrue();
+        } finally {
+            Thread.interrupted();
+        }
+        assertThat(legInterrupted).as("blocked leg was interrupted, not awaited").isTrue();
+    }
+
+    @Test
+    void exposesItsModeSoTheJoinerCanFollowIt() {
+        assertThat(unfusedRetriever().defersFusion()).isTrue();
+        assertThat(retriever.defersFusion()).isFalse();
     }
 }

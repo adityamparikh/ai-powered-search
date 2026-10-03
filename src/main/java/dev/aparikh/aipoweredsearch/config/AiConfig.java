@@ -224,10 +224,8 @@ public class AiConfig {
      *        runs on it rather than on the advisor's private 4-16 platform-thread pool; with
      *        {@code spring.threads.virtual.enabled=true} it runs each task on a virtual thread
      * @param observationRegistry records the {@code rag.join} and {@code rag.postprocess} observations
-     * @param fusionEnabled whether to fuse every retrieval leg of every query with
-     *        {@link RrfDocumentJoiner} ({@code search.rag.fusion.enabled}, default true). False
-     *        restores the per-query fused retriever and the pass-through joiner.
-     * @param fusionTopK fused candidates kept by the joiner ({@code search.rag.fusion.top-k})
+     * @param fusionTopK fused candidates kept by the joiner ({@code search.rag.fusion.top-k},
+     *        defaulting to {@code search.rag.hybrid.top-k})
      * @param rrfK RRF smoothing constant ({@code search.rag.fusion.rrf-k})
      * @return configured ChatClient instance with RAG capabilities
      */
@@ -240,8 +238,7 @@ public class AiConfig {
                                     @Autowired(required = false) @Nullable RerankingDocumentPostProcessor reranker,
                                     @Qualifier("applicationTaskExecutor") ObjectProvider<TaskExecutor> applicationTaskExecutor,
                                     ObjectProvider<ObservationRegistry> observationRegistry,
-                                    @Value("${search.rag.fusion.enabled:true}") boolean fusionEnabled,
-                                    @Value("${search.rag.fusion.top-k:20}") int fusionTopK,
+                                    @Value("${search.rag.fusion.top-k:${search.rag.hybrid.top-k:20}}") int fusionTopK,
                                     @Value("${search.rag.fusion.rrf-k:60}") int rrfK) {
         ChatClient.Builder builder = ChatClient.builder(chatModel);
 
@@ -258,9 +255,11 @@ public class AiConfig {
         //
         // The default ConcatenationDocumentJoiner is deliberately not used: it re-sorts documents
         // by their individual score, and raw BM25 and cosine scores are not comparable, so it
-        // would scramble the ranking. With fusion disabled the retriever fuses per query and a
-        // pass-through joiner keeps that order for the same reason.
-        DocumentJoiner joiner = fusionEnabled
+        // would scramble the ranking. With fusion disabled (search.rag.fusion.enabled=false) the
+        // retriever fuses per query and a pass-through joiner keeps that order for the same reason.
+        // The joiner follows the retriever's mode rather than re-reading the property, so the two
+        // cannot disagree.
+        DocumentJoiner joiner = hybridDocumentRetriever.defersFusion()
                 ? new RrfDocumentJoiner(rrfK, fusionTopK)
                 : documentsForQuery -> documentsForQuery.values().stream()
                         .flatMap(List::stream)

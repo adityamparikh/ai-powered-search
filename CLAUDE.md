@@ -768,7 +768,8 @@ public ChatClient ragChatClient(ChatModel chatModel,
                             .documentRetriever(hybridDocumentRetriever)
                             // One N-way RRF pass over every leg of every query; the default
                             // ConcatenationDocumentJoiner would re-sort by incomparable raw scores.
-                            .documentJoiner(new RrfDocumentJoiner(rrfK, fusionTopK))
+                            .documentJoiner(new ObservedDocumentJoiner(
+                                    new RrfDocumentJoiner(rrfK, fusionTopK), observations))
                             // Boot's applicationTaskExecutor: virtual threads, trace propagated
                             .taskExecutor(applicationTaskExecutor)
                             .build(),
@@ -792,15 +793,17 @@ public ChatClient ragChatClient(ChatModel chatModel,
   search API but not on a RAG turn, where the model already has the question.
 - **RrfDocumentJoiner** (W3): the retriever returns the BM25 and kNN hits *unfused*, tagged with
   `rag.leg` and `rag.legRank`. The joiner runs one N-way RRF pass over every leg of every query,
-  de-duplicates by id, sets the fused score, and caps at `search.rag.fusion.top-k` (default 20).
+  de-duplicates by id, sets the fused score, and caps at `search.rag.fusion.top-k`.
   It never thresholds. Ties go to best rank, then keyword leg, then id. With one query the
   output is identical to the old per-query fusion (`RrfEquivalenceTest`, `RagGoldenRegressionIT`).
   The default `ConcatenationDocumentJoiner` is not used because it re-sorts by raw scores that
   aren't comparable across legs.
 - **Fusion properties**:
   - `search.rag.fusion.enabled` (default `true`; `false` restores per-query fusion plus a
-    pass-through joiner);
-  - `search.rag.fusion.top-k` (default `20`; keep it equal to `search.rag.hybrid.top-k`);
+    pass-through joiner). The retriever reads it, and `AiConfig` picks the joiner from
+    `HybridDocumentRetriever.defersFusion()`, so the two cannot disagree;
+  - `search.rag.fusion.top-k` (defaults to `search.rag.hybrid.top-k`, 20; keep them equal for
+    the planner-off invariant);
   - `search.rag.fusion.rrf-k` (default `60`).
 - **RrfMerger**: `fuse(List<Ranking<T>>, idOf)` is the generic N-way algorithm. The search API's
   two-list `merge(keyword, vector)` delegates to it unchanged.

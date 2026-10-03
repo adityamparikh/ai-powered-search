@@ -176,6 +176,43 @@ class RrfDocumentJoinerTest {
     }
 
     @Test
+    void bestRankedOccurrenceWinsMetadataAndTextConflicts() {
+        // Keyword #3 vs vector #1: the vector occurrence is the best and supplies text and metadata.
+        Document keywordHit = new Document("a", "keyword text", Map.of(RagContextKeys.LEG, "keyword",
+                RagContextKeys.LEG_RANK, 3, "chunk", "from-keyword"));
+        Document vectorHit = new Document("a", "vector text", Map.of(RagContextKeys.LEG, "vector",
+                RagContextKeys.LEG_RANK, 1, "chunk", "from-vector"));
+
+        List<Document> hits = List.of(hit("k1", "keyword", 1), hit("k2", "keyword", 2), keywordHit, vectorHit);
+
+        Document fused = joiner.join(Map.of(new Query("q"), List.of(hits))).stream()
+                .filter(document -> "a".equals(document.getId()))
+                .findFirst().orElseThrow();
+
+        assertThat(fused.getText()).isEqualTo("vector text");
+        assertThat(fused.getMetadata()).containsEntry("chunk", "from-vector");
+    }
+
+    @Test
+    void aHitWithoutALegRankIsRankedLastInItsLeg() {
+        Document unranked = new Document("m", "text m", Map.of(RagContextKeys.LEG, "keyword"));
+
+        List<Document> joined = joiner.join(Map.of(new Query("q"),
+                List.of(List.of(unranked, hit("k1", "keyword", 1)))));
+
+        assertThat(ids(joined)).containsExactly("k1", "m");
+    }
+
+    @Test
+    void anEmptyTextHitIsKeptRatherThanRejected() {
+        Document empty = new Document("e", "", Map.of(RagContextKeys.LEG, "keyword", RagContextKeys.LEG_RANK, 1));
+
+        List<Document> joined = joiner.join(Map.of(new Query("q"), List.of(List.of(empty))));
+
+        assertThat(joined).singleElement().satisfies(document -> assertThat(document.getText()).isEmpty());
+    }
+
+    @Test
     void untaggedListsAreRankedByPosition() {
         List<Document> untagged = List.of(new Document("u1", "x", Map.of()), new Document("u2", "y", Map.of()));
 
