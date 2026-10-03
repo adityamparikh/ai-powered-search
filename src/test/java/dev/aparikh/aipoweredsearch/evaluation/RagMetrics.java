@@ -36,6 +36,22 @@ public final class RagMetrics {
     }
 
     /**
+     * Share of the relevant documents that survived reranking into the prompt context.
+     *
+     * <p>Read it against {@link #recallAtK}: recall@20 says what retrieval found, this says what
+     * Claude was actually given, so the gap between them is what reranking threw away. Unlike
+     * {@link #precision}, it cannot be raised by passing fewer documents.</p>
+     *
+     * <p>It can only reach 1.0 when {@code |relevant|} fits in the context. Every case in the
+     * evaluation set has at most 5 relevant documents, matching {@code search.rag.rerank.top-k}.</p>
+     *
+     * @return {@code |context ∩ relevant| / |relevant|}, or NaN when nothing is relevant
+     */
+    public static double recallAfterRerank(List<String> context, Set<String> relevant) {
+        return recallAtK(context, relevant, context.size());
+    }
+
+    /**
      * Follow-up parity: how much of the standalone query's candidate set the follow-up
      * retrieved. 1.0 means the follow-up found everything the standalone rewrite would have.
      *

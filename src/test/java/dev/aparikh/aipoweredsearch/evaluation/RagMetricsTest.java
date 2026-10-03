@@ -41,6 +41,27 @@ class RagMetricsTest {
     }
 
     @Test
+    void recallAfterRerankIsShareOfRelevantDocumentsThatReachedTheContext() {
+        // relevant = {a, b, c}; reranking kept a and an irrelevant x -> 1 of 3
+        assertThat(RagMetrics.recallAfterRerank(List.of("a", "x"), Set.of("a", "b", "c")))
+                .isCloseTo(1.0 / 3.0, within(EPS));
+    }
+
+    @Test
+    void recallAfterRerankIsNotRaisedByPassingFewerDocuments() {
+        // dropping x lifts precision from 0.5 to 1.0 but leaves recall after rerank at 1 of 3
+        Set<String> relevant = Set.of("a", "b", "c");
+        assertThat(RagMetrics.precision(List.of("a"), relevant)).isCloseTo(1.0, within(EPS));
+        assertThat(RagMetrics.recallAfterRerank(List.of("a"), relevant)).isCloseTo(1.0 / 3.0, within(EPS));
+    }
+
+    @Test
+    void recallAfterRerankIsZeroForAnEmptyContextAndUndefinedWithoutRelevantDocuments() {
+        assertThat(RagMetrics.recallAfterRerank(List.of(), Set.of("a"))).isZero();
+        assertThat(RagMetrics.recallAfterRerank(List.of("a"), Set.of())).isNaN();
+    }
+
+    @Test
     void parityIsShareOfStandaloneCandidatesTheFollowUpFound() {
         // standalone = {a, b, c, d}; follow-up found a, d and an extra x -> 2 of 4
         assertThat(RagMetrics.parity(List.of("x", "a", "d"), List.of("a", "b", "c", "d")))

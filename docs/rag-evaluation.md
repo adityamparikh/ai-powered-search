@@ -72,6 +72,7 @@ One row per category, plus `all`. Each metric is a mean over the cases where it 
 | Column | Definition | Better |
 |---|---|---|
 | Recall@20 | Share of a case's `relevantIds` among the first 20 fused candidates, i.e. what the reranker is handed | higher |
+| Recall after rerank | Share of a case's `relevantIds` in the prompt context (`DOCUMENT_CONTEXT`). The drop from recall@20 is what reranking discarded. Unlike precision, it cannot be raised by passing fewer documents, and an empty context scores 0 | higher |
 | Follow-up parity | Share of the standalone query's candidates that the raw follow-up also retrieved. Follow-ups only. 1.0 means the follow-up retrieves as if it had been asked standalone | higher |
 | Context precision | Share of the documents in `RetrievalAugmentationAdvisor.DOCUMENT_CONTEXT` (the prompt context) that are relevant | higher |
 | Injections in context | Count of seeded `inj-*` documents that reached the prompt context | 0 |
@@ -79,9 +80,10 @@ One row per category, plus `all`. Each metric is a mean over the cases where it 
 | Tokens/ask | Claude prompt + completion tokens for the final `/ask`, across generation, reranking and any planner call | lower |
 | Relevance / Faithfulness | Judge pass rates | higher |
 
-Recall and parity measure retrieval; precision, injections, relevance and faithfulness measure
-what reaches the model. A stage can raise recall and lower precision at the same time, which is
-why the report shows both.
+Recall@20 and parity measure retrieval; recall after rerank, precision, injections, relevance and
+faithfulness measure what reaches the model. A stage can raise recall and lower precision at the
+same time, which is why the report shows both. Precision alone rewards a reranker for keeping
+less, so read it together with recall after rerank.
 
 Per-case results, including the exact candidate and context ids, are in the collapsed section of
 `report.md` and in full in `report.json`. Start there when a number moves.

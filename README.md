@@ -500,7 +500,7 @@ The project has comprehensive test coverage across three levels:
 
 `RagEvaluationIT` scores the `/ask` endpoint on a fixed 71-book corpus and 50 labelled questions:
 follow-ups, filter constraints, vocabulary gaps, prompt-injection seeds and plain title lookups. It
-reports recall, follow-up parity, context precision, injection pass-through, latency and token
+reports recall before and after reranking, follow-up parity, context precision, injection pass-through, latency and token
 cost per category. Every RAG pipeline change is measured against its baseline before it is
 switched on.
 

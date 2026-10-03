@@ -28,26 +28,27 @@ public final class RagEvalReport {
     /**
      * Outcome of one evaluation case. Metrics that do not apply are {@code NaN}.
      *
-     * @param recallAt20   recall@20 over the fused candidates (before reranking)
-     * @param parity       follow-up parity against the standalone query's candidates
-     * @param precision    context precision over {@code DOCUMENT_CONTEXT}
-     * @param injections   seeded {@code inj-} documents that reached {@code DOCUMENT_CONTEXT}
-     * @param latencyMs    wall-clock time of the final {@code /ask}
-     * @param tokens       Claude tokens (prompt + completion) spent by the final {@code /ask}
-     * @param modelCalls   Claude calls made by the final {@code /ask}
-     * @param relevant     judge verdict on answer relevance, or null when not judged
-     * @param faithful     judge verdict on faithfulness to the context, or null when not judged
+     * @param recallAt20         recall@20 over the fused candidates (before reranking)
+     * @param recallAfterRerank  recall over {@code DOCUMENT_CONTEXT} (after reranking)
+     * @param parity             follow-up parity against the standalone query's candidates
+     * @param precision          context precision over {@code DOCUMENT_CONTEXT}
+     * @param injections         seeded {@code inj-} documents that reached {@code DOCUMENT_CONTEXT}
+     * @param latencyMs          wall-clock time of the final {@code /ask}
+     * @param tokens             Claude tokens (prompt + completion) spent by the final {@code /ask}
+     * @param modelCalls         Claude calls made by the final {@code /ask}
+     * @param relevant           judge verdict on answer relevance, or null when not judged
+     * @param faithful           judge verdict on faithfulness to the context, or null when not judged
      */
-    public record CaseResult(String id, String category, double recallAt20, double parity, double precision,
-                             long injections, double latencyMs, long tokens, long modelCalls,
-                             @Nullable Boolean relevant, @Nullable Boolean faithful,
+    public record CaseResult(String id, String category, double recallAt20, double recallAfterRerank,
+                             double parity, double precision, long injections, double latencyMs, long tokens,
+                             long modelCalls, @Nullable Boolean relevant, @Nullable Boolean faithful,
                              List<String> candidates, List<String> context, @Nullable String error) {
     }
 
     /** Aggregated metrics for one category (or {@code all}). */
-    public record CategorySummary(String category, int cases, int errors, double recallAt20, double parity,
-                                  double precision, long injections, double latencyP50Ms, double latencyP95Ms,
-                                  double meanTokens, double relevancePassRate, double faithfulnessPassRate) {
+    public record CategorySummary(String category, int cases, int errors, double recallAt20,
+                                  double recallAfterRerank, double parity, double precision, long injections,
+                                  double latencyP50Ms, double latencyP95Ms, double meanTokens, double relevancePassRate, double faithfulnessPassRate) {
     }
 
     public record Report(String label, String timestamp, String gitSha, Map<String, String> flags,
@@ -78,6 +79,7 @@ public final class RagEvalReport {
                 results.size(),
                 results.size() - ok.size(),
                 mean(ok, CaseResult::recallAt20),
+                mean(ok, CaseResult::recallAfterRerank),
                 mean(ok, CaseResult::parity),
                 mean(ok, CaseResult::precision),
                 ok.stream().mapToLong(CaseResult::injections).sum(),
@@ -108,13 +110,14 @@ public final class RagEvalReport {
         md.append("- Commit: `").append(report.gitSha()).append("`\n");
         md.append("- Flags: ").append(report.flags().isEmpty() ? "none (all stages off)" : report.flags()).append("\n");
         md.append("- Judge: ").append(report.judged() ? "Ollama bespoke-minicheck" : "disabled").append("\n\n");
-        md.append("| Category | Cases | Errors | Recall@20 | Follow-up parity | Context precision | Injections in context | p50 ms | p95 ms | Tokens/ask | Relevance | Faithfulness |\n");
-        md.append("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n");
+        md.append("| Category | Cases | Errors | Recall@20 | Recall after rerank | Follow-up parity | Context precision | Injections in context | p50 ms | p95 ms | Tokens/ask | Relevance | Faithfulness |\n");
+        md.append("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n");
         for (CategorySummary s : report.summaries()) {
             md.append("| ").append(s.category())
                     .append(" | ").append(s.cases())
                     .append(" | ").append(s.errors())
                     .append(" | ").append(fmt(s.recallAt20()))
+                    .append(" | ").append(fmt(s.recallAfterRerank()))
                     .append(" | ").append(fmt(s.parity()))
                     .append(" | ").append(fmt(s.precision()))
                     .append(" | ").append(s.injections())
@@ -128,11 +131,12 @@ public final class RagEvalReport {
         md.append("\nMetrics are means over the cases in each row, excluding cases where a metric is undefined ")
                 .append("(for example, parity applies to follow-ups only). See docs/rag-evaluation.md.\n");
         md.append("\n<details><summary>Per-case results</summary>\n\n");
-        md.append("| Case | Recall@20 | Parity | Precision | Injections | ms | Tokens | Context | Error |\n");
-        md.append("|---|---:|---:|---:|---:|---:|---:|---|---|\n");
+        md.append("| Case | Recall@20 | Recall after rerank | Parity | Precision | Injections | ms | Tokens | Context | Error |\n");
+        md.append("|---|---:|---:|---:|---:|---:|---:|---:|---|---|\n");
         for (CaseResult r : report.cases()) {
             md.append("| ").append(r.id())
                     .append(" | ").append(fmt(r.recallAt20()))
+                    .append(" | ").append(fmt(r.recallAfterRerank()))
                     .append(" | ").append(fmt(r.parity()))
                     .append(" | ").append(fmt(r.precision()))
                     .append(" | ").append(r.injections())

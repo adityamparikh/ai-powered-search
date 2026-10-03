@@ -579,6 +579,7 @@ The test validates:
 vocab-gap, injection and keyword. It reports, per category:
 
 - recall@20 after fusion;
+- recall after reranking (relevant documents that reached the prompt);
 - follow-up parity;
 - context precision;
 - injection pass-through;

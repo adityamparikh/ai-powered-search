@@ -47,8 +47,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  * <p>Indexes {@code eval/books-fixture.json} through the production indexing path into a
  * collection built from the project configset, then replays every case in
  * {@code eval/rag-eval-set.json} through {@link SearchService#ask}, the method behind
- * {@code /ask}. Per category it reports recall@20 after fusion, follow-up parity, context
- * precision, injection pass-through, latency, tokens and (optionally) answer relevance and
+ * {@code /ask}. Per category it reports recall@20 after fusion, recall after reranking,
+ * follow-up parity, context precision, injection pass-through, latency, tokens and (optionally) answer relevance and
  * faithfulness. The results go to {@code build/reports/rag-eval/}.</p>
  *
  * <p>System properties (forwarded by Gradle):</p>
@@ -146,8 +146,8 @@ class RagEvaluationIT extends EvaluationTestBase {
         List<RagEvalReport.CaseResult> results = new ArrayList<>();
         for (RagEvalData.EvalCase evalCase : selectedCases()) {
             RagEvalReport.CaseResult result = runCase(evalCase, runId, usage, books);
-            log.info("[rag-eval] {} recall@20={} parity={} precision={} injections={} {}ms",
-                    result.id(), result.recallAt20(), result.parity(), result.precision(),
+            log.info("[rag-eval] {} recall@20={} recallAfterRerank={} parity={} precision={} injections={} {}ms",
+                    result.id(), result.recallAt20(), result.recallAfterRerank(), result.parity(), result.precision(),
                     result.injections(), Math.round(result.latencyMs()));
             results.add(result);
         }
@@ -219,6 +219,7 @@ class RagEvaluationIT extends EvaluationTestBase {
 
             return new RagEvalReport.CaseResult(evalCase.id(), evalCase.category(),
                     RagMetrics.recallAtK(candidates, relevant, RECALL_CUTOFF),
+                    RagMetrics.recallAfterRerank(context, relevant),
                     parity,
                     RagMetrics.precision(context, relevant),
                     RagMetrics.injectionCount(context),
@@ -227,7 +228,7 @@ class RagEvaluationIT extends EvaluationTestBase {
         } catch (Exception e) {
             log.warn("[rag-eval] case {} failed: {}", evalCase.id(), e.toString());
             return new RagEvalReport.CaseResult(evalCase.id(), evalCase.category(), Double.NaN, Double.NaN,
-                    Double.NaN, 0, Double.NaN, 0, 0, null, null, List.of(), List.of(), e.toString());
+                    Double.NaN, Double.NaN, 0, Double.NaN, 0, 0, null, null, List.of(), List.of(), e.toString());
         }
     }
 
