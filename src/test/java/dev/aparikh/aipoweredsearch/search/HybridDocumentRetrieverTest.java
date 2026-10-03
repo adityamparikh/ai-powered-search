@@ -203,6 +203,16 @@ class HybridDocumentRetrieverTest {
     }
 
     @Test
+    void ignoresAnEmptyContextVector() {
+        stubHybridResults(List.of());
+
+        retriever.retrieve(Query.builder().text("q").context(Map.of(RagContextKeys.VECTOR, new float[0])).build());
+
+        verify(searchRepository).executeHybridRerankSearch(
+                eq(COLLECTION), eq("q"), eq(TOP_K), any(), any(), any(), isNull());
+    }
+
+    @Test
     void recordsARetrieveObservationTaggedWithTheLeg() {
         stubHybridResults(List.of(solrDoc("doc-1", "content", Map.of())));
 

@@ -80,6 +80,9 @@ public class HybridDocumentRetriever implements DocumentRetriever {
     /**
      * Creates a retriever bound to a single Solr collection, without observations.
      *
+     * <p>For subclasses that do not care about observations, such as the recording retriever in
+     * {@code RagAdvisorOrderingIT}. Spring uses the {@code @Autowired} constructor.</p>
+     *
      * @see #HybridDocumentRetriever(SearchRepository, String, int, ObservationRegistry)
      */
     public HybridDocumentRetriever(SearchRepository searchRepository, String collection, int topK) {
@@ -133,9 +136,22 @@ public class HybridDocumentRetriever implements DocumentRetriever {
 
     /**
      * The embedding an earlier stage already computed for this query, if any.
+     *
+     * <p>A value that is not a non-empty {@code float[]} is ignored with a warning and the query
+     * text is embedded instead, so a contract violation by an earlier stage costs one embedding
+     * call rather than a failed kNN query.</p>
      */
     static float @Nullable [] precomputedVector(Query query) {
-        return query.context().get(RagContextKeys.VECTOR) instanceof float[] vector ? vector : null;
+        Object value = query.context().get(RagContextKeys.VECTOR);
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof float[] vector && vector.length > 0) {
+            return vector;
+        }
+        log.warn("Ignoring {} of type {}: expected a non-empty float[]; embedding the query text instead",
+                RagContextKeys.VECTOR, value.getClass().getSimpleName());
+        return null;
     }
 
     /**

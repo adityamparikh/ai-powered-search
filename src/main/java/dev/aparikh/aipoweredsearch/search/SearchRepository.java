@@ -1,6 +1,7 @@
 package dev.aparikh.aipoweredsearch.search;
 
 import dev.aparikh.aipoweredsearch.embedding.EmbeddingService;
+import dev.aparikh.aipoweredsearch.embedding.VectorFormatUtils;
 import dev.aparikh.aipoweredsearch.search.model.FieldInfo;
 import dev.aparikh.aipoweredsearch.search.model.SearchRequest;
 import dev.aparikh.aipoweredsearch.search.model.SearchResponse;
@@ -418,8 +419,9 @@ public class SearchRepository {
                                                   @Nullable String filterExpression,
                                                   @Nullable String fieldsCsv,
                                                   float @Nullable [] queryVector) throws Exception {
+        // VectorFormatUtils' float[] overload avoids boxing the vector into a List<Float>.
         String vectorString = queryVector != null
-                ? embeddingService.formatVectorForSolr(queryVector)
+                ? VectorFormatUtils.formatVectorForSolr(queryVector)
                 : embeddingService.embedAndFormatForSolr(query);
 
         ModifiableSolrParams params = new ModifiableSolrParams();

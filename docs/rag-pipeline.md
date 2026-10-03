@@ -66,8 +66,22 @@ threads. `AiConfig.ragChatClient` passes Spring Boot's `applicationTaskExecutor`
 
 Within one retrieval, the BM25 and kNN legs already run concurrently (`SearchRepository`).
 
+Two side effects to be aware of:
+
+- **No concurrency limit.** With virtual threads, `applicationTaskExecutor` is a
+  `SimpleAsyncTaskExecutor` with no concurrency limit. The advisor's old pool had an unbounded
+  queue, so it ran at most 4 retrievals at a time across the JVM; that implicit backpressure on
+  Solr and the embedding API is gone. Today each `/ask` retrieves one query, so load still scales
+  with concurrent requests only. Once the planner (W1) fans out to N queries, set
+  `spring.task.execution.simple.concurrency-limit` if Solr or the embedding API needs protecting.
+- **Context propagation is application-wide.** `spring.task.execution.propagate-context=true`
+  decorates `applicationTaskExecutor` for every consumer (`@Async` methods included), not just
+  RAG. It relies on `io.micrometer:context-propagation`, which arrives transitively through
+  Micrometer Tracing and Spring AI. `TaskExecutorContextPropagationTest` pins that an
+  observation opened on the caller is current on the executor's thread.
+
 If no `applicationTaskExecutor` bean exists (for example, an application that defines its own
-`Executor`), the advisor's default pool is used, as before.
+`Executor`), `AiConfig` logs a warning and the advisor's default pool is used, as before.
 
 ## Retrieval: hybrid search
 
@@ -163,3 +177,9 @@ and a stub chat model, and asserts that the fused candidates and the prompt cont
 `src/test/resources/eval/golden-ask.json`. That file was recorded on the pipeline as it stood
 before W5. With every new flag off, `/ask` must keep returning the same documents in the same
 order. It needs no API keys and runs in every build.
+
+The golden order depends on Solr's BM25 scoring and on the reranker's fallback being
+deterministic. A failure after a Solr image bump, a schema or analyzer change in `solr-config`, or
+a change to `HashingEmbeddingModel` is most likely a scoring change rather than a pipeline
+regression. Confirm that, then re-record with `-Drag.golden.record=true` and explain the diff in
+the PR.

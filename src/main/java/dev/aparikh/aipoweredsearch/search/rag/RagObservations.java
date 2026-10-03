@@ -24,7 +24,7 @@ public final class RagObservations {
     /** One document post-processor; tag {@value #PROCESSOR_TAG} = the processor's simple class name. */
     public static final String POSTPROCESS = "rag.postprocess";
 
-    /** The query planner's model call (W1). */
+    /** The query planner's model call. Reserved for W1 (#36): nothing records it yet. */
     public static final String PLAN = "rag.plan";
 
     public static final String LEG_TAG = "leg";

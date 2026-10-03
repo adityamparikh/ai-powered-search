@@ -767,11 +767,16 @@ public ChatClient ragChatClient(ChatModel chatModel,
                     RetrievalAugmentationAdvisor.builder()
                             .documentRetriever(hybridDocumentRetriever)
                             // Pass-through joiner: the default ConcatenationDocumentJoiner
-                            // re-sorts by score and would undo the RRF ranking.
-                            .documentJoiner(documentsForQuery -> documentsForQuery.values().stream()
-                                    .flatMap(List::stream)
-                                    .flatMap(List::stream)
-                                    .toList())
+                            // re-sorts by score and would undo the RRF ranking. Wrapped to
+                            // record the rag.join observation.
+                            .documentJoiner(new ObservedDocumentJoiner(
+                                    documentsForQuery -> documentsForQuery.values().stream()
+                                            .flatMap(List::stream)
+                                            .flatMap(List::stream)
+                                            .toList(),
+                                    observations))
+                            // Boot's applicationTaskExecutor: virtual threads, trace propagated
+                            .taskExecutor(applicationTaskExecutor)
                             .build(),
                     MessageChatMemoryAdvisor.builder(chatMemory).build(),
                     SimpleLoggerAdvisor.builder().build(),
@@ -816,7 +821,7 @@ public ChatClient ragChatClient(ChatModel chatModel,
   `RetrievalAugmentationAdvisor.builder().taskExecutor(...)`. Per-query retrieval therefore runs on
   virtual threads (`spring.threads.virtual.enabled=true`) instead of the advisor's private 4-16
   platform-thread pool. `spring.task.execution.propagate-context=true` carries the trace onto
-  those threads.
+  those threads. If that bean is absent, `AiConfig` logs a warning and the advisor's pool is used.
 - **Precomputed vectors**: when `Query.context()` holds a `float[]` under `rag.vector`,
   `HybridDocumentRetriever` hands it to `SearchRepository.executeHybridRerankSearch(..., queryVector)`
   and the kNN leg makes no embedding call.
@@ -827,7 +832,7 @@ public ChatClient ragChatClient(ChatModel chatModel,
   - `rag.retrieve` (tag `leg`);
   - `rag.join`;
   - `rag.postprocess` (tag `processor`);
-  - `rag.plan`.
+  - `rag.plan` (reserved for W1; nothing records it yet).
 
   Percentile histograms come from `management.metrics.distribution.percentiles-histogram.rag=true`.
   Grafana's *Search & AI Performance* dashboard has a *RAG Pipeline Stages* row (p50/p95 per

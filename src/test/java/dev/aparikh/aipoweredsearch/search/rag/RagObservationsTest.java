@@ -45,7 +45,7 @@ class RagObservationsTest {
         DocumentPostProcessor reverse = (q, docs) -> docs.reversed();
         List<Document> two = List.of(new Document("a", "a", Map.of()), new Document("b", "b", Map.of()));
 
-        List<Document> result = ObservedDocumentPostProcessor.of(reverse, registry).process(query, two);
+        List<Document> result = new ObservedDocumentPostProcessor(reverse, registry, "Reverse").process(query, two);
 
         assertThat(result).extracting(Document::getId).containsExactly("b", "a");
     }
@@ -57,6 +57,29 @@ class RagObservationsTest {
 
         assertThat(ObservedDocumentPostProcessor.processorName(anonymous.getClass()))
                 .isEqualTo("RerankingDocumentPostProcessor");
+    }
+
+    @Test
+    void lambdaNeedsAnExplicitName() {
+        DocumentPostProcessor lambda = (q, docs) -> docs;
+
+        // Its class name (Foo$$Lambda/0x...) is not a stable, meaningful tag value.
+        assertThatThrownBy(() -> ObservedDocumentPostProcessor.of(lambda, registry))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void anonymousInterfaceImplementationNeedsAnExplicitName() {
+        DocumentPostProcessor anonymous = new DocumentPostProcessor() {
+            @Override
+            public List<Document> process(Query q, List<Document> docs) {
+                return docs;
+            }
+        };
+
+        // Walking up from an anonymous interface implementation reaches Object.
+        assertThatThrownBy(() -> ObservedDocumentPostProcessor.of(anonymous, registry))
+                .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
@@ -86,6 +109,21 @@ class RagObservationsTest {
                 .that()
                 .hasBeenStarted()
                 .hasBeenStopped();
+    }
+
+    @Test
+    void joinerFailureIsRecordedAndRethrown() {
+        IllegalStateException boom = new IllegalStateException("boom");
+        DocumentJoiner failing = documentsForQuery -> {
+            throw boom;
+        };
+
+        assertThatThrownBy(() -> new ObservedDocumentJoiner(failing, registry).join(Map.of(query, List.of(documents))))
+                .isSameAs(boom);
+        assertThat(registry)
+                .hasObservationWithNameEqualTo(RagObservations.JOIN)
+                .that()
+                .hasError();
     }
 
     @Test

@@ -32,6 +32,10 @@ public final class ObservedDocumentPostProcessor implements DocumentPostProcesso
     /**
      * Wraps {@code delegate}, tagging it with its simple class name (or, for an anonymous
      * subclass, its superclass's).
+     *
+     * @throws IllegalArgumentException if {@code delegate} is a lambda, or an anonymous class with
+     *         no named superclass. Neither has a meaningful, stable name, so use the constructor
+     *         and pass one explicitly.
      */
     public static ObservedDocumentPostProcessor of(DocumentPostProcessor delegate, ObservationRegistry registry) {
         return new ObservedDocumentPostProcessor(delegate, registry, processorName(delegate.getClass()));
@@ -41,6 +45,12 @@ public final class ObservedDocumentPostProcessor implements DocumentPostProcesso
         Class<?> named = type;
         while (named.getSimpleName().isEmpty() && named.getSuperclass() != null) {
             named = named.getSuperclass();
+        }
+        // A lambda's class is hidden and named like Foo$$Lambda/0x..., which changes between
+        // runs; an anonymous interface implementation would otherwise be tagged "Object".
+        if (type.isHidden() || named == Object.class) {
+            throw new IllegalArgumentException(type.getName()
+                    + " has no stable class name; pass an explicit processor name");
         }
         return named.getSimpleName();
     }

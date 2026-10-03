@@ -6,6 +6,8 @@ import dev.aparikh.aipoweredsearch.search.RerankingDocumentPostProcessor;
 import dev.aparikh.aipoweredsearch.search.rag.ObservedDocumentJoiner;
 import dev.aparikh.aipoweredsearch.search.rag.ObservedDocumentPostProcessor;
 import io.micrometer.observation.ObservationRegistry;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.ai.anthropic.AnthropicCacheOptions;
 import org.springframework.ai.anthropic.AnthropicCacheStrategy;
 import org.springframework.ai.anthropic.AnthropicCacheTtl;
@@ -55,6 +57,8 @@ import java.util.List;
  */
 @Configuration
 public class AiConfig {
+
+    private static final Logger log = LoggerFactory.getLogger(AiConfig.class);
 
     /**
      * Anthropic chat model id used for query generation and RAG.
@@ -267,6 +271,9 @@ public class AiConfig {
         TaskExecutor executor = applicationTaskExecutor.getIfAvailable();
         if (executor != null) {
             ragAdvisor.taskExecutor(executor);
+        } else {
+            log.warn("No applicationTaskExecutor bean; RAG retrieval falls back to the advisor's "
+                    + "4-16 platform-thread pool, without virtual threads");
         }
 
         // Reranking is the third and last place the pipeline can improve context quality:

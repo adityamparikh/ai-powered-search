@@ -55,7 +55,10 @@ import static org.assertj.core.api.Assertions.assertThat;
  * retrieval order, truncate to top-k), which makes the context deterministic too.</p>
  *
  * <p>To re-record after an <em>intentional</em> ordering change, run with
- * {@code -Drag.golden.record=true} and explain the diff in the PR.</p>
+ * {@code -Drag.golden.record=true} and explain the diff in the PR. A failure after a Solr image
+ * bump, a {@code solr-config} schema or analyzer change, or a change to
+ * {@link HashingEmbeddingModel} is most likely a BM25 or vector scoring change rather than a
+ * pipeline regression: confirm that before re-recording.</p>
  */
 @SpringBootTest(properties = {"solr.default.collection=" + RagGoldenRegressionIT.COLLECTION,
         "spring.ai.openai.api-key=test-key"})
