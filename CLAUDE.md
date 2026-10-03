@@ -907,6 +907,8 @@ public ChatClient ragChatClient(ChatModel chatModel,
   stage).
 - **Pipeline docs**: `docs/rag-pipeline.md` describes every stage (what, why, properties,
   failure behaviour). Each modular-RAG PR adds its section there.
+- **Architecture**: `docs/modular-rag.md` has the Modular RAG diagram, a request walkthrough and a
+  table of every module (stage, Spring AI SPI, class, flag, default).
 - **Regression guard**: `RagGoldenRegressionIT` (no API keys) asserts that `/ask` returns the
   golden documents in the golden order with all new flags off.
 
