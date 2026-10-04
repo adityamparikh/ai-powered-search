@@ -504,10 +504,11 @@ The project has comprehensive test coverage across four levels:
    - Tests skip gracefully if API key is not available
 
 4. **Evaluation Tests** (LLM-based testing)
-    - `EvaluationTestBase`: Base class for LLM evaluation tests
-    - Tests RAG quality, question answering accuracy
-    - Uses Ollama (via Testcontainers) for local LLM testing
-    - Configuration in `EvaluationModelsTestConfiguration.java`
+    - `EvaluationTestBase`: Base class for LLM evaluation tests (Ollama judge + Solr corpus)
+    - `RagEvaluationIT`: the RAG evaluation harness for `/ask` (epic #32); see below
+    - Uses Ollama (via Testcontainers, or `-Drag.eval.ollama-url`) as the judge
+    - Configuration in `EvaluationModelsTestConfiguration.java` (judge only; Solr comes from
+      `SolrTestConfiguration`)
 
 ### Test Configuration
 - Separate test configuration: `src/test/resources/application-test.properties`
@@ -569,6 +570,51 @@ The test validates:
 - Cache HIT on subsequent identical requests
 - Correct cache metrics logging
 - Cost savings calculations
+
+### Running the RAG Evaluation Harness
+
+`RagEvaluationIT` scores `/api/v1/search/ask` on a fixed 71-book fixture
+(`src/test/resources/eval/books-fixture.json`) and 50 labelled cases
+(`src/test/resources/eval/rag-eval-set.json`) across five categories: follow-up, filter,
+vocab-gap, injection and keyword. It reports, per category:
+
+- recall@20 after fusion;
+- recall after reranking (relevant documents that reached the prompt);
+- follow-up parity;
+- context precision;
+- injection pass-through;
+- p50/p95 latency and tokens per `/ask`;
+- judge-scored relevance and faithfulness.
+
+The report goes to `build/reports/rag-eval/report.{md,json}`.
+
+```bash
+# Needs ANTHROPIC_API_KEY and OPENAI_API_KEY; skipped without them. Makes billed calls,
+# so ./gradlew test and build exclude it (tag "rag-eval"); it has its own task.
+./gradlew ragEval -Drag.eval.ollama-url=http://localhost:11434
+
+# Same harness with stages on (';'-separated properties) and a report label
+./gradlew ragEval \
+  -Drag.eval.props='search.rag.planner.enabled=true' -Drag.eval.label=planner
+
+# Retrieval metrics only, no judge
+./gradlew ragEval -Drag.eval.judge=false
+```
+
+- The harness builds its collection from the **project configset** (`solr-config/conf`), not
+  Solr's `_default`. In `_default`, `_text_` is never populated, so the BM25 leg silently returns
+  nothing.
+- Filterable metadata uses explicit typed fields: `metadata_author` (`string`),
+  `metadata_price` (`pdouble`) and `metadata_year` (`pint`).
+- The baseline numbers are in `docs/rag-eval-baseline.md`. How to read the report and add cases
+  is in `docs/rag-evaluation.md`.
+- Related tests:
+  - `RagEvalFixtureIT` checks the fixture setup (OpenAI key only);
+  - `RagMetricsTest` covers the metric math;
+  - `RagEvalHarnessTest` checks the eval set against the fixture and the report aggregation
+    (no keys);
+  - `RetrievalAugmentationAdvisorContractTest` and `RagAdvisorOrderingIT` pin the Spring AI
+    advisor behaviour the pipeline relies on (no keys).
 
 ## Key Implementation Patterns
 

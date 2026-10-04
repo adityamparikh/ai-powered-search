@@ -496,6 +496,24 @@ The project has comprehensive test coverage across three levels:
 - Embedding generation and storage
 - Similarity search validation
 
+### RAG Evaluation
+
+`RagEvaluationIT` scores the `/ask` endpoint on a fixed 71-book corpus and 50 labelled questions:
+follow-ups, filter constraints, vocabulary gaps, prompt-injection seeds and plain title lookups. It
+reports recall before and after reranking, follow-up parity, context precision, injection pass-through, latency and token
+cost per category. Every RAG pipeline change is measured against its baseline before it is
+switched on.
+
+```bash
+# Requires ANTHROPIC_API_KEY and OPENAI_API_KEY; makes billed model calls.
+# Never part of ./gradlew test or build.
+./gradlew ragEval
+open build/reports/rag-eval/report.md
+```
+
+See [docs/rag-evaluation.md](docs/rag-evaluation.md) for options and how to read the report, and
+[docs/rag-eval-baseline.md](docs/rag-eval-baseline.md) for the current baseline.
+
 ## 📊 Code Quality & Automation
 
 ### SonarQube Integration

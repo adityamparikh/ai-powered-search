@@ -3,37 +3,59 @@ package dev.aparikh.aipoweredsearch.evaluation;
 import dev.aparikh.aipoweredsearch.embedding.EmbeddingService;
 import dev.aparikh.aipoweredsearch.fixtures.BookDatasetGenerator;
 import org.apache.solr.client.solrj.SolrClient;
-import org.apache.solr.client.solrj.impl.HttpJdkSolrClient;
 import org.apache.solr.common.SolrInputDocument;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.BeforeEach;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.evaluation.FactCheckingEvaluator;
 import org.springframework.ai.chat.evaluation.RelevancyEvaluator;
 import org.springframework.ai.ollama.OllamaChatModel;
 import org.springframework.ai.ollama.api.OllamaApi;
 import org.springframework.ai.ollama.api.OllamaChatOptions;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestClientException;
 import org.testcontainers.ollama.OllamaContainer;
 import org.testcontainers.solr.SolrContainer;
 
+import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 
 import static dev.aparikh.aipoweredsearch.config.EvaluationModelsTestConfiguration.BESPOKE_MINICHECK;
 
 /**
- * Base class for all evaluation tests providing common setup for:
- * - Ollama container with bespoke-minicheck model
- * - Solr container with 1000 book dataset
- * - FactCheckingEvaluator and RelevancyEvaluator
+ * Base class for evaluation tests providing common setup for:
+ * <ul>
+ *   <li>an Ollama judge running bespoke-minicheck, wrapped in {@link FactCheckingEvaluator} and
+ *       {@link RelevancyEvaluator};</li>
+ *   <li>a Solr client and a books collection, by default the 1000-book synthetic dataset.</li>
+ * </ul>
  *
- * <p>This class centralizes the setup logic to avoid duplication across evaluation test classes.
+ * <p>Subclasses import {@code SolrTestConfiguration} and {@code EvaluationModelsTestConfiguration}.
+ * They customise the corpus by overriding {@link #createBooksCollection()} and {@link #loadBooks()},
+ * and can opt out of the judge by overriding {@link #judgeEnabled()}.</p>
+ *
+ * <p>The judge runs in the lazily-started Ollama container unless the system property
+ * {@value #OLLAMA_URL_PROPERTY} names an Ollama server to use instead. A long-lived local server
+ * keeps the model between runs, where a fresh container pulls it every time.</p>
  */
 public abstract class EvaluationTestBase {
 
+    /** System property naming an external Ollama server for the judge. */
+    public static final String OLLAMA_URL_PROPERTY = "rag.eval.ollama-url";
+
+    /** Upper bound on pulling the judge model into an external Ollama (about 5 GB on first pull). */
+    private static final Duration MODEL_PULL_TIMEOUT = Duration.ofMinutes(30);
+
+    private static final Logger log = LoggerFactory.getLogger(EvaluationTestBase.class);
+
     @Autowired
-    protected OllamaContainer ollama;
+    protected ObjectProvider<OllamaContainer> ollama;
 
     @Autowired
     protected SolrContainer solr;
@@ -41,30 +63,67 @@ public abstract class EvaluationTestBase {
     @Autowired(required = false)
     protected EmbeddingService embeddingService;
 
-    protected FactCheckingEvaluator factCheckingEvaluator;
-    protected RelevancyEvaluator relevancyEvaluator;
+    /** Null when {@link #judgeEnabled()} is false. */
+    protected @Nullable FactCheckingEvaluator factCheckingEvaluator;
+
+    /** Null when {@link #judgeEnabled()} is false. */
+    protected @Nullable RelevancyEvaluator relevancyEvaluator;
+
+    /** The application's client, which {@code SolrTestConfiguration} points at the container. */
+    @Autowired
     protected SolrClient solrClient;
 
     protected static final String BOOKS_COLLECTION = "books";
 
     @BeforeEach
     void setUpBase() throws Exception {
-        // 1. Pull bespoke-minicheck model
-        System.out.println("Pulling " + BESPOKE_MINICHECK + " model...");
-        ollama.execInContainer("ollama", "pull", BESPOKE_MINICHECK);
+        if (judgeEnabled()) {
+            setUpJudge();
+        }
 
-        // 2. Create Ollama API with JDK HttpClient (to avoid Jetty conflicts)
-        String baseUrl = ollama.getEndpoint();
-        RestClient.Builder restClientBuilder = RestClient.builder()
-                .baseUrl(baseUrl)
-                .requestFactory(new JdkClientHttpRequestFactory());
+        createBooksCollection();
+        loadBooks();
+    }
+
+    /**
+     * Whether to start the Ollama judge. Defaults to true.
+     */
+    protected boolean judgeEnabled() {
+        return true;
+    }
+
+    private void setUpJudge() throws Exception {
+        String external = System.getProperty(OLLAMA_URL_PROPERTY);
+        String baseUrl;
+        if (external != null && !external.isBlank()) {
+            baseUrl = external;
+            log.info("Using external Ollama at {}; pulling {} if absent...", baseUrl, BESPOKE_MINICHECK);
+            JdkClientHttpRequestFactory pullRequestFactory = new JdkClientHttpRequestFactory();
+            pullRequestFactory.setReadTimeout(MODEL_PULL_TIMEOUT);
+            try {
+                RestClient.builder().baseUrl(baseUrl).requestFactory(pullRequestFactory).build()
+                        .post().uri("/api/pull")
+                        .body(Map.of("model", BESPOKE_MINICHECK, "stream", false))
+                        .retrieve().toBodilessEntity();
+            } catch (RestClientException e) {
+                throw new IllegalStateException("Could not pull " + BESPOKE_MINICHECK + " from the Ollama at "
+                        + baseUrl + " (" + OLLAMA_URL_PROPERTY + "). Is it running? Pass -Drag.eval.judge=false "
+                        + "to skip the judge.", e);
+            }
+        } else {
+            OllamaContainer container = ollama.getObject();
+            log.info("Pulling {} model into the Ollama container...", BESPOKE_MINICHECK);
+            container.execInContainer("ollama", "pull", BESPOKE_MINICHECK);
+            baseUrl = container.getEndpoint();
+        }
+
+        RestClient.Builder restClientBuilder = jdkRestClient(baseUrl);
 
         OllamaApi ollamaApi = OllamaApi.builder()
                 .baseUrl(baseUrl)
                 .restClientBuilder(restClientBuilder)
                 .build();
 
-        // 3. Create ChatModel with user-specified config
         OllamaChatOptions options = OllamaChatOptions.builder()
                 .model(BESPOKE_MINICHECK)
                 .numPredict(2)  // Limit token generation for yes/no answers
@@ -76,19 +135,13 @@ public abstract class EvaluationTestBase {
                 .options(options)
                 .build();
 
-        // 4. Create evaluators
         factCheckingEvaluator = FactCheckingEvaluator.builder(ChatClient.builder(chatModel)).build();
         relevancyEvaluator = RelevancyEvaluator.builder().chatClientBuilder(ChatClient.builder(chatModel)).build();
+    }
 
-        // 5. Create Solr client
-        String solrUrl = "http://" + solr.getHost() + ":" + solr.getSolrPort() + "/solr";
-        solrClient = new HttpJdkSolrClient.Builder(solrUrl).build();
-
-        // 6. Create Solr collection with vector fields
-        createBooksCollection();
-
-        // 7. Load 1000 books
-        loadBooks();
+    /** A RestClient on the JDK HttpClient (to avoid Jetty conflicts). */
+    private static RestClient.Builder jdkRestClient(String baseUrl) {
+        return RestClient.builder().baseUrl(baseUrl).requestFactory(new JdkClientHttpRequestFactory());
     }
 
     /**
@@ -131,7 +184,7 @@ public abstract class EvaluationTestBase {
 
         } catch (Exception e) {
             // Collection might already exist
-            System.out.println("Collection creation error (might already exist): " + e.getMessage());
+            log.info("Collection creation error (might already exist): {}", e.getMessage());
         }
     }
 
@@ -141,7 +194,7 @@ public abstract class EvaluationTestBase {
     protected void loadBooks() throws Exception {
         List<BookDatasetGenerator.Book> books = BookDatasetGenerator.generate1000Books();
 
-        System.out.println("Loading " + books.size() + " books into Solr...");
+        log.info("Loading {} books into Solr...", books.size());
 
         for (BookDatasetGenerator.Book book : books) {
             SolrInputDocument doc = new SolrInputDocument();
@@ -167,7 +220,7 @@ public abstract class EvaluationTestBase {
         // Commit all documents
         solrClient.commit(BOOKS_COLLECTION);
 
-        System.out.println("Finished loading books into Solr");
+        log.info("Finished loading books into Solr");
     }
 
     /**
