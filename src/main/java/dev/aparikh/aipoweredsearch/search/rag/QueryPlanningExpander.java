@@ -50,9 +50,8 @@ import java.util.regex.Pattern;
  * {@code RetrievalAugmentationAdvisor}, which collects them with {@code Collectors.toMap}. Each
  * query carries its own copy of the context with {@link RagContextKeys#STANDALONE},
  * {@link RagContextKeys#KEYWORD_QUERY} and, when present, {@link RagContextKeys#FILTERS}.
- * {@link RagContextKeys#KEYWORD_QUERY} is a hand-off for the BM25 leg, and the planner's HyDE passage
- * for the kNN leg: at this stage the retriever still searches both legs with the query text, and
- * both are consumed by W2 (per-leg query representation).</p>
+ * {@link RagContextKeys#KEYWORD_QUERY} is read by the BM25 leg and the planner's HyDE passage by the
+ * kNN leg (W2, see {@code LegRouting}).</p>
  *
  * <p><strong>Standalone hand-off.</strong> {@code RetrievalAugmentationAdvisor} passes the
  * <em>original</em> query to post-processors. The expander therefore also writes
