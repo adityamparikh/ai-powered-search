@@ -51,14 +51,6 @@ import java.util.List;
 public class AiConfig {
 
     /**
-     * Anthropic chat model id used for query generation and RAG.
-     *
-     * <p>Spring AI 2.x removed the {@code AnthropicApi.ChatModel} enum when it moved to the
-     * official Anthropic Java SDK, so the model is now identified by its string id.</p>
-     */
-    private static final String ANTHROPIC_CHAT_MODEL = "claude-sonnet-4-5";
-
-    /**
      * Creates default AnthropicChatOptions with prompt caching enabled.
      *
      * <p>Prompt caching reduces costs by up to 90% and improves response times by up to 85%
@@ -87,18 +79,21 @@ public class AiConfig {
      *
      * @param cachingEnabled whether prompt caching is enabled
      * @param cacheStrategyStr the cache strategy to use
+     * @param model the chat model, from {@code spring.ai.anthropic.chat.options.model}. These options
+     *        are the chat clients' defaults, so they must carry the configured model, not a fixed one.
      * @return configured AnthropicChatOptions builder
      */
     @Bean
     @ConditionalOnProperty(name = "spring.ai.anthropic.prompt-caching.enabled", havingValue = "true", matchIfMissing = true)
     public AnthropicChatOptions.Builder anthropicChatOptionsWithCaching(
             @Value("${spring.ai.anthropic.prompt-caching.enabled:true}") boolean cachingEnabled,
-            @Value("${spring.ai.anthropic.prompt-caching.strategy:SYSTEM_AND_TOOLS}") String cacheStrategyStr) {
+            @Value("${spring.ai.anthropic.prompt-caching.strategy:SYSTEM_AND_TOOLS}") String cacheStrategyStr,
+            @Value("${spring.ai.anthropic.chat.options.model}") String model) {
 
         AnthropicCacheStrategy cacheStrategy = AnthropicCacheStrategy.valueOf(cacheStrategyStr);
 
         AnthropicChatOptions.Builder builder = AnthropicChatOptions.builder();
-        builder.model(ANTHROPIC_CHAT_MODEL);
+        builder.model(model);
         builder.cacheOptions(AnthropicCacheOptions.builder()
                 .strategy(cacheStrategy)
                 .messageTypeTtl(MessageType.SYSTEM, AnthropicCacheTtl.ONE_HOUR)
