@@ -11,13 +11,18 @@ import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
 import org.springframework.ai.chat.client.advisor.SimpleLoggerAdvisor;
 import org.springframework.ai.chat.memory.ChatMemory;
+import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.MessageType;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.openai.OpenAiEmbeddingModel;
 import org.springframework.ai.openai.OpenAiEmbeddingOptions;
 import org.springframework.ai.rag.advisor.RetrievalAugmentationAdvisor;
+import org.springframework.ai.rag.Query;
 import org.springframework.ai.rag.generation.augmentation.ContextualQueryAugmenter;
+import org.springframework.ai.rag.postretrieval.document.DocumentPostProcessor;
+import org.springframework.ai.rag.preretrieval.query.transformation.CompressionQueryTransformer;
+import org.springframework.ai.rag.preretrieval.query.transformation.QueryTransformer;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
@@ -27,6 +32,8 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import org.jspecify.annotations.Nullable;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.List;
 
@@ -49,6 +56,11 @@ import java.util.List;
  */
 @Configuration
 public class AiConfig {
+
+    private static final Logger log = LoggerFactory.getLogger(AiConfig.class);
+
+    /** Query-context key under which a follow-up's standalone rewrite reaches the post-processors. */
+    static final String STANDALONE_QUERY = "rag.standalone";
 
     /**
      * Anthropic chat model id used for query generation and RAG.
@@ -208,6 +220,8 @@ public class AiConfig {
      * @param hybridDocumentRetriever retrieves RAG context using RRF-fused hybrid search
      * @param cachingEnabled whether prompt caching is enabled
      * @param chatOptions the chat options with caching configured (optional, may be null if caching disabled)
+     * @param reranker the reranking post-processor, absent when {@code search.rag.rerank.enabled=false}
+     * @param queryTransformer rewrites each question into a standalone query using the conversation
      * @return configured ChatClient instance with RAG capabilities
      */
     @Bean
@@ -216,7 +230,8 @@ public class AiConfig {
                                     HybridDocumentRetriever hybridDocumentRetriever,
                                     @Value("${spring.ai.anthropic.prompt-caching.enabled:true}") boolean cachingEnabled,
                                     @Autowired(required = false) @Qualifier("anthropicChatOptionsWithCaching") AnthropicChatOptions.@Nullable Builder chatOptions,
-                                    @Autowired(required = false) @Nullable RerankingDocumentPostProcessor reranker) {
+                                    @Autowired(required = false) @Nullable RerankingDocumentPostProcessor reranker,
+                                    QueryTransformer queryTransformer) {
         ChatClient.Builder builder = ChatClient.builder(chatModel);
 
         // Set default options if caching is enabled
@@ -226,6 +241,9 @@ public class AiConfig {
 
         RetrievalAugmentationAdvisor.Builder ragAdvisor =
                 RetrievalAugmentationAdvisor.builder()
+                                // Conversation-aware retrieval: "Anything cheaper by the same author?"
+                                // is searched as a standalone query with the author filled in.
+                                .queryTransformers(queryTransformer)
                                 .documentRetriever(hybridDocumentRetriever)
                                 // RetrievalAugmentationAdvisor refuses to answer when retrieval
                                 // returns nothing; QuestionAnswerAdvisor did not. Follow-up turns
@@ -247,7 +265,7 @@ public class AiConfig {
         // the retriever decides what is a candidate, and this decides what actually reaches
         // the prompt. Absent when search.rag.rerank.enabled=false.
         if (reranker != null) {
-            ragAdvisor.documentPostProcessors(reranker);
+            ragAdvisor.documentPostProcessors(judgedAgainstTheRewrite(reranker));
         }
 
         return builder.defaultAdvisors(
@@ -280,5 +298,70 @@ public class AiConfig {
             ChatModel chatModel,
             @Value("${search.rag.rerank.top-k:5}") int topK) {
         return new RerankingDocumentPostProcessor(ChatClient.builder(chatModel).build(), topK);
+    }
+
+    /**
+     * Rewrites a follow-up question, together with the conversation so far, into a standalone query
+     * before retrieval. Chat memory lets the model answer a follow-up, but without this the retriever
+     * would search for the follow-up's literal words.
+     *
+     * <p>Rewriting a query is a small task, so it runs on a smaller, cheaper model than the answer:
+     * {@code search.rag.query-rewrite.model}, default {@code claude-haiku-4-5}.</p>
+     *
+     * @param chatModel the ChatModel the rewrite runs on
+     * @param model     the model id for the rewrite
+     * @return the query transformer
+     */
+    @Bean
+    public QueryTransformer queryTransformer(ChatModel chatModel,
+                                             @Value("${search.rag.query-rewrite.model:claude-haiku-4-5}") String model) {
+        QueryTransformer compression = CompressionQueryTransformer.builder()
+                .chatClientBuilder(ChatClient.builder(chatModel)
+                        .defaultOptions(AnthropicChatOptions.builder().model(model)))
+                .build();
+        return query -> {
+            // A first question has no conversation to fold in, so it is searched as asked. Neither is
+            // the shared "default" conversation (requests without a conversationId), whose history
+            // mixes unrelated callers.
+            if (!hasEarlierTurns(query.history())
+                    || "default".equals(query.context().get(ChatMemory.CONVERSATION_ID))) {
+                return query;
+            }
+            Query rewritten;
+            try {
+                rewritten = compression.transform(query);
+            } catch (RuntimeException e) {
+                // The rewrite improves retrieval; it must not fail the request.
+                log.warn("Query rewrite failed; retrieving with the question as asked: {}", e.toString());
+                return query;
+            }
+            // The advisor hands post-processors the original query: leave the rewrite in its
+            // context (the advisor's own mutable map) so the reranker judges against it.
+            query.context().put(STANDALONE_QUERY, rewritten.text());
+            return rewritten;
+        };
+    }
+
+    /**
+     * Whether the conversation has a turn before the current question. {@code Query.history()} is
+     * the whole prompt, ending with the current user message; a system prompt is not a turn.
+     */
+    static boolean hasEarlierTurns(List<Message> history) {
+        return history.stream()
+                .filter(message -> message.getMessageType() == MessageType.USER
+                        || message.getMessageType() == MessageType.ASSISTANT)
+                .count() > 1;
+    }
+
+    /**
+     * Makes a post-processor judge documents against a follow-up's standalone rewrite rather than the
+     * original question, which is what {@code RetrievalAugmentationAdvisor} passes it.
+     */
+    static DocumentPostProcessor judgedAgainstTheRewrite(DocumentPostProcessor postProcessor) {
+        return (query, documents) -> postProcessor.process(
+                query.context().get(STANDALONE_QUERY) instanceof String rewrite
+                        ? query.mutate().text(rewrite).build()
+                        : query,
+                documents);
     }
 }
