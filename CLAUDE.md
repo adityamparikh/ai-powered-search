@@ -821,6 +821,18 @@ public ChatClient ragChatClient(ChatModel chatModel,
   hands post-processors the original question. The shared `"default"` conversation (requests
   without a `conversationId`) is not rewritten, since its history mixes unrelated callers, and a
   failed rewrite falls back to the question as asked.
+- **TypeSafe Jev screening (opt-in)**: `search.rag.jev.enabled=true` adds `JevDocumentFilter` before
+  the reranker, screening candidates for prompt injection, contradiction, relevance and answer
+  evidence. Off by default: it sends passages and the question to TypeSafe's hosted API, one call per
+  passage, which adds latency. Requires `spring.ai.typesafe.api-key` (`SPRING_AI_TYPESAFE_API_KEY`);
+  the starter auto-configures `TypeSafeClient` only when that key is set, so it must not be declared
+  empty in `application.properties`. Without a key the filter is not created (`JevConfig`). A
+  passage Jev cannot screen is passed through with a WARN.
+- **TypeSafe Jev reranking (opt-in)**: `search.rag.rerank.provider=jev` (with the same key) replaces the
+  Claude reranker with `JevDocumentReranker`, which scores each passage on "could this answer the
+  query?" and keeps the `search.rag.rerank.top-k` best. It discards only passages scoring below
+  `search.rag.jev.rerank.minimum-score` (default 0, so none); the Claude reranker discards irrelevant
+  ones. Without a key (or with any other provider value), Claude reranks and a WARN says so. Both Jev stages judge a follow-up's standalone rewrite.
 - **Field projection**: `id,content,metadata_*` — excludes the 1536-dim `vector` field, which
   Solr would otherwise return on every hit under the default `fl=*`
 
