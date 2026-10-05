@@ -810,10 +810,11 @@ public ChatClient ragChatClient(ChatModel chatModel,
   The reranking prompt is unique per question, so it does not benefit from prompt caching.
   Failures are never fatal: an unavailable model, a malformed ranking, or indexes pointing
   nowhere all degrade to the retriever's RRF order.
-- **Conversation-aware retrieval**: Spring AI's `CompressionQueryTransformer` (on a
-  `claude-haiku-4-5` client) rewrites each question, with the conversation so far, into a
-  standalone query before retrieval, so a follow-up such as "Anything cheaper by the same author?"
-  is searched with the author filled in. See Craig Walls' *Making RAG Conversation-Aware* recipe.
+- **Conversation-aware retrieval**: Spring AI's `CompressionQueryTransformer` rewrites each
+  question, with the conversation so far, into a standalone query before retrieval, so a follow-up
+  such as "Anything cheaper by the same author?" is searched with the author filled in. It runs on
+  `search.rag.query-rewrite.model` (default `claude-haiku-4-5`). See Craig Walls' *Making RAG
+  Conversation-Aware* recipe.
 - **Field projection**: `id,content,metadata_*` — excludes the 1536-dim `vector` field, which
   Solr would otherwise return on every hit under the default `fl=*`
 

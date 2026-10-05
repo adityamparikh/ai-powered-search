@@ -39,7 +39,7 @@ import static org.assertj.core.api.Assertions.tuple;
  * and has already spliced the remembered messages into the prompt. Needs no API keys: the chat
  * model is a stub and the retriever records instead of querying Solr.</p>
  */
-@SpringBootTest(properties = "spring.ai.openai.api-key=test-key")
+@SpringBootTest(properties = {"spring.ai.openai.api-key=test-key", "search.rag.query-rewrite.model=" + RagAdvisorOrderingIT.REWRITE_MODEL})
 @Import({PostgresTestConfiguration.class, SolrTestConfiguration.class, RagAdvisorOrderingIT.StubModels.class})
 class RagAdvisorOrderingIT {
 
@@ -47,6 +47,8 @@ class RagAdvisorOrderingIT {
     static final String FIRST_QUESTION = "Recommend an epic fantasy series with political intrigue.";
     static final String FOLLOW_UP = "Anything cheaper by the same author?";
     static final String STANDALONE = "Books by George R.R. Martin cheaper than A Game of Thrones";
+    static final String REWRITE_MODEL = "configured-rewrite-model";
+    static final List<String> REWRITE_MODELS = new CopyOnWriteArrayList<>();
 
     @TestConfiguration(proxyBeanMethods = false)
     static class StubModels {
@@ -57,6 +59,9 @@ class RagAdvisorOrderingIT {
             // Answers the query rewrite with STANDALONE and everything else with STUB_ANSWER.
             return prompt -> {
                 boolean rewrite = prompt.getContents().contains("standalone query");
+                if (rewrite && prompt.getOptions() != null) {
+                    REWRITE_MODELS.add(String.valueOf(prompt.getOptions().getModel()));
+                }
                 return new ChatResponse(List.of(new Generation(new AssistantMessage(rewrite ? STANDALONE : STUB_ANSWER))));
             };
         }
@@ -119,6 +124,13 @@ class RagAdvisorOrderingIT {
         searchService.ask(new AskRequest(FOLLOW_UP, conversationId));
 
         assertThat(retriever.queries.getLast().text()).isEqualTo(STANDALONE);
+    }
+
+    @Test
+    void theRewriteRunsOnTheConfiguredModel() {
+        searchService.ask(new AskRequest(FIRST_QUESTION, "model-" + UUID.randomUUID().toString().substring(0, 8)));
+
+        assertThat(REWRITE_MODELS).isNotEmpty().allMatch(REWRITE_MODEL::equals);
     }
 
     @Test

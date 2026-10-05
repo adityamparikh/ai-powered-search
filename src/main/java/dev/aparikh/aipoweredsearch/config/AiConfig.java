@@ -60,9 +60,6 @@ public class AiConfig {
      */
     private static final String ANTHROPIC_CHAT_MODEL = "claude-sonnet-4-5";
 
-    /** Rewriting a query is a small task, so it runs on a smaller, cheaper model. */
-    private static final String QUERY_REWRITE_MODEL = "claude-haiku-4-5";
-
     /**
      * Creates default AnthropicChatOptions with prompt caching enabled.
      *
@@ -298,14 +295,19 @@ public class AiConfig {
      * before retrieval. Chat memory lets the model answer a follow-up, but without this the retriever
      * would search for the follow-up's literal words.
      *
+     * <p>Rewriting a query is a small task, so it runs on a smaller, cheaper model than the answer:
+     * {@code search.rag.query-rewrite.model}, default {@code claude-haiku-4-5}.</p>
+     *
      * @param chatModel the ChatModel the rewrite runs on
+     * @param model     the model id for the rewrite
      * @return the query transformer
      */
     @Bean
-    public QueryTransformer queryTransformer(ChatModel chatModel) {
+    public QueryTransformer queryTransformer(ChatModel chatModel,
+                                             @Value("${search.rag.query-rewrite.model:claude-haiku-4-5}") String model) {
         return CompressionQueryTransformer.builder()
                 .chatClientBuilder(ChatClient.builder(chatModel)
-                        .defaultOptions(AnthropicChatOptions.builder().model(QUERY_REWRITE_MODEL)))
+                        .defaultOptions(AnthropicChatOptions.builder().model(model)))
                 .build();
     }
 }
