@@ -7,6 +7,7 @@ import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.rag.Query;
 
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -105,12 +106,15 @@ class LegRoutingAndBatchingTest {
     static Stream<Arguments> unusableVectors() {
         return Stream.of(
                 Arguments.of(List.of(new float[0], new float[0])),
-                Arguments.of(List.of(new float[]{1f, 2f}, new float[]{3f})));
+                Arguments.of(List.of(new float[]{1f, 2f}, new float[]{3f})),
+                // A null element, first or later: List.of rejects nulls, so use Arrays.asList.
+                Arguments.of(Arrays.asList(null, new float[]{1f})),
+                Arguments.of(Arrays.asList(new float[]{1f}, null)));
     }
 
     @ParameterizedTest
     @MethodSource("unusableVectors")
-    void batcherIgnoresEmptyOrInconsistentlySizedVectors(List<float[]> vectors) {
+    void batcherIgnoresNullEmptyOrInconsistentlySizedVectors(List<float[]> vectors) {
         EmbeddingModel model = mock(EmbeddingModel.class);
         when(model.embed(anyList())).thenReturn(vectors);
         List<Query> queries = List.of(query(Map.of()), query(Map.of()));
