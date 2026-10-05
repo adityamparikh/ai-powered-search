@@ -156,7 +156,7 @@ public final class QueryPlanningExpander implements QueryExpander {
         String keywordQuery = isBlank(accepted.keywordQuery()) ? standalone
                 : Objects.requireNonNull(accepted.keywordQuery()).strip();
         List<String> filters = filterValidator == null ? List.of()
-                : filterValidator.validate(collection, accepted.filters());
+                : filterValidator.render(collection, accepted.filters());
 
         handOffStandalone(query, standalone);
 

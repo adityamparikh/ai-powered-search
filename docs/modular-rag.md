@@ -35,7 +35,7 @@ flowchart TB
             direction TB
             TURNS{"Earlier turns in<br/>the conversation?<br/>planner.follow-ups-only"}
             PLAN["QueryPlanningExpander<br/>Haiku: standalone, keywords,<br/>variants, HyDE, filters<br/>planner.enabled"]
-            FV["FilterValidator<br/>only safe fq clauses<br/>planner.filters.enabled"]
+            FV["FilterValidator<br/>builds fq from typed filters<br/>planner.filters.enabled"]
             EMB["EmbeddingBatcher<br/>one embedding call per turn"]
         end
 
@@ -156,7 +156,9 @@ the only document placed in the prompt is the seeded injection `inj-04`.
 3. `QueryPlanningExpander` makes one `claude-haiku-4-5` call. It returns the standalone query
    "Books by George R.R. Martin cheaper than A Game of Thrones", the keyword query "George R.R.
    Martin", two variants, a HyDE passage and two filters.
-4. `FilterValidator` admits `metadata_author:"George R.R. Martin"` and `metadata_price:[* TO 9.98]`.
+4. The planner returns two typed filters, `{metadata_author EQUALS "George R.R. Martin"}` and
+   `{metadata_price RANGE to 9.98}`, and `FilterValidator` builds `metadata_author:"George R.R. Martin"`
+   and `metadata_price:[* TO 9.98]` from them.
    The expander returns three queries (standalone plus two variants), each carrying the filters.
    It writes `rag.standalone` into the original query's context.
 5. `EmbeddingBatcher` embeds three kNN texts in one request: the HyDE passage for query 0 and each
@@ -181,7 +183,7 @@ The order is the order the advisor runs them in. Flags in **bold** are off by de
 | 0 | (before RAG) | `BaseChatMemoryAdvisor` | `MessageChatMemoryAdvisor` | none | on | Adds the conversation's earlier turns to the prompt, so they reach `Query.history()` |
 | 1 | Pre-retrieval | `QueryExpander` | `QueryPlanningExpander` | **`search.rag.planner.enabled`** | `false` | One small-model call: standalone rewrite, keyword query, variants, HyDE passage, filters. Falls back to the original query on timeout (`search.rag.planner.timeout`, `3s`), error or a malformed plan |
 | 1a | Pre-retrieval | none (a check in the expander) | `QueryPlanningExpander` | **`search.rag.planner.follow-ups-only`** (needs the planner) | `false` | Skips the planner when the conversation has no earlier turns. First questions then get no planner filters or HyDE |
-| 1b | Pre-retrieval | none (used by the expander) | `FilterValidator` | **`search.rag.planner.filters.enabled`** (needs the planner) | `false` | Keeps only single `field:value`, `field:"phrase"` or numeric/date range clauses on known fields |
+| 1b | Pre-retrieval | none (used by the expander) | `FilterValidator` | **`search.rag.planner.filters.enabled`** (needs the planner) | `false` | Builds each `fq` clause from the planner's typed filters (field, `EQUALS`/`RANGE`, plain values): quotes and escapes every value, and admits only known fields |
 | 1c | Pre-retrieval | none (used by the expander) | `EmbeddingBatcher` | on with the planner | (planner) | Embeds every planned query's kNN text in one request and stores the vector as `rag.vector` |
 | 1d | Pre-retrieval | none (planner output) | HyDE in `QueryPlanningExpander` | **`search.rag.hyde.enabled`** (needs the planner) | `false` | The standalone query's kNN leg searches with an imagined catalogue entry instead of the question |
 | 2 | Retrieval | `DocumentRetriever` | `HybridDocumentRetriever` (legs routed by `LegRouting`) | `search.rag.hybrid.top-k` | `20` | BM25 (edismax on `_text_`) and kNN (cosine on `vector`) concurrently, `2 × top-k` hits each, returned unfused and tagged by leg |

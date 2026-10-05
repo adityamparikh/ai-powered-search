@@ -813,8 +813,9 @@ public ChatClient ragChatClient(ChatModel chatModel,
   rewrite of the question plus variants. Each query carries `rag.standalone`, `rag.keywordQuery`
   and validated `rag.filters`. The standalone text is also written into the *original* query's
   context, and `StandaloneQueryAwarePostProcessor` makes the reranker judge against it.
-  `FilterValidator` admits only single `field:value`, `field:"phrase"` or numeric/date
-  `field:[a TO b]` clauses on known filterable fields, with values of the field's type. If filters
+  Filters come back as typed `PlannedFilter`s (field, `EQUALS`/`RANGE`, plain values), never Solr
+  syntax: `FilterValidator` builds each clause, quoting and escaping every value, and admits only
+  known filterable fields, values of the field's type, and ranges on numeric/date fields. If filters
   leave fewer than 3 candidates, the retriever retries without them. Every failure (timeout, model
   error, bad JSON, blank standalone) falls back to the original query with a WARN and an errored
   `rag.plan` observation; a wrong variant count keeps the plan (extras dropped). Duplicate

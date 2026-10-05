@@ -51,7 +51,9 @@ class QueryPlanningExpanderTest {
              "variants": ["Cheaper novels from the author of A Song of Ice and Fire",
                           "Lower-priced George R.R. Martin paperbacks"],
              "hydePassage": "A sweeping tale of rival houses.",
-             "filters": ["metadata_author:\\"George R.R. Martin\\"", "metadata_price:[* TO 9.98]", "{!func}div(1,0)"]}
+             "filters": [{"field": "metadata_author", "op": "EQUALS", "value": "George R.R. Martin"},
+                         {"field": "metadata_price", "op": "RANGE", "to": "9.98"},
+                         "{!func}div(1,0)"]}
             """;
 
     private final List<Prompt> prompts = new CopyOnWriteArrayList<>();

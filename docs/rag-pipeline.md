@@ -91,9 +91,10 @@ context with `rag.standalone`, `rag.keywordQuery` and, when present, `rag.filter
 - `keywordQuery` is 3–10 distinctive terms;
 - `variants` is exactly the requested number, each with different vocabulary;
 - `hydePassage` is 2–4 sentences in catalogue-description style;
-- `filters` cover explicit hard constraints only, on the listed fields only, as single
-  `field:value`, `field:"phrase"` or `field:[a TO b]` clauses. A relative constraint ("cheaper")
-  becomes a range only when its reference value is in the conversation.
+- `filters` cover explicit hard constraints only, on the listed fields only, as objects:
+  `{"field", "op": "EQUALS", "value"}` or `{"field", "op": "RANGE", "from", "to"}` with plain
+  values. The planner never writes Solr syntax. A relative constraint ("cheaper") becomes a range
+  only when its reference value is in the conversation.
 
 The user message carries the last `search.rag.planner.history-messages` user and assistant
 turns (each truncated to 1,500 characters), the latest question, the variant count and the
@@ -107,14 +108,25 @@ the standalone text. With the planner off there is no such key, and the wrapper 
 through unchanged.
 
 **Filter safety** (`FilterValidator`, only with `search.rag.planner.filters.enabled=true`). Planner
-filters are untrusted. A clause survives only if it is exactly one `field:value` (one plain
-token), `field:"phrase"`, or `field:[a TO b]` with numeric, ISO-instant or `*` bounds, on a known
-filterable field of the collection. Ranges are allowed only on numeric and date types: on
-`text_general` they compare lexically, and `10.99` would fall inside `[* TO 9]`. Values and bounds
-must match the field's type (integers on `pint`, numbers on `pdouble`, ISO instants on `pdate`;
-date fields take ranges only), since a mismatch is a Solr 400. That rules out
-`{!func}` local params, `_query_`, `*:*`, wildcards, boolean expressions, bare `AND`/`OR`/`NOT`
-values and unknown fields. Rejected clauses are dropped with a DEBUG log. Field types come from
+filters are untrusted, so the planner returns them as data (`PlannedFilter`: field, operator,
+plain values) and `FilterValidator` builds each `fq` clause itself, the way a prepared statement
+keeps values out of SQL:
+- `EQUALS` on a text or string field becomes `field:"value"`, always quoted, with `\\` and `"`
+  escaped. Inside quotes Solr reads nothing else, so `{!func}`, `*`, `OR` or `-` in a value stay
+  literal text. On a numeric field the value must be a number of the field's type, and it is
+  quoted too (`field:"-1"`): unquoted, a negative number is a parse error.
+- `RANGE` becomes `field:[from TO to]`, only on numeric and date types (on `text_general` a range
+  compares lexically, and `10.99` would fall inside `[* TO 9]`), with typed or `*` bounds. A range
+  open at both ends, or with reversed bounds, is dropped.
+- The field must be a known, indexed, filterable field of the collection, never `id`, `content`,
+  the vector field or an internal `_field_`. Every clause therefore starts with such a name, so it
+  cannot start with local params or be `_query_` or `*:*`.
+
+Values must match the field's type (integers on `pint`, numbers on `pdouble`, ISO instants on
+`pdate`, and only real dates; date fields take ranges only), since a mismatch is a Solr 400. Rejected filters are
+dropped with a DEBUG log. A filter the model gets wrong costs that filter, never the plan: an
+unknown operator is inferred from the values present, and a pre-typed string clause binds as an
+empty filter and is dropped. Field types come from
 `SearchRepository.getFieldsWithSchema()`, cached for `search.rag.planner.filters.field-cache-ttl`.
 If a refresh fails, the previous schema is kept, and a failure with nothing to fall back on is
 cached for 30s rather than retried on every turn.

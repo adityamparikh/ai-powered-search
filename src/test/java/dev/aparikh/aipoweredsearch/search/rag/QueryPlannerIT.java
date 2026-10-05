@@ -13,6 +13,7 @@ import dev.aparikh.aipoweredsearch.search.model.AskRequest;
 import dev.aparikh.aipoweredsearch.search.model.AskResponse;
 import org.apache.solr.client.solrj.SolrClient;
 import org.apache.solr.client.solrj.SolrRequest;
+import org.apache.solr.client.solrj.request.SolrQuery;
 import org.apache.solr.common.params.SolrParams;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -74,15 +75,22 @@ class QueryPlannerIT {
     static final String TURN_2 = "Anything cheaper by the same author?";
     static final String STANDALONE = "Books by George R.R. Martin cheaper than A Game of Thrones";
 
-    /** The plan for turn 2, including three filters the validator must drop. */
+    /**
+     * The plan for turn 2, including four filters the validator must drop: a nested-query field, an
+     * unknown field, a range on a text field and a pre-typed string clause.
+     */
     static final String TURN_2_PLAN = """
             {"standalone": "Books by George R.R. Martin cheaper than A Game of Thrones",
              "keywordQuery": "George R.R. Martin",
              "variants": ["Lower-priced novels by the author of A Song of Ice and Fire",
                           "Cheaper George R.R. Martin paperbacks"],
              "hydePassage": "A sweeping saga of rival noble houses.",
-             "filters": ["metadata_author:\\"George R.R. Martin\\"", "metadata_price:[* TO 9.98]",
-                         "{!func}div(1,0)", "_query_:\\"{!dismax}martin\\"", "unknown_field:x"]}
+             "filters": [{"field": "metadata_author", "op": "EQUALS", "value": "George R.R. Martin"},
+                         {"field": "metadata_price", "op": "RANGE", "to": "9.98"},
+                         {"field": "_query_", "op": "EQUALS", "value": "{!dismax}martin"},
+                         {"field": "unknown_field", "op": "EQUALS", "value": "x"},
+                         {"field": "metadata_author", "op": "RANGE", "from": "A", "to": "M"},
+                         "{!func}div(1,0)"]}
             """;
 
     static final String TURN_1_PLAN = """
@@ -245,5 +253,24 @@ class QueryPlannerIT {
         assertThat(params.getAllValues().stream().filter(p -> "edismax".equals(p.get("defType"))).map(p -> p.get("q")))
                 .isNotEmpty()
                 .noneMatch(q -> q.contains("sweeping saga"));
+    }
+
+    @Test
+    void quotedNumbersAreReadAsNumbersOnPointFields() throws Exception {
+        // FilterValidator quotes numeric values, because an unquoted negative number is a parse
+        // error. Solr must still read a quoted number on a point field as that number.
+        assertThat(filteredIds("metadata_year:\"1996\"")).containsExactlyInAnyOrder("grrm-01", "hobb-02");
+        assertThat(filteredIds("metadata_author:\"George R.R. Martin\"", "metadata_price:\"9.99\""))
+                .containsExactly("grrm-01");
+        assertThat(filteredIds("metadata_price:\"-1\"")).isEmpty();
+    }
+
+    private List<String> filteredIds(String... filterQueries) throws Exception {
+        SolrQuery query = new SolrQuery("*:*");
+        query.addFilterQuery(filterQueries);
+        query.setRows(100);
+        return solrClient.query(COLLECTION, query).getResults().stream()
+                .map(doc -> String.valueOf(doc.getFieldValue("id")))
+                .toList();
     }
 }
