@@ -4,6 +4,7 @@ import com.anthropic.models.messages.Model;
 import dev.aparikh.aipoweredsearch.search.HybridDocumentRetriever;
 import dev.aparikh.aipoweredsearch.search.RerankingDocumentPostProcessor;
 import org.springaicommunity.typesafe.rag.JevDocumentFilter;
+import org.springaicommunity.typesafe.rag.JevDocumentReranker;
 import org.springframework.ai.anthropic.AnthropicCacheOptions;
 import org.springframework.ai.anthropic.AnthropicCacheStrategy;
 import org.springframework.ai.anthropic.AnthropicCacheTtl;
@@ -225,6 +226,7 @@ public class AiConfig {
      * @param reranker the reranking post-processor, absent when {@code search.rag.rerank.enabled=false}
      * @param queryTransformer rewrites each question into a standalone query using the conversation
      * @param jevFilter the optional TypeSafe Jev passage filter, see {@link JevConfig}
+     * @param jevReranker the TypeSafe Jev reranker, used instead of {@code reranker} when present
      * @return configured ChatClient instance with RAG capabilities
      */
     @Bean
@@ -235,7 +237,8 @@ public class AiConfig {
                                     @Autowired(required = false) @Qualifier("anthropicChatOptionsWithCaching") AnthropicChatOptions.@Nullable Builder chatOptions,
                                     @Autowired(required = false) @Nullable RerankingDocumentPostProcessor reranker,
                                     QueryTransformer queryTransformer,
-                                    @Autowired(required = false) @Nullable JevDocumentFilter jevFilter) {
+                                    @Autowired(required = false) @Nullable JevDocumentFilter jevFilter,
+                                    @Autowired(required = false) @Nullable JevDocumentReranker jevReranker) {
         ChatClient.Builder builder = ChatClient.builder(chatModel);
 
         // Set default options if caching is enabled
@@ -273,8 +276,10 @@ public class AiConfig {
         if (jevFilter != null) {
             postProcessors.add(judgedAgainstTheRewrite(jevFilter));
         }
-        if (reranker != null) {
-            postProcessors.add(judgedAgainstTheRewrite(reranker));
+        // Reranking is Claude's unless search.rag.rerank.provider=jev selected Jev (with a key).
+        DocumentPostProcessor rerank = jevReranker != null ? jevReranker : reranker;
+        if (rerank != null) {
+            postProcessors.add(judgedAgainstTheRewrite(rerank));
         }
         if (!postProcessors.isEmpty()) {
             ragAdvisor.documentPostProcessors(postProcessors);

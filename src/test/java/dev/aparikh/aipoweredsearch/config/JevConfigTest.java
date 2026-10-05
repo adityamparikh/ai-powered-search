@@ -3,13 +3,14 @@ package dev.aparikh.aipoweredsearch.config;
 import org.junit.jupiter.api.Test;
 import org.springaicommunity.typesafe.autoconfigure.TypeSafeAutoConfiguration;
 import org.springaicommunity.typesafe.rag.JevDocumentFilter;
+import org.springaicommunity.typesafe.rag.JevDocumentReranker;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * The Jev filter exists only when it is switched on and a TypeSafe API key is configured.
+ * The Jev filter and reranker exist only when switched on and a TypeSafe API key is configured.
  */
 class JevConfigTest {
 
@@ -36,5 +37,22 @@ class JevConfigTest {
                     assertThat(context).hasNotFailed();
                     assertThat(context).doesNotHaveBean(JevDocumentFilter.class);
                 });
+    }
+
+    @Test
+    void theJevRerankerIsSelectedWithTheProviderAndAKey() {
+        runner.withPropertyValues("search.rag.rerank.provider=jev", "spring.ai.typesafe.api-key=test-key")
+                .run(context -> assertThat(context).hasSingleBean(JevDocumentReranker.class));
+    }
+
+    @Test
+    void noJevRerankerByDefaultOrWithoutAKeyOrWithRerankingOff() {
+        runner.withPropertyValues("spring.ai.typesafe.api-key=test-key")
+                .run(context -> assertThat(context).doesNotHaveBean(JevDocumentReranker.class));
+        runner.withPropertyValues("search.rag.rerank.provider=jev")
+                .run(context -> assertThat(context).doesNotHaveBean(JevDocumentReranker.class));
+        runner.withPropertyValues("search.rag.rerank.provider=jev", "spring.ai.typesafe.api-key=test-key",
+                        "search.rag.rerank.enabled=false")
+                .run(context -> assertThat(context).doesNotHaveBean(JevDocumentReranker.class));
     }
 }
