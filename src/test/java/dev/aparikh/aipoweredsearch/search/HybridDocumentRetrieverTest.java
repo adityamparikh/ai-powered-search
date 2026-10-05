@@ -290,6 +290,18 @@ class HybridDocumentRetrieverTest {
     }
 
     @Test
+    void aLegThatDiesOfAnErrorIsNotSwallowedAsADegradedLeg() throws Exception {
+        when(searchRepository.executeKeywordSearch(any(), any(), anyInt(), any(), any()))
+                .thenReturn(List.of(solrDoc("k1", "a", Map.of())));
+        when(searchRepository.executeVectorSearch(any(), any(), anyInt(), any(), any(), any()))
+                .thenThrow(new AssertionError("not an Exception"));
+
+        assertThatThrownBy(() -> unfusedRetriever().retrieve(Query.builder().text("q").build()))
+                .isInstanceOf(AssertionError.class)
+                .hasMessage("not an Exception");
+    }
+
+    @Test
     void bothLegsFailingYieldsNoDocumentsRatherThanAnError() throws Exception {
         when(searchRepository.executeKeywordSearch(any(), any(), anyInt(), any(), any()))
                 .thenThrow(new IllegalStateException("solr down"));

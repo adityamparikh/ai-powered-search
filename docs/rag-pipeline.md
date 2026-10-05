@@ -14,9 +14,9 @@ fails.
 
 ```mermaid
 flowchart TD
-    A[Question + chat history] --> G{W6 gate: keyword-only and no history?}
-    G -- yes, today's path --> R
-    G -- no --> P[W1 QueryPlanningExpander: one Haiku-class call<br/>standalone, keyword query, variants, HyDE passage, validated filters]
+    A[Question + chat history] --> G{W6 follow-ups-only on,<br/>and no earlier turns?}
+    G -- yes: raw question --> R
+    G -- no: plan --> P[W1 QueryPlanningExpander: one Haiku-class call<br/>standalone, keyword query, variants, HyDE passage, validated filters]
     P --> E[W5 batch embed: one embedding request]
     E --> R
     subgraph R[Hybrid retrieval per query, concurrent]
@@ -47,7 +47,8 @@ flowchart TD
    - history: every prompt message;
    - context: a mutable copy of the request context.
 3. With the planner on (W1), the query is expanded into a standalone query plus variants, unless
-   the gate (W6) decides it is a standalone lookup that planning cannot improve.
+   `search.rag.planner.follow-ups-only` (W6, off by default) is on and the conversation has no earlier
+   turns, in which case the raw question is retrieved as it is.
 4. Each query is retrieved on the task executor, the result lists are joined, the joined list goes
    through the post-processors, and the survivors are added to the user message as context.
 5. Claude answers with the augmented prompt. The documents used are returned as `sources`.
@@ -198,6 +199,11 @@ The estimate stitches two single runs together, so treat differences of a few po
 filters and no HyDE passage. The heuristic gate still planned vocabulary-gap questions, which
 gained about 9 points of precision from it. If first questions need filters or HyDE, leave this
 off; startup logs a WARN when it is on together with either.
+
+"First question" means the first for that conversation ID. When a request carries no
+`conversationId`, `SearchService` uses the shared ID `"default"`, so after the first anonymous call
+every later anonymous question has earlier turns and is planned. That errs toward planning (more
+cost, not wrong results); pass a `conversationId` to get per-conversation behaviour.
 
 | Property | Default | Meaning |
 |---|---|---|
