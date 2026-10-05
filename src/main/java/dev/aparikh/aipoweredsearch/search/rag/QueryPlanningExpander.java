@@ -49,7 +49,9 @@ import java.util.regex.Pattern;
  * de-duplication by normalised text. Equal queries would crash
  * {@code RetrievalAugmentationAdvisor}, which collects them with {@code Collectors.toMap}. Each
  * query carries its own copy of the context with {@link RagContextKeys#STANDALONE},
- * {@link RagContextKeys#KEYWORD_QUERY} and, when present, {@link RagContextKeys#FILTERS}.</p>
+ * {@link RagContextKeys#KEYWORD_QUERY} and, when present, {@link RagContextKeys#FILTERS}.
+ * {@link RagContextKeys#KEYWORD_QUERY} is read by the BM25 leg and the planner's HyDE passage by the
+ * kNN leg (W2, see {@code LegRouting}).</p>
  *
  * <p><strong>Standalone hand-off.</strong> {@code RetrievalAugmentationAdvisor} passes the
  * <em>original</em> query to post-processors. The expander therefore also writes
