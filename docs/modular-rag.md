@@ -33,7 +33,7 @@ flowchart TB
 
         subgraph PRE["1 · Pre-retrieval · QueryExpander"]
             direction TB
-            GATE{"QueryGate<br/>first turn, short,<br/>no follow-up words?<br/>gate.enabled"}
+            TURNS{"Earlier turns in<br/>the conversation?<br/>planner.follow-ups-only"}
             PLAN["QueryPlanningExpander<br/>Haiku: standalone, keywords,<br/>variants, HyDE, filters<br/>planner.enabled"]
             FV["FilterValidator<br/>only safe fq clauses<br/>planner.filters.enabled"]
             EMB["EmbeddingBatcher<br/>one embedding call per turn"]
@@ -70,10 +70,10 @@ flowchart TB
 
     USER --> MEM
     STORE -. "earlier turns" .-> MEM
-    MEM -- "Query + history" --> GATE
+    MEM -- "Query + history" --> TURNS
     MEM -. "planner off: raw question" .-> QS
-    GATE -- "skip: raw question" --> QS
-    GATE -- "plan" --> PLAN
+    TURNS -- "no: raw question" --> QS
+    TURNS -- "yes: plan" --> PLAN
     PLAN --> FV --> EMB
     EMB -- "standalone + variants" --> QS
     QS -- "keywordQuery" --> KW
@@ -100,7 +100,7 @@ flowchart TB
     classDef dropped fill:#ffebee,stroke:#c62828,stroke-width:1px,stroke-dasharray:3 3,color:#c62828
 
     class MEM,KW,VEC,JOIN,RR,AUG,QS module
-    class GATE,PLAN,FV,EMB,HYDE,JEV optional
+    class TURNS,PLAN,FV,EMB,HYDE,JEV optional
     class USER,ANS,STORE,DC io
     class LLM model
     class DROP dropped
@@ -152,7 +152,7 @@ the only document placed in the prompt is the seeded injection `inj-04`.
 **With every stage on** (see [Fully enabled](#fully-enabled)):
 
 1. Memory adds turn 1, as before.
-2. `QueryGate` sees earlier turns, so the question is planned.
+2. The question has earlier turns, so with `search.rag.planner.follow-ups-only` it is planned.
 3. `QueryPlanningExpander` makes one `claude-haiku-4-5` call. It returns the standalone query
    "Books by George R.R. Martin cheaper than A Game of Thrones", the keyword query "George R.R.
    Martin", two variants, a HyDE passage and two filters.
@@ -180,7 +180,7 @@ The order is the order the advisor runs them in. Flags in **bold** are off by de
 |---|---|---|---|---|---|---|
 | 0 | (before RAG) | `BaseChatMemoryAdvisor` | `MessageChatMemoryAdvisor` | none | on | Adds the conversation's earlier turns to the prompt, so they reach `Query.history()` |
 | 1 | Pre-retrieval | `QueryExpander` | `QueryPlanningExpander` | **`search.rag.planner.enabled`** | `false` | One small-model call: standalone rewrite, keyword query, variants, HyDE passage, filters. Falls back to the original query on timeout (`search.rag.planner.timeout`, `3s`), error or a malformed plan |
-| 1a | Pre-retrieval | none (used by the expander) | `QueryGate` | **`search.rag.gate.enabled`** (needs the planner) | `false` | Skips the planner for first-turn questions of at most `search.rag.gate.max-tokens` (`6`) tokens with no `search.rag.gate.markers` |
+| 1a | Pre-retrieval | none (a check in the expander) | `QueryPlanningExpander` | **`search.rag.planner.follow-ups-only`** (needs the planner) | `false` | Skips the planner when the conversation has no earlier turns. First questions then get no planner filters or HyDE |
 | 1b | Pre-retrieval | none (used by the expander) | `FilterValidator` | **`search.rag.planner.filters.enabled`** (needs the planner) | `false` | Keeps only single `field:value`, `field:"phrase"` or numeric/date range clauses on known fields |
 | 1c | Pre-retrieval | none (used by the expander) | `EmbeddingBatcher` | on with the planner | (planner) | Embeds every planned query's kNN text in one request and stores the vector as `rag.vector` |
 | 1d | Pre-retrieval | none (planner output) | HyDE in `QueryPlanningExpander` | **`search.rag.hyde.enabled`** (needs the planner) | `false` | The standalone query's kNN leg searches with an imagined catalogue entry instead of the question |
@@ -228,7 +228,7 @@ Per turn: 1 embedding request, 2 Solr queries, 1 Claude rerank call, 1 Claude ge
 search.rag.planner.enabled=true
 search.rag.planner.filters.enabled=true
 search.rag.hyde.enabled=true
-search.rag.gate.enabled=true
+search.rag.planner.follow-ups-only=true
 search.rag.jev.enabled=true
 spring.ai.typesafe.api-key=${TYPESAFE_API_KEY}
 ```
@@ -236,8 +236,9 @@ spring.ai.typesafe.api-key=${TYPESAFE_API_KEY}
 Per planned turn with the default 2 variants: 1 Haiku planner call, 1 embedding request,
 6 Solr queries (plus up to 6 more if a filtered query is retried without filters), up to 20
 Jev calls (`search.rag.jev.concurrency` at a time), 1 Claude rerank call and 1 Claude
-generation call. A gated question skips the planner and the batched embedding, so it retrieves
-exactly as the default pipeline does; the Jev filter still screens its candidates.
+generation call. The first question of a conversation skips the planner and the batched
+embedding, so it retrieves exactly as the default pipeline does, without filters or HyDE; the Jev
+filter still screens its candidates. Startup logs a WARN about that trade-off.
 
 Setting `search.rag.rerank.provider=jev` replaces the Claude rerank call with one Jev call per
 surviving passage. If no TypeSafe key is configured, the app still starts: the Jev filter is
@@ -257,7 +258,7 @@ target metric:
 | Pre-retrieval | `QueryPlanningExpander` + `RrfDocumentJoiner` | follow-up parity and follow-up recall@20 |
 | Pre-retrieval | `FilterValidator` | filter-category context precision |
 | Pre-retrieval | HyDE | vocab-gap recall@20 |
-| Pre-retrieval | `QueryGate` | keyword recall@20 within 1 point; gate hit rate |
+| Pre-retrieval | follow-ups only | first-question categories within 1 point of the baseline, with the planner's follow-up gains kept |
 | Post-retrieval | `JevDocumentFilter` | injections in context of 0, context precision within 2 points |
 | Post-retrieval | reranker and `JevDocumentFilter` | recall after rerank: how many relevant books retrieval found still reach the prompt |
 
