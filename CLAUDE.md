@@ -248,6 +248,7 @@ The repository includes several helper scripts for common tasks:
 
 ### Environment Variables
 - `ANTHROPIC_API_KEY`: Required for Claude AI integration (query generation and chat)
+- `ANTHROPIC_CHAT_MODEL`: Claude model for chat, query generation and reranking (defaults to 'claude-sonnet-4-5')
 - `ANTHROPIC_PROMPT_CACHING_ENABLED`: Enable Anthropic prompt caching (defaults to 'true')
 - `ANTHROPIC_PROMPT_CACHING_STRATEGY`: Cache strategy (defaults to 'SYSTEM_AND_TOOLS')
 - `OPENAI_API_KEY`: Required for OpenAI embeddings (vector search and indexing)
