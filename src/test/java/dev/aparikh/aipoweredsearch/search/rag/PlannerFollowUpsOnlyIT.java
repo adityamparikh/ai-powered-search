@@ -11,7 +11,6 @@ import dev.aparikh.aipoweredsearch.indexing.IndexService;
 import dev.aparikh.aipoweredsearch.search.SearchService;
 import dev.aparikh.aipoweredsearch.search.model.AskRequest;
 import dev.aparikh.aipoweredsearch.search.model.AskResponse;
-import io.micrometer.core.instrument.MeterRegistry;
 import org.apache.solr.client.solrj.SolrClient;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -40,20 +39,23 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * W6 on the real wiring with offline models: with the planner and the gate on, a first-turn title
- * lookup makes zero planner calls and returns exactly the documents of the planner-off baseline.
+ * W6 on the real wiring with offline models: with the planner on and
+ * {@code search.rag.planner.follow-ups-only=true}, the first question of a conversation makes zero
+ * planner calls and returns exactly the documents of the planner-off baseline, and a follow-up is
+ * planned. Only the conversation history, loaded by the memory advisor before retrieval, tells
+ * the two apart.
  */
 @SpringBootTest(properties = {
-        "solr.default.collection=" + QueryGateIT.COLLECTION,
+        "solr.default.collection=" + PlannerFollowUpsOnlyIT.COLLECTION,
         "spring.ai.openai.api-key=test-key",
         "search.rag.planner.enabled=true",
-        "search.rag.gate.enabled=true"})
+        "search.rag.planner.follow-ups-only=true"})
 @Import({PostgresTestConfiguration.class, SolrTestConfiguration.class, RagEvalTestConfiguration.class,
-        QueryGateIT.OfflineModels.class})
+        PlannerFollowUpsOnlyIT.OfflineModels.class})
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
-class QueryGateIT {
+class PlannerFollowUpsOnlyIT {
 
-    static final String COLLECTION = "rag-gate";
+    static final String COLLECTION = "rag-follow-ups";
 
     @TestConfiguration(proxyBeanMethods = false)
     static class OfflineModels {
@@ -101,9 +103,6 @@ class QueryGateIT {
     @Autowired
     private CandidateRecorder candidateRecorder;
 
-    @Autowired
-    private MeterRegistry meterRegistry;
-
     @BeforeAll
     void indexFixture() throws Exception {
         RagEvalFixture.uploadConfigSet(solr);
@@ -112,35 +111,28 @@ class QueryGateIT {
     }
 
     @Test
-    void aGatedLookupMakesNoPlannerCallAndMatchesTheBaseline() throws Exception {
+    void aFirstQuestionMakesNoPlannerCallAndMatchesTheBaseline() throws Exception {
         int before = OfflineModels.PLANNER_CALLS.get();
-        double skippedBefore = gateCount(QueryGate.SKIPPED);
 
-        AskResponse response = searchService.ask(new AskRequest("A Clash of Kings", "gate-lookup"));
+        AskResponse response = searchService.ask(new AskRequest("A Clash of Kings", "first-question"));
 
         assertThat(OfflineModels.PLANNER_CALLS.get()).isEqualTo(before);
         Map<String, List<String>> golden = golden("k-01");
-        assertThat(candidateRecorder.lastCandidates("gate-lookup")).containsExactlyElementsOf(golden.get("candidates"));
+        assertThat(candidateRecorder.lastCandidates("first-question")).containsExactlyElementsOf(golden.get("candidates"));
         assertThat(response.sources()).containsExactlyElementsOf(golden.get("context"));
-        assertThat(gateCount(QueryGate.SKIPPED)).isEqualTo(skippedBefore + 1);
     }
 
     @Test
-    void aFollowUpIsStillPlanned() {
-        searchService.ask(new AskRequest("Recommend an epic fantasy series with political intrigue.", "gate-follow-up"));
+    void aFollowUpIsPlannedAndALongFirstQuestionIsNot() {
         int before = OfflineModels.PLANNER_CALLS.get();
-        double plannedBefore = gateCount(QueryGate.PLANNED);
 
-        // Short and marker-free: only the conversation history, loaded by the memory advisor before
-        // retrieval, tells the gate this is a follow-up.
-        searchService.ask(new AskRequest("Which one is the shortest?", "gate-follow-up"));
+        // Long and conversational, but the first question: not planned.
+        searchService.ask(new AskRequest("Recommend an epic fantasy series with political intrigue.", "follow-up"));
+        assertThat(OfflineModels.PLANNER_CALLS.get()).isEqualTo(before);
 
+        // Short, but it has history: planned.
+        searchService.ask(new AskRequest("Which one is the shortest?", "follow-up"));
         assertThat(OfflineModels.PLANNER_CALLS.get()).isEqualTo(before + 1);
-        assertThat(gateCount(QueryGate.PLANNED)).isEqualTo(plannedBefore + 1);
-    }
-
-    private double gateCount(String outcome) {
-        return meterRegistry.get(QueryGate.METRIC).tag(QueryGate.OUTCOME_TAG, outcome).counter().count();
     }
 
     private Map<String, List<String>> golden(String caseId) throws Exception {

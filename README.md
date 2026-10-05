@@ -371,9 +371,9 @@ API is unavailable, candidates simply pass through, so screening is best-effort.
 the candidate passages and the question to TypeSafe's hosted API. Reranking can also use Jev
 instead of Claude (`search.rag.rerank.provider=jev`).
 
-**Adaptive gating (optional):** with `search.rag.gate.enabled=true`, short first-turn lookups
-like "A Clash of Kings" skip the planner entirely and are answered with no extra latency. Follow-ups
-are always planned. The `rag.gate` metric reports how often planning is skipped.
+**Follow-ups only (optional):** with `search.rag.planner.follow-ups-only=true`, the planner runs
+only for questions that follow earlier turns, which is where it helps. The first question of a
+conversation is answered with no extra latency.
 
 ## 🔍 Usage Examples
 

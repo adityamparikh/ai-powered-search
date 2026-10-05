@@ -837,17 +837,11 @@ public ChatClient ragChatClient(ChatModel chatModel,
   - `EmbeddingBatcher` embeds every planned query in one `EmbeddingModel.embed(List)` call, so a
     turn makes one embedding request regardless of the number of queries. A failed or invalid batch leaves
     vectors unset, and each leg then embeds individually.
-- **Adaptive gating** (W6): with `search.rag.gate.enabled=true` (default `false`; needs the planner),
-  `QueryGate` skips the planner when all three hold:
-  - the conversation has no earlier turns;
-  - the question has ≤ `search.rag.gate.max-tokens` (`6`) tokens;
-  - it contains no `search.rag.gate.markers` (default
-    `it,its,that,those,them,same,more,another,else,cheaper,newer,older`).
-
-  Counter: `rag.gate{outcome=skipped|planned}`. Hit rate on the eval set is 38%: keyword 10/10,
-  follow-up 0/15, filter 7/10. Because short constraint questions get gated, add words like
-  `under,over,before,after` (`QueryGate.CONSTRAINT_MARKERS`) to the markers when planner filters
-  are on; startup logs a WARN if you don't.
+- **Follow-ups only** (W6): with `search.rag.planner.follow-ups-only=true` (default `false`; needs
+  the planner), `QueryPlanningExpander` skips the planner when the conversation has no earlier
+  user or assistant turns, counted over the whole history, not the `history-messages` cap. First
+  questions then get no planner filters or HyDE, and startup logs a WARN if either is enabled.
+  It replaced a word-count and marker-word gate, which the evaluation data did not justify.
 - **Post-processors** (W4): `RagPostProcessingConfig` assembles `RagPostProcessors`.
   - **Order:** the optional `JevDocumentFilter` (`search.rag.jev.enabled`, default `false`;
     fail-open via `FailOpenPostProcessor`, bounded by `search.rag.jev.timeout`, counted as

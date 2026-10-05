@@ -109,7 +109,7 @@ From W0 finding A6. A stage's flag is flipped only if all of these hold:
   | W1 filters | filter-category context precision |
   | W2 (HyDE) | vocab-gap recall@20 |
   | W4 (Jev) | injection pass-through of 0, with context precision held within 2 points |
-  | W6 (gating) | keyword recall@20 within 1 point, gate hit rate reported |
+  | W6 (follow-ups only) | first-question categories within 1 point of the baseline, follow-up gains of W1 kept |
 
 - **p95 latency ≤ baseline + 1.5 s**.
 - **No category regresses by more than 2 points** on recall@20 or context precision.

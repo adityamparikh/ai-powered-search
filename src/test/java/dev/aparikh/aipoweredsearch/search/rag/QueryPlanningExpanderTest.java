@@ -26,6 +26,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.stream.Stream;
 
@@ -436,5 +437,76 @@ class QueryPlanningExpanderTest {
         expander.expand(followUp());
 
         org.mockito.Mockito.verifyNoInteractions(model);
+    }
+
+    // ==================== Follow-ups only (W6) ====================
+
+    private static QueryPlanningExpander countingExpander(AtomicInteger calls,
+                                                         boolean followUpsOnly, int historyMessages) {
+        ChatModel planner = prompt -> {
+            calls.incrementAndGet();
+            return new ChatResponse(List.of(new Generation(new AssistantMessage(
+                    "{\"standalone\": \"s\", \"variants\": [], \"filters\": []}"))));
+        };
+        return QueryPlanningExpander.builder()
+                .plannerChatClient(ChatClient.builder(planner).build())
+                .systemPrompt("planner").collection("books").variants(0).historyMessages(historyMessages)
+                .followUpsOnly(followUpsOnly)
+                .build();
+    }
+
+    @Test
+    void withFollowUpsOnlyAFirstQuestionNeverReachesThePlanner() {
+        AtomicInteger calls = new AtomicInteger();
+        QueryPlanningExpander expander = countingExpander(calls, true, 10);
+        // Long and conversational, but the first question in the conversation.
+        Query first = Query.builder().text("Recommend an epic fantasy series with political intrigue.")
+                .history(new UserMessage("Recommend an epic fantasy series with political intrigue."))
+                .context(new HashMap<>()).build();
+        Query followUp = Query.builder().text("Anything cheaper by the same author?")
+                .history(new UserMessage("Recommend an epic fantasy series."), new AssistantMessage("A Game of Thrones."),
+                        new UserMessage("Anything cheaper by the same author?"))
+                .context(new HashMap<>()).build();
+
+        assertThat(expander.expand(first)).containsExactly(first);
+        assertThat(calls).hasValue(0);
+        assertThat(first.context()).doesNotContainKey(RagContextKeys.STANDALONE);
+
+        expander.expand(followUp);
+        assertThat(calls).hasValue(1);
+    }
+
+    @Test
+    void earlierTurnsAreCountedBeyondTheHistoryCapAndWithoutSystemMessages() {
+        AtomicInteger calls = new AtomicInteger();
+        // history-messages=0 sends the planner no history, but must not make a follow-up look new.
+        QueryPlanningExpander expander = countingExpander(calls, true, 0);
+        Query followUp = Query.builder().text("by Tolkien?")
+                .history(new UserMessage("Recommend an epic fantasy series."), new UserMessage("by Tolkien?"))
+                .context(new HashMap<>()).build();
+        Query assistantOnly = Query.builder().text("by Tolkien?")
+                .history(new AssistantMessage("Hello, what are you looking for?"), new UserMessage("by Tolkien?"))
+                .context(new HashMap<>()).build();
+        Query systemOnly = Query.builder().text("by Tolkien?")
+                .history(new SystemMessage("You answer questions about books."), new UserMessage("by Tolkien?"))
+                .context(new HashMap<>()).build();
+
+        expander.expand(followUp);
+        assertThat(calls).hasValue(1);
+        expander.expand(assistantOnly);
+        assertThat(calls).hasValue(2);
+        assertThat(expander.expand(systemOnly)).containsExactly(systemOnly);
+        assertThat(calls).hasValue(2);
+    }
+
+    @Test
+    void withoutFollowUpsOnlyAFirstQuestionIsPlanned() {
+        AtomicInteger calls = new AtomicInteger();
+        Query first = Query.builder().text("A Clash of Kings").history(new UserMessage("A Clash of Kings"))
+                .context(new HashMap<>()).build();
+
+        countingExpander(calls, false, 10).expand(first);
+
+        assertThat(calls).hasValue(1);
     }
 }

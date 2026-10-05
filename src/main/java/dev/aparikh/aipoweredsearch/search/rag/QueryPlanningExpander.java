@@ -63,9 +63,10 @@ import java.util.regex.Pattern;
  * query's kNN text is then embedded in one {@link EmbeddingBatcher} request, and the vector is
  * set as {@link RagContextKeys#VECTOR}.</p>
  *
- * <p><strong>Gating (W6).</strong> With a {@link QueryGate}, a first-turn question that is short
- * and has no conversational markers ("A Clash of Kings") is returned unchanged without calling the
- * planner: no added latency for lookups that planning cannot improve.</p>
+ * <p><strong>Follow-ups only (W6).</strong> With {@code followUpsOnly}, a question with no earlier
+ * turns in the conversation is returned unchanged without calling the planner. The planner's gain
+ * is concentrated in follow-ups, whose text has a referent only in the history; a first question
+ * is already self-contained, and planning it adds a model call for little benefit.</p>
  *
  * <p><strong>Fails safe.</strong> On a timeout, an exception, an unparseable reply or a blank
  * standalone query, the expander logs a WARN and returns {@code List.of(originalQuery)}. That is
@@ -101,7 +102,7 @@ public final class QueryPlanningExpander implements QueryExpander {
     private final ObservationRegistry observationRegistry;
     private final boolean hydeEnabled;
     private final @Nullable EmbeddingBatcher embeddingBatcher;
-    private final @Nullable QueryGate gate;
+    private final boolean followUpsOnly;
     private final ContextSnapshotFactory contextSnapshotFactory = ContextSnapshotFactory.builder().build();
 
     private QueryPlanningExpander(Builder builder) {
@@ -118,7 +119,7 @@ public final class QueryPlanningExpander implements QueryExpander {
         this.observationRegistry = builder.observationRegistry;
         this.hydeEnabled = builder.hydeEnabled;
         this.embeddingBatcher = builder.embeddingBatcher;
-        this.gate = builder.gate;
+        this.followUpsOnly = builder.followUpsOnly;
     }
 
     public static Builder builder() {
@@ -127,12 +128,11 @@ public final class QueryPlanningExpander implements QueryExpander {
 
     @Override
     public List<Query> expand(Query query) {
-        // Adaptive gating (W6): a standalone keyword lookup on the first turn skips the planner
-        // entirely and is retrieved exactly as with the planner off. Earlier turns are counted
-        // before the history-messages cap, so history-messages=0 cannot make a follow-up look
-        // like a first turn.
-        if (gate != null && gate.skipPlanning(query.text(), !allPriorTurns(query).isEmpty())) {
-            log.debug("Gate: retrieving '{}' without planning", query.text());
+        // Follow-ups only (W6): a first question is retrieved exactly as with the planner off.
+        // Earlier turns are counted before the history-messages cap, so history-messages=0 cannot
+        // make a follow-up look like a first question.
+        if (followUpsOnly && allPriorTurns(query).isEmpty()) {
+            log.debug("First question in the conversation; retrieving '{}' without planning", query.text());
             return List.of(query);
         }
 
@@ -362,14 +362,17 @@ public final class QueryPlanningExpander implements QueryExpander {
         private ObservationRegistry observationRegistry = ObservationRegistry.NOOP;
         private boolean hydeEnabled;
         private @Nullable EmbeddingBatcher embeddingBatcher;
-        private @Nullable QueryGate gate;
+        private boolean followUpsOnly;
 
         private Builder() {
         }
 
-        /** Skip planning for standalone keyword lookups (W6); null plans every question. */
-        public Builder gate(@Nullable QueryGate gate) {
-            this.gate = gate;
+        /**
+         * Plan only questions with earlier turns in the conversation (W6,
+         * {@code search.rag.planner.follow-ups-only}); false plans every question.
+         */
+        public Builder followUpsOnly(boolean followUpsOnly) {
+            this.followUpsOnly = followUpsOnly;
             return this;
         }
 
