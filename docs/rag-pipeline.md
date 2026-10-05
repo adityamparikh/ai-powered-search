@@ -200,6 +200,11 @@ filters and no HyDE passage. The heuristic gate still planned vocabulary-gap que
 gained about 9 points of precision from it. If first questions need filters or HyDE, leave this
 off; startup logs a WARN when it is on together with either.
 
+"First question" means the first for that conversation ID. When a request carries no
+`conversationId`, `SearchService` uses the shared ID `"default"`, so after the first anonymous call
+every later anonymous question has earlier turns and is planned. That errs toward planning (more
+cost, not wrong results); pass a `conversationId` to get per-conversation behaviour.
+
 | Property | Default | Meaning |
 |---|---|---|
 | `search.rag.planner.follow-ups-only` | `false` | Plan only questions with earlier turns in the conversation |
