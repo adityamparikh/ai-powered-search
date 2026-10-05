@@ -3,6 +3,7 @@ package dev.aparikh.aipoweredsearch.config;
 import com.anthropic.models.messages.Model;
 import dev.aparikh.aipoweredsearch.search.HybridDocumentRetriever;
 import dev.aparikh.aipoweredsearch.search.RerankingDocumentPostProcessor;
+import org.springaicommunity.typesafe.rag.JevDocumentFilter;
 import org.springframework.ai.anthropic.AnthropicCacheOptions;
 import org.springframework.ai.anthropic.AnthropicCacheStrategy;
 import org.springframework.ai.anthropic.AnthropicCacheTtl;
@@ -35,6 +36,7 @@ import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -222,6 +224,7 @@ public class AiConfig {
      * @param chatOptions the chat options with caching configured (optional, may be null if caching disabled)
      * @param reranker the reranking post-processor, absent when {@code search.rag.rerank.enabled=false}
      * @param queryTransformer rewrites each question into a standalone query using the conversation
+     * @param jevFilter the optional TypeSafe Jev passage filter, see {@link JevConfig}
      * @return configured ChatClient instance with RAG capabilities
      */
     @Bean
@@ -231,7 +234,8 @@ public class AiConfig {
                                     @Value("${spring.ai.anthropic.prompt-caching.enabled:true}") boolean cachingEnabled,
                                     @Autowired(required = false) @Qualifier("anthropicChatOptionsWithCaching") AnthropicChatOptions.@Nullable Builder chatOptions,
                                     @Autowired(required = false) @Nullable RerankingDocumentPostProcessor reranker,
-                                    QueryTransformer queryTransformer) {
+                                    QueryTransformer queryTransformer,
+                                    @Autowired(required = false) @Nullable JevDocumentFilter jevFilter) {
         ChatClient.Builder builder = ChatClient.builder(chatModel);
 
         // Set default options if caching is enabled
@@ -261,11 +265,19 @@ public class AiConfig {
                                         .flatMap(List::stream)
                                         .toList());
 
-        // Reranking is the third and last place the pipeline can improve context quality:
-        // the retriever decides what is a candidate, and this decides what actually reaches
-        // the prompt. Absent when search.rag.rerank.enabled=false.
+        // Post-processing decides which candidates actually reach the prompt. The optional Jev
+        // filter screens them first, so the reranker only reads passages that survived screening.
+        // Each stage judges a follow-up's standalone rewrite rather than the raw follow-up.
+        // Reranking is absent when search.rag.rerank.enabled=false.
+        List<DocumentPostProcessor> postProcessors = new ArrayList<>(2);
+        if (jevFilter != null) {
+            postProcessors.add(judgedAgainstTheRewrite(jevFilter));
+        }
         if (reranker != null) {
-            ragAdvisor.documentPostProcessors(judgedAgainstTheRewrite(reranker));
+            postProcessors.add(judgedAgainstTheRewrite(reranker));
+        }
+        if (!postProcessors.isEmpty()) {
+            ragAdvisor.documentPostProcessors(postProcessors);
         }
 
         return builder.defaultAdvisors(
