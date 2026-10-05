@@ -88,7 +88,7 @@ public class AiConfig {
     public AnthropicChatOptions.Builder anthropicChatOptionsWithCaching(
             @Value("${spring.ai.anthropic.prompt-caching.enabled:true}") boolean cachingEnabled,
             @Value("${spring.ai.anthropic.prompt-caching.strategy:SYSTEM_AND_TOOLS}") String cacheStrategyStr,
-            @Value("${spring.ai.anthropic.chat.options.model}") String model) {
+            @Value("${spring.ai.anthropic.chat.options.model:claude-sonnet-4-5}") String model) {
 
         AnthropicCacheStrategy cacheStrategy = AnthropicCacheStrategy.valueOf(cacheStrategyStr);
 
