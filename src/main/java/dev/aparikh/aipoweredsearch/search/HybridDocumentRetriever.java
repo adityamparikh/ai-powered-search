@@ -289,6 +289,11 @@ public class HybridDocumentRetriever implements DocumentRetriever {
             Thread.currentThread().interrupt();
             throw new IllegalStateException("Retrieval was interrupted", e);
         } catch (ExecutionException e) {
+            // A leg that dies of an Error (OutOfMemoryError, AssertionError) is not a degraded leg:
+            // surface it instead of logging it away.
+            if (e.getCause() instanceof Error error) {
+                throw error;
+            }
             log.warn("The {} retrieval leg failed for '{}'; continuing with the other leg: {}",
                     leg, query.text(), String.valueOf(e.getCause()));
             return null;
