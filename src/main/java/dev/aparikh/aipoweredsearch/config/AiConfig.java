@@ -227,6 +227,7 @@ public class AiConfig {
      * @param queryTransformer rewrites each question into a standalone query using the conversation
      * @param jevFilter the optional TypeSafe Jev passage filter, see {@link JevConfig}
      * @param jevReranker the TypeSafe Jev reranker, used instead of {@code reranker} when present
+     * @param rerankProvider {@code search.rag.rerank.provider}: {@code claude} (default) or {@code jev}
      * @return configured ChatClient instance with RAG capabilities
      */
     @Bean
@@ -238,7 +239,8 @@ public class AiConfig {
                                     @Autowired(required = false) @Nullable RerankingDocumentPostProcessor reranker,
                                     QueryTransformer queryTransformer,
                                     @Autowired(required = false) @Nullable JevDocumentFilter jevFilter,
-                                    @Autowired(required = false) @Nullable JevDocumentReranker jevReranker) {
+                                    @Autowired(required = false) @Nullable JevDocumentReranker jevReranker,
+                                    @Value("${search.rag.rerank.provider:claude}") String rerankProvider) {
         ChatClient.Builder builder = ChatClient.builder(chatModel);
 
         // Set default options if caching is enabled
@@ -278,9 +280,15 @@ public class AiConfig {
         }
         // Reranking is Claude's unless search.rag.rerank.provider=jev selected Jev (with a key).
         DocumentPostProcessor rerank = jevReranker != null ? jevReranker : reranker;
+        if (jevReranker == null && !"claude".equalsIgnoreCase(rerankProvider.strip())) {
+            log.warn("search.rag.rerank.provider={} needs 'jev' and spring.ai.typesafe.api-key; reranking with Claude",
+                    rerankProvider);
+        }
         if (rerank != null) {
             postProcessors.add(judgedAgainstTheRewrite(rerank));
         }
+        log.info("RAG post-processors: Jev filter {}, reranker {}", jevFilter != null ? "on" : "off",
+                rerank == null ? "off" : rerank.getClass().getSimpleName());
         if (!postProcessors.isEmpty()) {
             ragAdvisor.documentPostProcessors(postProcessors);
         }

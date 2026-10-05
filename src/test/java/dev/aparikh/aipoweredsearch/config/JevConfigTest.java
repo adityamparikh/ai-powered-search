@@ -1,6 +1,7 @@
 package dev.aparikh.aipoweredsearch.config;
 
 import org.junit.jupiter.api.Test;
+import org.springaicommunity.typesafe.TypeSafeClient;
 import org.springaicommunity.typesafe.autoconfigure.TypeSafeAutoConfiguration;
 import org.springaicommunity.typesafe.rag.JevDocumentFilter;
 import org.springaicommunity.typesafe.rag.JevDocumentReranker;
@@ -35,6 +36,8 @@ class JevConfigTest {
         runner.withPropertyValues("search.rag.jev.enabled=true")
                 .run(context -> {
                     assertThat(context).hasNotFailed();
+                    // The starter only activates with a key, so there is no client either.
+                    assertThat(context).doesNotHaveBean(TypeSafeClient.class);
                     assertThat(context).doesNotHaveBean(JevDocumentFilter.class);
                 });
     }

@@ -832,7 +832,7 @@ public ChatClient ragChatClient(ChatModel chatModel,
   Claude reranker with `JevDocumentReranker`, which scores each passage on "could this answer the
   query?" and keeps the `search.rag.rerank.top-k` best. It discards only passages scoring below
   `search.rag.jev.rerank.minimum-score` (default 0, so none); the Claude reranker discards irrelevant
-  ones. Without a key, Claude reranks. Both Jev stages judge a follow-up's standalone rewrite.
+  ones. Without a key (or with any other provider value), Claude reranks and a WARN says so. Both Jev stages judge a follow-up's standalone rewrite.
 - **Field projection**: `id,content,metadata_*` — excludes the 1536-dim `vector` field, which
   Solr would otherwise return on every hit under the default `fl=*`
 
