@@ -49,6 +49,8 @@ class RagAdvisorOrderingIT {
     static final String STANDALONE = "Books by George R.R. Martin cheaper than A Game of Thrones";
     static final String REWRITE_MODEL = "configured-rewrite-model";
     static final List<String> REWRITE_MODELS = new CopyOnWriteArrayList<>();
+    static final List<String> REWRITE_PROMPTS = new CopyOnWriteArrayList<>();
+    static final List<String> RANKING_PROMPTS = new CopyOnWriteArrayList<>();
 
     @TestConfiguration(proxyBeanMethods = false)
     static class StubModels {
@@ -59,8 +61,13 @@ class RagAdvisorOrderingIT {
             // Answers the query rewrite with STANDALONE and everything else with STUB_ANSWER.
             return prompt -> {
                 boolean rewrite = prompt.getContents().contains("standalone query");
-                if (rewrite && prompt.getOptions() != null) {
-                    REWRITE_MODELS.add(String.valueOf(prompt.getOptions().getModel()));
+                if (rewrite) {
+                    REWRITE_PROMPTS.add(prompt.getContents());
+                    if (prompt.getOptions() != null) {
+                        REWRITE_MODELS.add(String.valueOf(prompt.getOptions().getModel()));
+                    }
+                } else if (prompt.getContents().startsWith("Rank the following documents")) {
+                    RANKING_PROMPTS.add(prompt.getContents());
                 }
                 return new ChatResponse(List.of(new Generation(new AssistantMessage(rewrite ? STANDALONE : STUB_ANSWER))));
             };
@@ -127,8 +134,32 @@ class RagAdvisorOrderingIT {
     }
 
     @Test
+    void aFirstQuestionIsSearchedAsAskedWithoutARewrite() {
+        int rewritesBefore = REWRITE_PROMPTS.size();
+
+        searchService.ask(new AskRequest(FIRST_QUESTION, "first-" + UUID.randomUUID().toString().substring(0, 8)));
+
+        assertThat(retriever.queries.getLast().text()).isEqualTo(FIRST_QUESTION);
+        assertThat(REWRITE_PROMPTS).hasSize(rewritesBefore);
+    }
+
+    @Test
+    void aFollowUpIsRerankedAgainstTheStandaloneQuery() {
+        // The advisor hands post-processors the original question; without the rewrite the
+        // reranker would judge candidates against "Anything cheaper by the same author?".
+        String conversationId = "rerank-" + UUID.randomUUID().toString().substring(0, 8);
+
+        searchService.ask(new AskRequest(FIRST_QUESTION, conversationId));
+        searchService.ask(new AskRequest(FOLLOW_UP, conversationId));
+
+        assertThat(RANKING_PROMPTS.getLast()).contains("Query:\n" + STANDALONE);
+    }
+
+    @Test
     void theRewriteRunsOnTheConfiguredModel() {
-        searchService.ask(new AskRequest(FIRST_QUESTION, "model-" + UUID.randomUUID().toString().substring(0, 8)));
+        String conversationId = "model-" + UUID.randomUUID().toString().substring(0, 8);
+        searchService.ask(new AskRequest(FIRST_QUESTION, conversationId));
+        searchService.ask(new AskRequest(FOLLOW_UP, conversationId));
 
         assertThat(REWRITE_MODELS).isNotEmpty().allMatch(REWRITE_MODEL::equals);
     }

@@ -814,7 +814,10 @@ public ChatClient ragChatClient(ChatModel chatModel,
   question, with the conversation so far, into a standalone query before retrieval, so a follow-up
   such as "Anything cheaper by the same author?" is searched with the author filled in. It runs on
   `search.rag.query-rewrite.model` (default `claude-haiku-4-5`). See Craig Walls' *Making RAG
-  Conversation-Aware* recipe.
+  Conversation-Aware* recipe. Two additions to the recipe: a first question, which has no
+  conversation to fold in, is searched as asked; and the reranker judges candidates against the
+  rewrite (left in the query context under `rag.standalone`), because `RetrievalAugmentationAdvisor`
+  hands post-processors the original question.
 - **Field projection**: `id,content,metadata_*` — excludes the 1536-dim `vector` field, which
   Solr would otherwise return on every hit under the default `fl=*`
 

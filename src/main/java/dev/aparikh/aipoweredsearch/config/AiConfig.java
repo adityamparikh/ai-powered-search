@@ -11,13 +11,16 @@ import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
 import org.springframework.ai.chat.client.advisor.SimpleLoggerAdvisor;
 import org.springframework.ai.chat.memory.ChatMemory;
+import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.MessageType;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.openai.OpenAiEmbeddingModel;
 import org.springframework.ai.openai.OpenAiEmbeddingOptions;
 import org.springframework.ai.rag.advisor.RetrievalAugmentationAdvisor;
+import org.springframework.ai.rag.Query;
 import org.springframework.ai.rag.generation.augmentation.ContextualQueryAugmenter;
+import org.springframework.ai.rag.postretrieval.document.DocumentPostProcessor;
 import org.springframework.ai.rag.preretrieval.query.transformation.CompressionQueryTransformer;
 import org.springframework.ai.rag.preretrieval.query.transformation.QueryTransformer;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -51,6 +54,9 @@ import java.util.List;
  */
 @Configuration
 public class AiConfig {
+
+    /** Query-context key under which a follow-up's standalone rewrite reaches the post-processors. */
+    static final String STANDALONE_QUERY = "rag.standalone";
 
     /**
      * Anthropic chat model id used for query generation and RAG.
@@ -255,7 +261,7 @@ public class AiConfig {
         // the retriever decides what is a candidate, and this decides what actually reaches
         // the prompt. Absent when search.rag.rerank.enabled=false.
         if (reranker != null) {
-            ragAdvisor.documentPostProcessors(reranker);
+            ragAdvisor.documentPostProcessors(judgedAgainstTheRewrite(reranker));
         }
 
         return builder.defaultAdvisors(
@@ -291,7 +297,7 @@ public class AiConfig {
     }
 
     /**
-     * Rewrites the latest question, together with the conversation so far, into a standalone query
+     * Rewrites a follow-up question, together with the conversation so far, into a standalone query
      * before retrieval. Chat memory lets the model answer a follow-up, but without this the retriever
      * would search for the follow-up's literal words.
      *
@@ -305,9 +311,43 @@ public class AiConfig {
     @Bean
     public QueryTransformer queryTransformer(ChatModel chatModel,
                                              @Value("${search.rag.query-rewrite.model:claude-haiku-4-5}") String model) {
-        return CompressionQueryTransformer.builder()
+        QueryTransformer compression = CompressionQueryTransformer.builder()
                 .chatClientBuilder(ChatClient.builder(chatModel)
                         .defaultOptions(AnthropicChatOptions.builder().model(model)))
                 .build();
+        return query -> {
+            // A first question has no conversation to fold in, so it is searched as asked.
+            if (!hasEarlierTurns(query.history())) {
+                return query;
+            }
+            Query rewritten = compression.transform(query);
+            // The advisor hands post-processors the original query: leave the rewrite in its
+            // context (the advisor's own mutable map) so the reranker judges against it.
+            query.context().put(STANDALONE_QUERY, rewritten.text());
+            return rewritten;
+        };
+    }
+
+    /**
+     * Whether the conversation has a turn before the current question. {@code Query.history()} is
+     * the whole prompt, ending with the current user message; a system prompt is not a turn.
+     */
+    static boolean hasEarlierTurns(List<Message> history) {
+        return history.stream()
+                .filter(message -> message.getMessageType() == MessageType.USER
+                        || message.getMessageType() == MessageType.ASSISTANT)
+                .count() > 1;
+    }
+
+    /**
+     * Makes a post-processor judge documents against a follow-up's standalone rewrite rather than the
+     * original question, which is what {@code RetrievalAugmentationAdvisor} passes it.
+     */
+    static DocumentPostProcessor judgedAgainstTheRewrite(DocumentPostProcessor postProcessor) {
+        return (query, documents) -> postProcessor.process(
+                query.context().get(STANDALONE_QUERY) instanceof String rewrite
+                        ? query.mutate().text(rewrite).build()
+                        : query,
+                documents);
     }
 }
