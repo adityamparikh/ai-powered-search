@@ -150,18 +150,21 @@ class RagAdvisorOrderingIT {
         String conversationId = "rerank-" + UUID.randomUUID().toString().substring(0, 8);
 
         searchService.ask(new AskRequest(FIRST_QUESTION, conversationId));
+        int rankingsBefore = RANKING_PROMPTS.size();
         searchService.ask(new AskRequest(FOLLOW_UP, conversationId));
 
-        assertThat(RANKING_PROMPTS.getLast()).contains("Query:\n" + STANDALONE);
+        assertThat(RANKING_PROMPTS.subList(rankingsBefore, RANKING_PROMPTS.size()))
+                .singleElement().asString().contains("Query:\n" + STANDALONE);
     }
 
     @Test
     void theRewriteRunsOnTheConfiguredModel() {
         String conversationId = "model-" + UUID.randomUUID().toString().substring(0, 8);
         searchService.ask(new AskRequest(FIRST_QUESTION, conversationId));
+        int rewritesBefore = REWRITE_MODELS.size();
         searchService.ask(new AskRequest(FOLLOW_UP, conversationId));
 
-        assertThat(REWRITE_MODELS).isNotEmpty().allMatch(REWRITE_MODEL::equals);
+        assertThat(REWRITE_MODELS.subList(rewritesBefore, REWRITE_MODELS.size())).containsExactly(REWRITE_MODEL);
     }
 
     @Test

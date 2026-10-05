@@ -32,6 +32,8 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import org.jspecify.annotations.Nullable;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.List;
 
@@ -54,6 +56,8 @@ import java.util.List;
  */
 @Configuration
 public class AiConfig {
+
+    private static final Logger log = LoggerFactory.getLogger(AiConfig.class);
 
     /** Query-context key under which a follow-up's standalone rewrite reaches the post-processors. */
     static final String STANDALONE_QUERY = "rag.standalone";
@@ -316,11 +320,21 @@ public class AiConfig {
                         .defaultOptions(AnthropicChatOptions.builder().model(model)))
                 .build();
         return query -> {
-            // A first question has no conversation to fold in, so it is searched as asked.
-            if (!hasEarlierTurns(query.history())) {
+            // A first question has no conversation to fold in, so it is searched as asked. Neither is
+            // the shared "default" conversation (requests without a conversationId), whose history
+            // mixes unrelated callers.
+            if (!hasEarlierTurns(query.history())
+                    || "default".equals(query.context().get(ChatMemory.CONVERSATION_ID))) {
                 return query;
             }
-            Query rewritten = compression.transform(query);
+            Query rewritten;
+            try {
+                rewritten = compression.transform(query);
+            } catch (RuntimeException e) {
+                // The rewrite improves retrieval; it must not fail the request.
+                log.warn("Query rewrite failed; retrieving with the question as asked: {}", e.toString());
+                return query;
+            }
             // The advisor hands post-processors the original query: leave the rewrite in its
             // context (the advisor's own mutable map) so the reranker judges against it.
             query.context().put(STANDALONE_QUERY, rewritten.text());

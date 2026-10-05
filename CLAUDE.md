@@ -248,6 +248,7 @@ The repository includes several helper scripts for common tasks:
 
 ### Environment Variables
 - `ANTHROPIC_API_KEY`: Required for Claude AI integration (query generation and chat)
+- `RAG_QUERY_REWRITE_MODEL`: Model that rewrites follow-up questions for retrieval (defaults to 'claude-haiku-4-5')
 - `ANTHROPIC_PROMPT_CACHING_ENABLED`: Enable Anthropic prompt caching (defaults to 'true')
 - `ANTHROPIC_PROMPT_CACHING_STRATEGY`: Cache strategy (defaults to 'SYSTEM_AND_TOOLS')
 - `OPENAI_API_KEY`: Required for OpenAI embeddings (vector search and indexing)
@@ -817,7 +818,9 @@ public ChatClient ragChatClient(ChatModel chatModel,
   Conversation-Aware* recipe. Two additions to the recipe: a first question, which has no
   conversation to fold in, is searched as asked; and the reranker judges candidates against the
   rewrite (left in the query context under `rag.standalone`), because `RetrievalAugmentationAdvisor`
-  hands post-processors the original question.
+  hands post-processors the original question. The shared `"default"` conversation (requests
+  without a `conversationId`) is not rewritten, since its history mixes unrelated callers, and a
+  failed rewrite falls back to the question as asked.
 - **Field projection**: `id,content,metadata_*` — excludes the 1536-dim `vector` field, which
   Solr would otherwise return on every hit under the default `fl=*`
 
