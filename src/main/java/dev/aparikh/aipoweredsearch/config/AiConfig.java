@@ -18,6 +18,8 @@ import org.springframework.ai.openai.OpenAiEmbeddingModel;
 import org.springframework.ai.openai.OpenAiEmbeddingOptions;
 import org.springframework.ai.rag.advisor.RetrievalAugmentationAdvisor;
 import org.springframework.ai.rag.generation.augmentation.ContextualQueryAugmenter;
+import org.springframework.ai.rag.preretrieval.query.transformation.CompressionQueryTransformer;
+import org.springframework.ai.rag.preretrieval.query.transformation.QueryTransformer;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
@@ -57,6 +59,9 @@ public class AiConfig {
      * official Anthropic Java SDK, so the model is now identified by its string id.</p>
      */
     private static final String ANTHROPIC_CHAT_MODEL = "claude-sonnet-4-5";
+
+    /** Rewriting a query is a small task, so it runs on a smaller, cheaper model. */
+    private static final String QUERY_REWRITE_MODEL = "claude-haiku-4-5";
 
     /**
      * Creates default AnthropicChatOptions with prompt caching enabled.
@@ -208,6 +213,8 @@ public class AiConfig {
      * @param hybridDocumentRetriever retrieves RAG context using RRF-fused hybrid search
      * @param cachingEnabled whether prompt caching is enabled
      * @param chatOptions the chat options with caching configured (optional, may be null if caching disabled)
+     * @param reranker the reranking post-processor, absent when {@code search.rag.rerank.enabled=false}
+     * @param queryTransformer rewrites each question into a standalone query using the conversation
      * @return configured ChatClient instance with RAG capabilities
      */
     @Bean
@@ -216,7 +223,8 @@ public class AiConfig {
                                     HybridDocumentRetriever hybridDocumentRetriever,
                                     @Value("${spring.ai.anthropic.prompt-caching.enabled:true}") boolean cachingEnabled,
                                     @Autowired(required = false) @Qualifier("anthropicChatOptionsWithCaching") AnthropicChatOptions.@Nullable Builder chatOptions,
-                                    @Autowired(required = false) @Nullable RerankingDocumentPostProcessor reranker) {
+                                    @Autowired(required = false) @Nullable RerankingDocumentPostProcessor reranker,
+                                    QueryTransformer queryTransformer) {
         ChatClient.Builder builder = ChatClient.builder(chatModel);
 
         // Set default options if caching is enabled
@@ -226,6 +234,9 @@ public class AiConfig {
 
         RetrievalAugmentationAdvisor.Builder ragAdvisor =
                 RetrievalAugmentationAdvisor.builder()
+                                // Conversation-aware retrieval: "Anything cheaper by the same author?"
+                                // is searched as a standalone query with the author filled in.
+                                .queryTransformers(queryTransformer)
                                 .documentRetriever(hybridDocumentRetriever)
                                 // RetrievalAugmentationAdvisor refuses to answer when retrieval
                                 // returns nothing; QuestionAnswerAdvisor did not. Follow-up turns
@@ -280,5 +291,21 @@ public class AiConfig {
             ChatModel chatModel,
             @Value("${search.rag.rerank.top-k:5}") int topK) {
         return new RerankingDocumentPostProcessor(ChatClient.builder(chatModel).build(), topK);
+    }
+
+    /**
+     * Rewrites the latest question, together with the conversation so far, into a standalone query
+     * before retrieval. Chat memory lets the model answer a follow-up, but without this the retriever
+     * would search for the follow-up's literal words.
+     *
+     * @param chatModel the ChatModel the rewrite runs on
+     * @return the query transformer
+     */
+    @Bean
+    public QueryTransformer queryTransformer(ChatModel chatModel) {
+        return CompressionQueryTransformer.builder()
+                .chatClientBuilder(ChatClient.builder(chatModel)
+                        .defaultOptions(AnthropicChatOptions.builder().model(QUERY_REWRITE_MODEL)))
+                .build();
     }
 }

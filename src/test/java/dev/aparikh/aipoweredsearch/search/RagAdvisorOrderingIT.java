@@ -44,6 +44,9 @@ import static org.assertj.core.api.Assertions.tuple;
 class RagAdvisorOrderingIT {
 
     static final String STUB_ANSWER = "Try A Game of Thrones by George R.R. Martin.";
+    static final String FIRST_QUESTION = "Recommend an epic fantasy series with political intrigue.";
+    static final String FOLLOW_UP = "Anything cheaper by the same author?";
+    static final String STANDALONE = "Books by George R.R. Martin cheaper than A Game of Thrones";
 
     @TestConfiguration(proxyBeanMethods = false)
     static class StubModels {
@@ -51,7 +54,11 @@ class RagAdvisorOrderingIT {
         @Bean
         @Primary
         ChatModel stubChatModel() {
-            return prompt -> new ChatResponse(List.of(new Generation(new AssistantMessage(STUB_ANSWER))));
+            // Answers the query rewrite with STANDALONE and everything else with STUB_ANSWER.
+            return prompt -> {
+                boolean rewrite = prompt.getContents().contains("standalone query");
+                return new ChatResponse(List.of(new Generation(new AssistantMessage(rewrite ? STANDALONE : STUB_ANSWER))));
+            };
         }
 
         @Bean
@@ -90,19 +97,28 @@ class RagAdvisorOrderingIT {
         // SPRING_AI_CHAT_MEMORY.conversation_id is varchar(36).
         String conversationId = "ordering-" + UUID.randomUUID().toString().substring(0, 8);
 
-        searchService.ask(new AskRequest("Recommend an epic fantasy series with political intrigue.", conversationId));
-        searchService.ask(new AskRequest("Anything cheaper by the same author?", conversationId));
+        searchService.ask(new AskRequest(FIRST_QUESTION, conversationId));
+        searchService.ask(new AskRequest(FOLLOW_UP, conversationId));
 
         Query turnTwo = retriever.queries.getLast();
-        assertThat(turnTwo.text()).isEqualTo("Anything cheaper by the same author?");
         assertThat(turnTwo.history())
                 .filteredOn(message -> message.getMessageType() != MessageType.SYSTEM)
                 .extracting(Message::getMessageType, Message::getText)
                 .containsExactly(
-                        tuple(MessageType.USER, "Recommend an epic fantasy series with political intrigue."),
+                        tuple(MessageType.USER, FIRST_QUESTION),
                         tuple(MessageType.ASSISTANT, STUB_ANSWER),
-                        tuple(MessageType.USER, "Anything cheaper by the same author?"));
+                        tuple(MessageType.USER, FOLLOW_UP));
         assertThat(turnTwo.context()).containsEntry(ChatMemory.CONVERSATION_ID, conversationId);
+    }
+
+    @Test
+    void aFollowUpIsSearchedAsAStandaloneQuery() {
+        String conversationId = "rewrite-" + UUID.randomUUID().toString().substring(0, 8);
+
+        searchService.ask(new AskRequest(FIRST_QUESTION, conversationId));
+        searchService.ask(new AskRequest(FOLLOW_UP, conversationId));
+
+        assertThat(retriever.queries.getLast().text()).isEqualTo(STANDALONE);
     }
 
     @Test
