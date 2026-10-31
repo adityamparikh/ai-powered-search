@@ -13,6 +13,7 @@ import org.apache.solr.client.solrj.request.schema.SchemaRequest;
 import org.apache.solr.client.solrj.response.QueryResponse;
 import org.apache.solr.client.solrj.response.schema.SchemaResponse;
 import org.apache.solr.common.SolrDocument;
+import org.apache.solr.common.SolrException;
 import org.apache.solr.common.params.ModifiableSolrParams;
 import org.apache.solr.common.params.ShardParams;
 import org.slf4j.Logger;
@@ -58,6 +59,7 @@ public class SearchRepository {
     static final String COMBINER_QUERY = "combiner.query";
     static final String COMBINER_ALGORITHM = "combiner.algorithm";
     static final String COMBINER_RRF = "rrf";
+    private static final int HTTP_NOT_FOUND = 404;
 
     Logger log = LoggerFactory.getLogger(SearchRepository.class);
     private final SolrClient solrClient;
@@ -297,8 +299,15 @@ public class SearchRepository {
             return new SearchResponse(results, Map.of(), Map.of(), null);
 
         } catch (Exception e) {
-            log.error("Error performing hybrid search with Solr RRF in collection: {}", collection, e);
-            log.warn("Hybrid search failed, attempting fallback");
+            if (e instanceof SolrException solrException && solrException.code() == HTTP_NOT_FOUND) {
+                // A configuration problem, not an outage: no stack trace, but say how to fix it.
+                log.warn("Collection '{}' has no {} handler (solr.CombinedQuerySearchHandler, Solr 10.1+); "
+                        + "hybrid search is degrading to keyword/vector fallback. Add the handler to the "
+                        + "collection's configset (see solr-config/conf/solrconfig.xml).", collection, HYBRID_HANDLER);
+            } else {
+                log.error("Error performing hybrid search with Solr RRF in collection: {}", collection, e);
+                log.warn("Hybrid search failed, attempting fallback");
+            }
             return fallbackSearch(collection, query, topK, filterExpression, fieldsCsv, minScore);
         }
     }

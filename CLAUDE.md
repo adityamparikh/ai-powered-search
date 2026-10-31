@@ -274,6 +274,7 @@ The repository includes several helper scripts for common tasks:
 ```bash
 docker-compose up -d  # Start Solr, ZooKeeper, and PostgreSQL
 docker-compose down   # Stop services
+docker-compose down -v  # Stop and wipe volumes (do this if an existing Solr 9 volume fails to start on 10.1)
 docker-compose ps     # Check service status
 docker-compose logs solr  # View Solr logs
 ```
@@ -426,7 +427,8 @@ Documents can be indexed with automatic embedding generation via REST endpoints:
 - Sends one combined-query request; Solr runs both legs and fuses them server-side
 - Best for balanced search that leverages both exact matches and semantic understanding
 - Schema-agnostic: works with any Solr collection using `_text_` catch-all field
-- Intelligent fallback: hybrid → keyword-only → vector-only if no results
+- Fallback on error: if the combined request fails (e.g. no `/hybrid` handler → 404) or the query
+  cannot be embedded, degrades to keyword-only → vector-only. An empty fused result is returned as is
 - Parameters:
     - `k`: topK results (defaults to 100)
     - `minScore`: minimum RRF score threshold

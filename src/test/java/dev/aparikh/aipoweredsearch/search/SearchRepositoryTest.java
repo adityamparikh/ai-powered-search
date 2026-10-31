@@ -2,6 +2,7 @@ package dev.aparikh.aipoweredsearch.search;
 
 import dev.aparikh.aipoweredsearch.embedding.EmbeddingService;
 import dev.aparikh.aipoweredsearch.search.model.SearchResponse;
+import org.apache.solr.client.solrj.RemoteSolrException;
 import org.apache.solr.client.solrj.SolrClient;
 import org.apache.solr.client.solrj.SolrRequest;
 import org.apache.solr.client.solrj.SolrServerException;
@@ -269,6 +270,32 @@ class SearchRepositoryTest {
             // e.g. a collection whose configset lacks the /hybrid handler (Solr answers 404)
             when(solrClient.request(any(SolrRequest.class), eq(COLLECTION)))
                     .thenThrow(new SolrServerException("404 Not Found"));
+            stubPlainQueryResults(doc("kw"));
+
+            SearchResponse response = searchRepository.executeHybridRerankSearch(
+                    COLLECTION, QUERY, 10, null, null, null);
+
+            assertThat(response.documents()).extracting(d -> d.get("id")).containsExactly("kw");
+        }
+
+        @Test
+        void fallsBackWhenSolrReturnsAServerError() throws Exception {
+            stubEmbedding();
+            when(solrClient.request(any(SolrRequest.class), eq(COLLECTION)))
+                    .thenThrow(new RemoteSolrException("http://solr", 503, "Service Unavailable", null));
+            stubPlainQueryResults(doc("kw"));
+
+            SearchResponse response = searchRepository.executeHybridRerankSearch(
+                    COLLECTION, QUERY, 10, null, null, null);
+
+            assertThat(response.documents()).extracting(d -> d.get("id")).containsExactly("kw");
+        }
+
+        @Test
+        void fallsBackWhenTheCollectionHasNoHybridHandler() throws Exception {
+            stubEmbedding();
+            when(solrClient.request(any(SolrRequest.class), eq(COLLECTION)))
+                    .thenThrow(new RemoteSolrException("http://solr", 404, "Not Found", null));
             stubPlainQueryResults(doc("kw"));
 
             SearchResponse response = searchRepository.executeHybridRerankSearch(
