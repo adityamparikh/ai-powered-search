@@ -143,7 +143,7 @@ class SolrHybridSearchIT {
         SearchResponse response = searchRepository.executeHybridRerankSearch(
                 COLLECTION, QUERY, 10, null, "id,content", null);
 
-        assertThat(response.documents()).allSatisfy(doc ->
+        assertThat(response.documents()).hasSize(4).allSatisfy(doc ->
                 assertThat(doc).containsOnlyKeys("id", "content"));
     }
 
