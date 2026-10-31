@@ -30,6 +30,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 
@@ -64,6 +65,9 @@ public class SearchRepository {
     Logger log = LoggerFactory.getLogger(SearchRepository.class);
     private final SolrClient solrClient;
     private final EmbeddingService embeddingService;
+
+    /** Collections already reported as lacking the /hybrid handler, so the warning is logged once. */
+    private final Set<String> collectionsWithoutHybridHandler = ConcurrentHashMap.newKeySet();
 
     public SearchRepository(SolrClient solrClient, EmbeddingService embeddingService) {
         this.solrClient = solrClient;
@@ -285,8 +289,11 @@ public class SearchRepository {
                                                     @Nullable Double minScore) {
         log.debug("Performing hybrid search (Solr RRF) in collection: {} with query: {}", collection, query);
 
+        // Kept outside the try so a failed combined request does not pay for a second embedding
+        // call in the vector-only fallback.
+        @Nullable String vector = null;
         try {
-            String vector = embeddingService.embedAndFormatForSolr(query);
+            vector = embeddingService.embedAndFormatForSolr(query);
             JsonQueryRequest request = buildHybridRequest(
                     query, vector, topK, filterExpression, fieldsCsv, minScore);
 
@@ -299,17 +306,37 @@ public class SearchRepository {
             return new SearchResponse(results, Map.of(), Map.of(), null);
 
         } catch (Exception e) {
+            if (isInterruption(e)) {
+                // The caller is being cancelled: running fallback queries on this thread would ignore
+                // that and swallow the interrupt. Restore the flag and propagate instead.
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException("Hybrid search was interrupted", e);
+            }
             if (e instanceof SolrException solrException && solrException.code() == HTTP_NOT_FOUND) {
-                // A configuration problem, not an outage: no stack trace, but say how to fix it.
-                log.warn("Collection '{}' has no {} handler (solr.CombinedQuerySearchHandler, Solr 10.1+); "
-                        + "hybrid search is degrading to keyword/vector fallback. Add the handler to the "
-                        + "collection's configset (see solr-config/conf/solrconfig.xml).", collection, HYBRID_HANDLER);
+                // A configuration problem, not an outage: no stack trace, said once per collection.
+                if (collectionsWithoutHybridHandler.add(collection)) {
+                    log.warn("Collection '{}' has no {} handler (solr.CombinedQuerySearchHandler, Solr 10.1+); "
+                            + "hybrid search is degrading to keyword/vector fallback. Add the handler to the "
+                            + "collection's configset (see solr-config/conf/solrconfig.xml).",
+                            collection, HYBRID_HANDLER);
+                } else {
+                    log.debug("Collection '{}' still has no {} handler; using fallback", collection, HYBRID_HANDLER);
+                }
             } else {
                 log.error("Error performing hybrid search with Solr RRF in collection: {}", collection, e);
                 log.warn("Hybrid search failed, attempting fallback");
             }
-            return fallbackSearch(collection, query, topK, filterExpression, fieldsCsv, minScore);
+            return fallbackSearch(collection, query, vector, topK, filterExpression, fieldsCsv, minScore);
         }
+    }
+
+    private static boolean isInterruption(Throwable e) {
+        for (Throwable t = e; t != null; t = t.getCause()) {
+            if (t instanceof InterruptedException) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -353,6 +380,8 @@ public class SearchRepository {
         Map<String, Object> vectorLeg = minScore == null
                 ? Map.of("knn", Map.of(
                         "f", FIELD_VECTOR,
+                        // Same as shards.rows below: kNN should find as many candidates as the
+                        // combiner will consider from this leg.
                         "topK", fetchSize,
                         "query", vector))
                 : Map.of("vectorSimilarity", Map.of(
@@ -432,7 +461,18 @@ public class SearchRepository {
                                                   int rows,
                                                   @Nullable String filterExpression,
                                                   @Nullable String fieldsCsv) throws Exception {
-        String vectorString = embeddingService.embedAndFormatForSolr(query);
+        return executeVectorSearch(collection, query, null, rows, filterExpression, fieldsCsv);
+    }
+
+    private List<Map<String, Object>> executeVectorSearch(String collection,
+                                                          String query,
+                                                          @Nullable String precomputedVector,
+                                                          int rows,
+                                                          @Nullable String filterExpression,
+                                                          @Nullable String fieldsCsv) throws Exception {
+        String vectorString = precomputedVector != null
+                ? precomputedVector
+                : embeddingService.embedAndFormatForSolr(query);
 
         ModifiableSolrParams params = new ModifiableSolrParams();
         params.set("q", SolrQueryUtils.buildKnnQuery(FIELD_VECTOR, rows, vectorString));
@@ -454,6 +494,7 @@ public class SearchRepository {
      */
     private SearchResponse fallbackSearch(String collection,
                                           String query,
+                                          @Nullable String vector,
                                           int topK,
                                           @Nullable String filterExpression,
                                           @Nullable String fieldsCsv,
@@ -475,7 +516,7 @@ public class SearchRepository {
         // Try vector-only as last resort. minScore applies here — these are cosine similarities.
         try {
             List<Map<String, Object>> vectorResults = filterByMinScore(executeVectorSearch(
-                    collection, query, topK, filterExpression, fieldsCsv), minScore);
+                    collection, query, vector, topK, filterExpression, fieldsCsv), minScore);
 
             if (!vectorResults.isEmpty()) {
                 log.info("Vector-only fallback returned {} results", vectorResults.size());

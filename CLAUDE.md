@@ -431,7 +431,8 @@ Documents can be indexed with automatic embedding generation via REST endpoints:
   cannot be embedded, degrades to keyword-only → vector-only. An empty fused result is returned as is
 - Parameters:
     - `k`: topK results (defaults to 100)
-    - `minScore`: minimum RRF score threshold
+    - `minScore`: minimum cosine similarity [0..1] for the vector leg (`vectorSimilarity minReturn`);
+      never applied to the keyword leg or the fused order
     - `fields`: comma-separated list of fields to return
 - Example: "machine learning frameworks" (finds both exact term matches and semantically similar content)
 

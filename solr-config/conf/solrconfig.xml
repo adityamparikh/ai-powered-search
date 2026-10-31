@@ -646,8 +646,8 @@
   </requestHandler>
 
   <searchComponent name="combined_query" class="solr.CombinedQueryComponent">
-    <!-- keyword + vector today; headroom for e.g. a second kNN leg -->
-    <int name="maxCombinerQueries">3</int>
+    <!-- keyword + vector -->
+    <int name="maxCombinerQueries">2</int>
   </searchComponent>
 
   <!-- Shared parameters for multiple Request Handlers -->

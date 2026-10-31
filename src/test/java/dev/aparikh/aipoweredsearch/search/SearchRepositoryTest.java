@@ -27,6 +27,7 @@ import java.io.IOException;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
@@ -302,6 +303,42 @@ class SearchRepositoryTest {
                     COLLECTION, QUERY, 10, null, null, null);
 
             assertThat(response.documents()).extracting(d -> d.get("id")).containsExactly("kw");
+        }
+
+        @Test
+        void reusesTheQueryEmbeddingInTheVectorFallback() throws Exception {
+            stubEmbedding();
+            when(solrClient.request(any(SolrRequest.class), eq(COLLECTION)))
+                    .thenThrow(new RemoteSolrException("http://solr", 404, "Not Found", null));
+            SolrDocumentList empty = new SolrDocumentList();
+            SolrDocumentList vectorHits = new SolrDocumentList();
+            vectorHits.add(doc("vec"));
+            when(queryResponse.getResults()).thenReturn(empty, vectorHits);
+            when(solrClient.query(eq(COLLECTION), any(SolrParams.class), eq(SolrRequest.METHOD.POST)))
+                    .thenReturn(queryResponse);
+
+            SearchResponse response = searchRepository.executeHybridRerankSearch(
+                    COLLECTION, QUERY, 10, null, null, null);
+
+            assertThat(response.documents()).extracting(d -> d.get("id")).containsExactly("vec");
+            verify(embeddingService, times(1)).embedAndFormatForSolr(QUERY);
+        }
+
+        @Test
+        void propagatesInterruptionInsteadOfFallingBack() throws Exception {
+            stubEmbedding();
+            when(solrClient.request(any(SolrRequest.class), eq(COLLECTION)))
+                    .thenThrow(new SolrServerException(new InterruptedException("cancelled")));
+
+            try {
+                assertThatThrownBy(() -> searchRepository.executeHybridRerankSearch(
+                        COLLECTION, QUERY, 10, null, null, null))
+                        .isInstanceOf(IllegalStateException.class);
+                assertThat(Thread.currentThread().isInterrupted()).isTrue();
+                verify(solrClient, never()).query(any(String.class), any(SolrParams.class), any(SolrRequest.METHOD.class));
+            } finally {
+                Thread.interrupted(); // clear the flag for the next test
+            }
         }
 
         @Test
