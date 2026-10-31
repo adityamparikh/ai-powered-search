@@ -23,7 +23,7 @@
 - **Configured in:** `config/SpringAiConfig.java`
 
 ### 4. Search Engine
-- **Technology:** Apache Solr 9.9.0
+- **Technology:** Apache Solr 10.1.0
 - **Field Type:** DenseVectorField
 - **Algorithm:** HNSW (Hierarchical Navigable Small World)
 - **Similarity:** Cosine (0-1 scale, 1 = identical)

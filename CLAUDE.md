@@ -16,7 +16,7 @@ The application follows a **package-by-feature** structure organized around main
   - `SearchRepository`: Low-level Solr query execution and field introspection
   - Traditional search: Converts free-text queries into structured Solr queries using Claude AI
   - Semantic search: Uses vector embeddings (OpenAI) for similarity-based retrieval
-  - Hybrid search: Client-side RRF (Reciprocal Rank Fusion) combining keyword and vector signals
+  - Hybrid search: Solr-native RRF (Reciprocal Rank Fusion, Solr 10.1 combined query) combining keyword and vector signals
 
 - **Indexing Domain** (`dev.aparikh.aipoweredsearch.indexing`):
   - `IndexController`: REST endpoints for document indexing
@@ -29,10 +29,10 @@ The application follows a **package-by-feature** structure organized around main
   - Implements dense vector support with HNSW (Hierarchical Navigable Small World) algorithm
   - Handles automatic embedding generation and vector similarity search
 
-- **RRF Fusion** (`dev.aparikh.aipoweredsearch.search`):
-    - `RrfMerger`: Client-side Reciprocal Rank Fusion implementation
-    - Merges keyword and vector search results using rank-based scoring
-    - Formula: `score = sum(1 / (k + rank))` with configurable k parameter (default: 60)
+- **RRF Fusion** (Solr, not the application):
+    - Solr 10.1's combined query feature (`solr.CombinedQuerySearchHandler`, SOLR-17319) fuses
+      the keyword and vector legs server-side, in one request to the `/hybrid` handler
+    - Formula: `score = sum(1 / (k + rank))` with `combiner.rrf.k` (Solr default: 60)
 
 - **Configuration** (`dev.aparikh.aipoweredsearch.config`):
     - `AiConfig`: Multi-LLM configuration for Anthropic (chat) and OpenAI (embeddings)
@@ -45,7 +45,8 @@ The application follows a **package-by-feature** structure organized around main
 - **Spring Boot 4.1.1** with Spring AI 2.0.1
 - **Anthropic Claude AI** (claude-sonnet-4-5) for query generation and chat
 - **OpenAI** (text-embedding-3-small) for vector embeddings (1536 dimensions)
-- **SolrJ 10.0.0** client against **Apache Solr 9.10.1** server, with dense vector support
+- **SolrJ 10.1.0** client against **Apache Solr 10.1.0** server, with dense vector support and
+  built-in RRF hybrid search (combined query)
 - **ZooKeeper 3.9** for SolrCloud coordination
 - **PostgreSQL 16** for chat memory persistence
 - **Testcontainers** for integration testing with Solr, PostgreSQL, and Ollama
@@ -69,7 +70,7 @@ fields at runtime and adapts accordingly.
 
 The application leverages advanced Apache Solr features for enhanced search quality and user experience:
 
-- **Client-side RRF (Reciprocal Rank Fusion)**: Balanced fusion of keyword and vector search using client-side merging
+- **Solr-native RRF (Reciprocal Rank Fusion)**: Balanced fusion of keyword and vector search inside Solr (combined query, Solr 10.1+)
 - **Highlighting**: Shows users why results matched their query
 - **Faceting**: Filter and aggregate results by category, year, etc.
 - **Spell Checking**: "Did you mean...?" suggestions for misspelled queries
@@ -256,7 +257,9 @@ The repository includes several helper scripts for common tasks:
 
 ### External Services
 - **Solr**: Expected at `http://localhost:8983/solr`
-  - Must support dense vector fields (Solr 9.0+)
+  - Must be Solr 10.1+ (combined query / built-in RRF) with dense vector fields
+  - Collections must expose the `/hybrid` handler (`solr.CombinedQuerySearchHandler`); the
+    project configset in `solr-config/conf` declares it
   - Collections must include vector field with DenseVectorField type
   - Managed via SolrCloud with ZooKeeper coordination
   - See Solr Schema Requirements section below
@@ -277,7 +280,7 @@ docker-compose logs solr  # View Solr logs
 
 **Services started:**
 
-- Solr 9.10.1 on port 8983 (with ZooKeeper coordination)
+- Solr 10.1.0 on port 8983 (with ZooKeeper coordination)
 - ZooKeeper 3.9 on port 2181
 - PostgreSQL 16 on port 5432
 
@@ -419,8 +422,8 @@ Documents can be indexed with automatic embedding generation via REST endpoints:
 **Hybrid Search (RRF)**:
 `GET /api/v1/search/{collection}/hybrid?query={text}&k={topK}&minScore={threshold}&fields={csv}`
 
-- Uses client-side RRF (Reciprocal Rank Fusion) to combine keyword and vector signals
-- Executes keyword search and vector search independently, then merges on client side
+- Uses Solr's built-in RRF (Reciprocal Rank Fusion) to combine keyword and vector signals
+- Sends one combined-query request; Solr runs both legs and fuses them server-side
 - Best for balanced search that leverages both exact matches and semantic understanding
 - Schema-agnostic: works with any Solr collection using `_text_` catch-all field
 - Intelligent fallback: hybrid → keyword-only → vector-only if no results
@@ -464,7 +467,7 @@ Response:
 3. Executes search in Solr:
     - Traditional: BM25 keyword search
    - Semantic: KNN similarity search (topK=50 by default)
-   - Hybrid: Client-side RRF merging keyword and vector results
+   - Hybrid: Solr-native RRF (combined query) fusing keyword and vector results
 4. For RAG: RetrievalAugmentationAdvisor retrieves hybrid context and injects into prompt
 5. Returns documents with scores and enhanced features (highlighting, facets, spell check)
 
@@ -472,7 +475,6 @@ Response:
 
 - `SearchService` in `src/main/java/dev/aparikh/aipoweredsearch/search/`
 - `SearchRepository.executeHybridRerankSearch()` for hybrid search orchestration
-- `RrfMerger` for client-side RRF algorithm implementation
 - `SearchService.ask()` for RAG question answering
 - `AiConfig.ragChatClient` bean with RetrievalAugmentationAdvisor configuration
 - `HybridDocumentRetriever` adapting hybrid search to Spring AI's `DocumentRetriever` SPI
@@ -707,35 +709,51 @@ pinning and exclusions have been removed from `build.gradle.kts`.
 ### Vector Search POST Method
 Vector searches use POST method to avoid "URI too long" errors when sending large embedding arrays (1536 dimensions).
 
-### Hybrid Search with Client-Side RRF
+### Hybrid Search with Solr-Native RRF
 
-The `executeHybridRerankSearch()` method in `SearchRepository` implements client-side RRF:
+`executeHybridRerankSearch()` in `SearchRepository` sends **one** JSON request to the collection's
+`/hybrid` handler (`solr.CombinedQuerySearchHandler`, Solr 10.1+, SOLR-17319). Solr runs both legs
+and fuses them with RRF; the application does no merging:
 
-```java
-// Step 1: Execute keyword search independently
-List<Map<String, Object>> keywordResults = executeKeywordSearch(
-                collection, query, topK * 2, filterExpression, fieldsCsv);
-
-// Step 2: Execute vector search independently
-List<Map<String, Object>> vectorResults = executeVectorSearch(
-        collection, query, topK * 2, filterExpression, fieldsCsv);
-
-// Step 3: Merge using RRF algorithm
-RrfMerger rrfMerger = new RrfMerger(); // Uses default k=60
-List<Map<String, Object>> mergedResults = rrfMerger.merge(keywordResults, vectorResults);
+```json
+POST /solr/{collection}/hybrid
+{
+  "queries": {
+    "keyword": { "edismax": { "query": "...", "qf": "_text_" } },
+    "vector":  { "knn": { "f": "vector", "topK": 20, "query": "[...]" } }
+  },
+  "limit": 10,
+  "filter": ["..."],
+  "params": {
+    "combiner": true,
+    "combiner.query": ["keyword", "vector"],
+    "combiner.algorithm": "rrf",
+    "shards.rows": 20
+  }
+}
 ```
 
 **Key features**:
 
-- Keyword and vector legs execute **concurrently** on virtual threads, so a hybrid query
-  costs roughly one Solr round-trip instead of two
-- Uses client-side RRF merging via `RrfMerger` class
-- RRF formula: `score = sum(1 / (k + rank))` with configurable k parameter (default: 60)
-- Executes keyword (edismax) and vector (KNN) searches independently
-- Fetches `topK * 2` results from each search for better fusion quality
+- One Solr round-trip; fusion is global across shards
+- RRF formula: `score = sum(1 / (k + rank))`, k = `combiner.rrf.k` (Solr default 60)
+- `shards.rows = topK * 2` over-fetches candidates per leg (per-leg depth is
+  `max(start + rows, shards.rows)`)
+- `filter` applies to both legs
+- `minScore` turns the vector leg into `{!vectorSimilarity minReturn=minScore}`; it never touches the
+  keyword leg or the fused output
 - Schema-agnostic using `_text_` catch-all field
-- Intelligent fallback: hybrid → keyword → vector if no results
-- Applies minScore filtering and topK limiting after fusion
+- Fallback: if the combined request fails (e.g. a collection without the `/hybrid` handler → 404) or the
+  query cannot be embedded, it degrades to keyword-only, then vector-only
+- **No `score` on hybrid rows.** Solr 10.1 orders hits by fused RRF score, but the per-document
+  `score` it returns is a raw per-leg score (BM25 or cosine), so it is not requested. Use
+  `buildHybridRequest(...)` with `debug=results` to see `combinerExplanations` (each document's rank
+  per leg; note that 10.1 can attach the wrong leg *names* to those ranks)
+- Grouping and `cursorMark` are not supported in combined mode
+- Tests on `_default` collections register the handler with
+  `SolrTestContainers.registerHybridHandler(...)`; `SolrHybridSearchIT` covers fusion end to end
+- Testcontainers' `SolrContainer` 2.0.5 cannot start Solr 10 (bare `-DzkRun`); use
+  `SolrTestContainers.newSolrContainer()`
 
 ### Observation and Metrics
 The `SolrVectorStore` extends `AbstractObservationVectorStore` for integration with Micrometer:

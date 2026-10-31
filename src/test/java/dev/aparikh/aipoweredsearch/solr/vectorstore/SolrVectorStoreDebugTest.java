@@ -59,11 +59,11 @@ class SolrVectorStoreDebugTest {
         // Create collection
         System.out.println("\n1. Creating collection...");
         var result = solrContainer.execInContainer(
-                "/opt/solr/bin/solr", "create_collection",
+                "/opt/solr/bin/solr", "create",
                 "-c", COLLECTION_NAME,
                 "-d", "_default",
-                "-shards", "1",
-                "-replicationFactor", "1"
+                "-sh", "1",
+                "-rf", "1"
         );
         System.out.println("Collection creation stdout: " + result.getStdout());
         if (result.getExitCode() != 0) {

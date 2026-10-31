@@ -63,7 +63,7 @@ class SolrVectorStoreIT {
     void setUp() throws Exception {
         // Create collection (idempotent) and schema
         try {
-            solrContainer.execInContainer("/opt/solr/bin/solr", "create_collection", "-c", COLLECTION_NAME, "-d", "_default");
+            solrContainer.execInContainer("/opt/solr/bin/solr", "create", "-c", COLLECTION_NAME, "-d", "_default");
         } catch (Exception ignored) {
         }
         // Add vector field type and field

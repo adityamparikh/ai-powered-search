@@ -5,7 +5,6 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.test.context.DynamicPropertyRegistrar;
 import org.testcontainers.solr.SolrContainer;
-import org.testcontainers.utility.DockerImageName;
 
 @TestConfiguration(proxyBeanMethods = false)
 public class SolrTestConfiguration {
@@ -13,8 +12,7 @@ public class SolrTestConfiguration {
     @Bean(initMethod = "start", destroyMethod = "stop")
     @RestartScope
     SolrContainer solrContainer() {
-        return new SolrContainer(DockerImageName.parse("solr:9.10.1"))
-                .withEnv("SOLR_HEAP", "512m");
+        return SolrTestContainers.newSolrContainer();
     }
 
     @Bean

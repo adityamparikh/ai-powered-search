@@ -2,11 +2,14 @@ package dev.aparikh.aipoweredsearch.evaluation;
 
 import dev.aparikh.aipoweredsearch.config.PostgresTestConfiguration;
 import dev.aparikh.aipoweredsearch.config.SolrTestConfiguration;
+import dev.aparikh.aipoweredsearch.embedding.EmbeddingService;
 import dev.aparikh.aipoweredsearch.indexing.IndexService;
 import dev.aparikh.aipoweredsearch.search.SearchRepository;
 import dev.aparikh.aipoweredsearch.search.model.SearchResponse;
 import org.apache.solr.client.solrj.SolrClient;
 import org.apache.solr.client.solrj.request.SolrQuery;
+import org.apache.solr.client.solrj.request.json.JsonQueryRequest;
+import org.apache.solr.client.solrj.response.QueryResponse;
 import org.apache.solr.common.SolrDocument;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -52,6 +55,9 @@ class RagEvalFixtureIT {
 
     @Autowired
     private SearchRepository searchRepository;
+
+    @Autowired
+    private EmbeddingService embeddingService;
 
     @BeforeAll
     void indexFixture() throws Exception {
@@ -100,14 +106,24 @@ class RagEvalFixtureIT {
     }
 
     @Test
-    void hybridSearchFusesBothLegsOverTheFixture() {
+    void hybridSearchFusesBothLegsOverTheFixture() throws Exception {
         SearchResponse response = searchRepository.executeHybridRerankSearch(
                 COLLECTION, "A Clash of Kings", 20, null, "id,content,metadata_*", null);
 
-        Map<String, Object> top = response.documents().getFirst();
-        assertThat(top).containsEntry("id", "grrm-02");
-        // Both legs contributed: the keyword leg is not silently empty.
-        assertThat(top).containsKeys("keyword_rank", "vector_rank");
+        assertThat(response.documents().getFirst()).containsEntry("id", "grrm-02");
+
+        // Both legs contributed: the keyword leg is not silently empty. Solr's RRF explanation
+        // lists the document's rank in each leg, or "not in the results" for a leg that missed
+        // it. (Solr 10.1 can swap which leg name labels which rank, so only the shape is checked.)
+        JsonQueryRequest explained = searchRepository.buildHybridRequest(
+                "A Clash of Kings", embeddingService.embedAndFormatForSolr("A Clash of Kings"),
+                20, null, "id", null);
+        explained.withParam("debug", "results");
+        QueryResponse debug = explained.process(solrClient, COLLECTION);
+        Object explanation = ((Map<?, ?>) debug.getDebugMap().get("combinerExplanations")).get("grrm-02");
+        assertThat(String.valueOf(explanation))
+                .contains("for query(keyword)", "for query(vector)")
+                .doesNotContain("not in the results");
     }
 
     @Test

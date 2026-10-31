@@ -5,10 +5,12 @@ import dev.aparikh.aipoweredsearch.search.model.SearchResponse;
 import org.apache.solr.client.solrj.SolrClient;
 import org.apache.solr.client.solrj.SolrRequest;
 import org.apache.solr.client.solrj.SolrServerException;
+import org.apache.solr.client.solrj.request.json.JsonQueryRequest;
 import org.apache.solr.client.solrj.response.QueryResponse;
 import org.apache.solr.common.SolrDocument;
 import org.apache.solr.common.SolrDocumentList;
 import org.apache.solr.common.params.SolrParams;
+import org.apache.solr.common.util.NamedList;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -16,34 +18,36 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.util.List;
-import java.util.Map;
-import java.util.concurrent.CyclicBarrier;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * Unit tests for SearchRepository - schema-agnostic version.
- * <p>
- * Note: This version uses only _text_ catch-all field and doesn't assume
- * any specific field names exist in the schema.
+ * Unit tests for {@link SearchRepository#executeHybridRerankSearch}.
+ *
+ * <p>Hybrid search is a single Solr combined-query request (server-side RRF). These tests pin
+ * the request Solr receives and the fallback cascade taken when that request fails. The
+ * fusion itself is Solr's and is covered by {@code SearchRepositoryIT}.</p>
  */
 @ExtendWith(MockitoExtension.class)
 class SearchRepositoryTest {
+
+    private static final String COLLECTION = "test-collection";
+    private static final String QUERY = "machine learning frameworks";
+    private static final String VECTOR = "[0.1,0.2,0.3]";
+
+    private final ObjectMapper mapper = new ObjectMapper();
 
     @Mock
     private SolrClient solrClient;
@@ -61,807 +65,320 @@ class SearchRepositoryTest {
         searchRepository = new SearchRepository(solrClient, embeddingService);
     }
 
-    // ==================== Hybrid Search Core ====================
+    // ==================== Request shape ====================
 
     @Nested
-    class HybridSearchCore {
+    class CombinedQueryRequest {
 
         @Test
-        void shouldPerformHybridSearchWithRRF() throws Exception {
-            String collection = "test-collection";
-            String query = "machine learning frameworks";
-            int topK = 100;
-            String vectorString = "[0.1, 0.2, 0.3, ...]";
+        void sendsOneRequestToTheHybridHandler() throws Exception {
+            stubEmbedding();
+            stubCombinedResults(doc("1"));
 
-            when(embeddingService.embedAndFormatForSolr(query)).thenReturn(vectorString);
+            searchRepository.executeHybridRerankSearch(COLLECTION, QUERY, 10, null, null, null);
 
-            SolrDocumentList documentList = new SolrDocumentList();
-            SolrDocument doc1 = new SolrDocument();
-            doc1.addField("id", "1");
-            doc1.addField("content", "TensorFlow is a popular ML framework");
-            doc1.addField("score", 0.95f);
-            documentList.add(doc1);
-            documentList.setNumFound(1L);
-
-            when(queryResponse.getResults()).thenReturn(documentList);
-            when(solrClient.query(eq(collection), any(SolrParams.class), eq(SolrRequest.METHOD.POST))).thenReturn(queryResponse);
-
-            SearchResponse response = searchRepository.executeHybridRerankSearch(collection, query, topK, null, null, null);
-
-            assertNotNull(response);
-            assertEquals(1, response.documents().size());
+            SolrRequest<?> request = captureCombinedRequest();
+            assertThat(request).isInstanceOf(JsonQueryRequest.class);
+            assertThat(request.getPath()).isEqualTo("/hybrid");
+            assertThat(request.getMethod()).isEqualTo(SolrRequest.METHOD.POST);
+            // No client-side legs: nothing goes through the plain query path.
+            verify(solrClient, never()).query(any(String.class), any(SolrParams.class), any(SolrRequest.METHOD.class));
         }
 
         @Test
-        void shouldApplyFilterExpression() throws Exception {
-            String collection = "test-collection";
-            String query = "spring boot";
-            int topK = 50;
-            String filterExpression = "category:programming";
-            String vectorString = "[0.1, 0.2, 0.3, ...]";
+        void enablesRrfOverAKeywordAndAVectorLeg() throws Exception {
+            stubEmbedding();
+            stubCombinedResults(doc("1"));
 
-            when(embeddingService.embedAndFormatForSolr(query)).thenReturn(vectorString);
+            searchRepository.executeHybridRerankSearch(COLLECTION, QUERY, 10, null, null, null);
 
-            SolrDocumentList documentList = new SolrDocumentList();
-            SolrDocument doc = new SolrDocument();
-            doc.setField("id", "test-1");
-            doc.setField("content", "Test document");
-            documentList.add(doc);
-            documentList.setNumFound(1L);
-
-            when(queryResponse.getResults()).thenReturn(documentList);
-            when(solrClient.query(eq(collection), any(SolrParams.class), eq(SolrRequest.METHOD.POST))).thenReturn(queryResponse);
-
-            SearchResponse response = searchRepository.executeHybridRerankSearch(collection, query, topK, filterExpression, null, null);
-
-            assertNotNull(response);
-            assertEquals(1, response.documents().size());
+            JsonNode params = body(captureCombinedRequest()).path("params");
+            assertThat(params.path("combiner").asBoolean()).isTrue();
+            assertThat(params.path("combiner.algorithm").asString()).isEqualTo("rrf");
+            assertThat(params.path("combiner.query").values())
+                    .extracting(JsonNode::asString)
+                    .containsExactly("keyword", "vector");
         }
 
         @Test
-        void shouldUseSchemaAgnosticFieldConfiguration() throws Exception {
-            String collection = "test-collection";
-            String query = "test query";
-            int topK = 10;
-            String vectorString = "[0.1, 0.2, 0.3, ...]";
+        void keywordLegIsEdismaxOverTheCatchAllField() throws Exception {
+            stubEmbedding();
+            stubCombinedResults(doc("1"));
 
-            when(embeddingService.embedAndFormatForSolr(query)).thenReturn(vectorString);
+            searchRepository.executeHybridRerankSearch(COLLECTION, QUERY, 10, null, null, null);
 
-            SolrDocumentList documentList = new SolrDocumentList();
-            SolrDocument doc = new SolrDocument();
-            doc.setField("id", "test-1");
-            doc.setField("content", "Test document");
-            documentList.add(doc);
-            documentList.setNumFound(1L);
+            JsonNode keyword = body(captureCombinedRequest()).path("queries").path("keyword").path("edismax");
+            assertThat(keyword.path("query").asString()).isEqualTo(QUERY);
+            assertThat(keyword.path("qf").asString()).isEqualTo("_text_");
+        }
 
-            when(queryResponse.getResults()).thenReturn(documentList);
-            when(solrClient.query(eq(collection), any(SolrParams.class), eq(SolrRequest.METHOD.POST))).thenReturn(queryResponse);
+        @Test
+        void vectorLegIsKnnOverTheEmbeddedQuery() throws Exception {
+            stubEmbedding();
+            stubCombinedResults(doc("1"));
 
-            searchRepository.executeHybridRerankSearch(collection, query, topK, null, null, null);
+            searchRepository.executeHybridRerankSearch(COLLECTION, QUERY, 10, null, null, null);
 
-            // With client-side RRF, we make TWO separate queries (keyword + vector)
-            ArgumentCaptor<SolrParams> queryCaptor = ArgumentCaptor.forClass(SolrParams.class);
-            verify(solrClient, times(2)).query(eq(collection), queryCaptor.capture(), eq(SolrRequest.METHOD.POST));
+            JsonNode knn = body(captureCombinedRequest()).path("queries").path("vector").path("knn");
+            assertThat(knn.path("f").asString()).isEqualTo("vector");
+            assertThat(knn.path("query").asString()).isEqualTo(VECTOR);
+            assertThat(knn.path("topK").asInt()).isEqualTo(20);
+        }
 
-            List<SolrParams> capturedQueries = queryCaptor.getAllValues();
-            assertEquals(2, capturedQueries.size(), "Should make 2 queries: keyword and vector");
+        @Test
+        void overFetchesCandidatesForFusionButReturnsTopK() throws Exception {
+            stubEmbedding();
+            stubCombinedResults(doc("1"));
 
-            // The legs run concurrently, so identify them by their parameters rather than by
-            // capture order — which leg lands first is not part of the contract.
-            SolrParams keywordQuery = capturedQueries.stream()
-                    .filter(p -> "edismax".equals(p.get("defType")))
-                    .findFirst()
-                    .orElseThrow(() -> new AssertionError("No edismax keyword query was issued"));
-            assertEquals("_text_", keywordQuery.get("qf"),
-                    "Should use _text_ catch-all field for schema-agnostic keyword search");
+            searchRepository.executeHybridRerankSearch(COLLECTION, QUERY, 7, null, null, null);
 
-            SolrParams vectorQuery = capturedQueries.stream()
-                    .filter(p -> p.get("q") != null && p.get("q").contains("{!knn"))
-                    .findFirst()
-                    .orElseThrow(() -> new AssertionError("No KNN vector query was issued"));
-            assertTrue(vectorQuery.get("q").contains("{!knn"),
-                    "Vector leg should be a KNN search: " + vectorQuery.get("q"));
+            JsonNode body = body(captureCombinedRequest());
+            assertThat(body.path("limit").asInt()).isEqualTo(7);
+            // Per-leg candidate depth is max(start + rows, shards.rows)
+            assertThat(body.path("params").path("shards.rows").asInt())
+                    .isEqualTo(7 * SearchRepository.OVER_FETCH_MULTIPLIER);
         }
     }
 
-    // ==================== Parallel Execution ====================
+    // ==================== Filters and fields ====================
 
     @Nested
-    class ParallelExecution {
+    class FiltersAndFields {
 
-        /**
-         * The keyword and vector legs are independent I/O calls on the critical path, so they
-         * must overlap rather than run one after the other.
-         *
-         * <p>A CyclicBarrier proves it: each leg parks at the barrier and proceeds only once
-         * the other arrives. Run sequentially, the first leg times out and breaks the barrier,
-         * so neither records a meeting.</p>
-         */
         @Test
-        void shouldRunKeywordAndVectorLegsAtTheSameTime() throws Exception {
-            String collection = "test-collection";
-            String query = "concurrency test";
+        void filterAppliesToTheWholeCombinedRequest() throws Exception {
+            stubEmbedding();
+            stubCombinedResults(doc("1"));
 
-            when(embeddingService.embedAndFormatForSolr(query)).thenReturn("[0.1, 0.2, 0.3]");
+            searchRepository.executeHybridRerankSearch(
+                    COLLECTION, QUERY, 10, "metadata_year:[2020 TO *]", null, null);
 
-            SolrDocumentList docs = new SolrDocumentList();
-            SolrDocument doc = new SolrDocument();
-            doc.setField("id", "1");
-            doc.setField("score", 1.0f);
-            docs.add(doc);
-            docs.setNumFound(1L);
-            when(queryResponse.getResults()).thenReturn(docs);
-
-            CyclicBarrier barrier = new CyclicBarrier(2);
-            AtomicInteger invocations = new AtomicInteger();
-            AtomicInteger metConcurrently = new AtomicInteger();
-
-            when(solrClient.query(eq(collection), any(SolrParams.class), eq(SolrRequest.METHOD.POST)))
-                    .thenAnswer(invocation -> {
-                        // Only the two hybrid legs participate; any fallback calls pass straight through.
-                        if (invocations.incrementAndGet() <= 2) {
-                            try {
-                                barrier.await(2, TimeUnit.SECONDS);
-                                metConcurrently.incrementAndGet();
-                            } catch (Exception timedOutOrBroken) {
-                                // Sequential execution lands here.
-                            }
-                        }
-                        return queryResponse;
-                    });
-
-            searchRepository.executeHybridRerankSearch(collection, query, 10, null, null, null);
-
-            assertEquals(2, metConcurrently.get(),
-                    "Keyword and vector searches must be in flight at the same time");
-        }
-
-        /**
-         * An interrupt means the caller is being cancelled. Swallowing it and running the
-         * fallback cascade would issue further Solr queries on a thread that has been asked
-         * to stop, and would lose the interrupt for every caller above us.
-         */
-        @Test
-        void propagatesInterruptionRatherThanFallingBack() throws Exception {
-            String collection = "test-collection";
-            String query = "interrupted query";
-
-            when(embeddingService.embedAndFormatForSolr(query)).thenReturn("[0.1, 0.2, 0.3]");
-            SolrDocumentList docs = new SolrDocumentList();
-            docs.setNumFound(0L);
-            lenient().when(queryResponse.getResults()).thenReturn(docs);
-            lenient().when(solrClient.query(eq(collection), any(SolrParams.class), eq(SolrRequest.METHOD.POST)))
-                    .thenReturn(queryResponse);
-
-            Thread.currentThread().interrupt();
-            try {
-                assertThrows(IllegalStateException.class, () ->
-                                searchRepository.executeHybridRerankSearch(collection, query, 10, null, null, null),
-                        "An interrupted hybrid search must not silently fall back");
-                assertTrue(Thread.currentThread().isInterrupted(),
-                        "Interrupt status must be restored for callers above us");
-            } finally {
-                // Clear the flag so it cannot leak into other tests.
-                Thread.interrupted();
-            }
+            assertThat(body(captureCombinedRequest()).path("filter").values())
+                    .extracting(JsonNode::asString)
+                    .containsExactly("metadata_year:[2020 TO *]");
         }
 
         @Test
-        void shouldIssueBothKeywordAndVectorQueries() throws Exception {
-            String collection = "test-collection";
-            String query = "concurrent query";
-            String vectorString = "[0.1, 0.2, 0.3]";
+        void omitsFilterWhenNull() throws Exception {
+            stubEmbedding();
+            stubCombinedResults(doc("1"));
 
-            when(embeddingService.embedAndFormatForSolr(query)).thenReturn(vectorString);
+            searchRepository.executeHybridRerankSearch(COLLECTION, QUERY, 10, null, null, null);
 
-            SolrDocumentList kwDocs = new SolrDocumentList();
-            SolrDocument kwDoc = new SolrDocument();
-            kwDoc.setField("id", "kw-1");
-            kwDoc.setField("score", 5.0f);
-            kwDocs.add(kwDoc);
-            kwDocs.setNumFound(1L);
-
-            SolrDocumentList vecDocs = new SolrDocumentList();
-            SolrDocument vecDoc = new SolrDocument();
-            vecDoc.setField("id", "vec-1");
-            vecDoc.setField("score", 0.9f);
-            vecDocs.add(vecDoc);
-            vecDocs.setNumFound(1L);
-
-            // Both searches return different documents
-            QueryResponse kwResponse = org.mockito.Mockito.mock(QueryResponse.class);
-            QueryResponse vecResponse = org.mockito.Mockito.mock(QueryResponse.class);
-            when(kwResponse.getResults()).thenReturn(kwDocs);
-            when(vecResponse.getResults()).thenReturn(vecDocs);
-
-            // Return different responses for keyword vs vector queries
-            when(solrClient.query(eq(collection), any(SolrParams.class), eq(SolrRequest.METHOD.POST)))
-                    .thenReturn(kwResponse, vecResponse);
-
-            SearchResponse response = searchRepository.executeHybridRerankSearch(
-                    collection, query, 10, null, null, null);
-
-            assertNotNull(response);
-            // Should have results from both searches
-            assertFalse(response.documents().isEmpty());
-
-            // Verify both queries were made
-            verify(solrClient, times(2)).query(eq(collection), any(SolrParams.class), eq(SolrRequest.METHOD.POST));
+            assertThat(body(captureCombinedRequest()).has("filter")).isFalse();
         }
 
         @Test
-        void shouldMergeResultsFromBothSearches() throws Exception {
-            String collection = "test-collection";
-            String query = "merge test";
-            String vectorString = "[0.1, 0.2, 0.3]";
+        void projectsRequestedFieldsWithoutAddingScore() throws Exception {
+            stubEmbedding();
+            stubCombinedResults(doc("1"));
 
-            when(embeddingService.embedAndFormatForSolr(query)).thenReturn(vectorString);
+            searchRepository.executeHybridRerankSearch(
+                    COLLECTION, QUERY, 10, null, "id, content ,metadata_*", null);
 
-            // Keyword search returns doc A and B
-            SolrDocumentList kwDocs = new SolrDocumentList();
-            SolrDocument kwA = new SolrDocument();
-            kwA.setField("id", "A");
-            kwA.setField("score", 10.0f);
-            kwDocs.add(kwA);
-            SolrDocument kwB = new SolrDocument();
-            kwB.setField("id", "B");
-            kwB.setField("score", 8.0f);
-            kwDocs.add(kwB);
-            kwDocs.setNumFound(2L);
+            // Solr returns a raw per-leg score in combined mode, so it is not requested.
+            assertThat(body(captureCombinedRequest()).path("fields").values())
+                    .extracting(JsonNode::asString)
+                    .containsExactly("id", "content", "metadata_*");
+        }
 
-            // Vector search returns doc A and C
-            SolrDocumentList vecDocs = new SolrDocumentList();
-            SolrDocument vecA = new SolrDocument();
-            vecA.setField("id", "A");
-            vecA.setField("score", 0.95f);
-            vecDocs.add(vecA);
-            SolrDocument vecC = new SolrDocument();
-            vecC.setField("id", "C");
-            vecC.setField("score", 0.85f);
-            vecDocs.add(vecC);
-            vecDocs.setNumFound(2L);
+        @Test
+        void leavesFieldListToSolrWhenFieldsCsvIsNull() throws Exception {
+            stubEmbedding();
+            stubCombinedResults(doc("1"));
 
-            QueryResponse kwResponse = org.mockito.Mockito.mock(QueryResponse.class);
-            QueryResponse vecResponse = org.mockito.Mockito.mock(QueryResponse.class);
-            when(kwResponse.getResults()).thenReturn(kwDocs);
-            when(vecResponse.getResults()).thenReturn(vecDocs);
+            searchRepository.executeHybridRerankSearch(COLLECTION, QUERY, 10, null, null, null);
 
-            when(solrClient.query(eq(collection), any(SolrParams.class), eq(SolrRequest.METHOD.POST)))
-                    .thenReturn(kwResponse, vecResponse);
-
-            SearchResponse response = searchRepository.executeHybridRerankSearch(
-                    collection, query, 10, null, null, null);
-
-            // Should have 3 unique documents: A (in both), B (keyword only), C (vector only)
-            assertEquals(3, response.documents().size());
-
-            // A should be ranked first (appears in both lists)
-            assertEquals("A", response.documents().get(0).get("id"));
+            assertThat(body(captureCombinedRequest()).has("fields")).isFalse();
         }
     }
 
-    // ==================== Over-Fetch Behavior ====================
+    // ==================== minScore ====================
 
     @Nested
-    class OverFetchBehavior {
+    class MinScore {
 
         @Test
-        void shouldFetchDoubleTopKFromEachSearch() throws Exception {
-            String collection = "test-collection";
-            String query = "overfetch test";
-            int topK = 25;
-            String vectorString = "[0.1, 0.2, 0.3]";
+        void thresholdsTheVectorLegWithVectorSimilarity() throws Exception {
+            stubEmbedding();
+            stubCombinedResults(doc("1"));
 
-            when(embeddingService.embedAndFormatForSolr(query)).thenReturn(vectorString);
+            searchRepository.executeHybridRerankSearch(COLLECTION, QUERY, 10, null, null, 0.8);
 
-            SolrDocumentList emptyDocs = new SolrDocumentList();
-            emptyDocs.setNumFound(0L);
-            when(queryResponse.getResults()).thenReturn(emptyDocs);
-            when(solrClient.query(eq(collection), any(SolrParams.class), eq(SolrRequest.METHOD.POST)))
-                    .thenReturn(queryResponse);
+            JsonNode vector = body(captureCombinedRequest()).path("queries").path("vector");
+            assertThat(vector.has("knn")).isFalse();
+            JsonNode similarity = vector.path("vectorSimilarity");
+            assertThat(similarity.path("f").asString()).isEqualTo("vector");
+            assertThat(similarity.path("minReturn").asDouble()).isEqualTo(0.8);
+            assertThat(similarity.path("query").asString()).isEqualTo(VECTOR);
+        }
 
-            searchRepository.executeHybridRerankSearch(collection, query, topK, null, null, null);
+        @Test
+        void neverThresholdsTheKeywordLeg() throws Exception {
+            stubEmbedding();
+            stubCombinedResults(doc("1"));
 
-            ArgumentCaptor<SolrParams> queryCaptor = ArgumentCaptor.forClass(SolrParams.class);
-            // 2 from hybrid + 2 from fallback (keyword + vector) since hybrid returns empty
-            verify(solrClient, times(4)).query(eq(collection), queryCaptor.capture(), eq(SolrRequest.METHOD.POST));
+            searchRepository.executeHybridRerankSearch(COLLECTION, QUERY, 10, null, null, 0.8);
 
-            // Check the first two queries (the hybrid ones) used 2x topK
-            List<SolrParams> allQueries = queryCaptor.getAllValues();
-            assertEquals("50", allQueries.get(0).get("rows"),
-                    "Keyword search should fetch topK * 2 = 50 rows");
-            assertEquals("50", allQueries.get(1).get("rows"),
-                    "Vector search should fetch topK * 2 = 50 rows");
+            JsonNode keyword = body(captureCombinedRequest()).path("queries").path("keyword");
+            assertThat(keyword.toString()).doesNotContain("0.8");
         }
     }
 
-    // ==================== MinScore Filtering ====================
+    // ==================== Results ====================
 
     @Nested
-    class MinScoreFiltering {
+    class Results {
 
-        /**
-         * Builds a SolrDocumentList from (id, score) pairs.
-         */
-        private SolrDocumentList docsWithScores(Object... idScorePairs) {
-            SolrDocumentList docs = new SolrDocumentList();
-            for (int i = 0; i < idScorePairs.length; i += 2) {
-                SolrDocument doc = new SolrDocument();
-                doc.setField("id", idScorePairs[i]);
-                doc.setField("score", idScorePairs[i + 1]);
-                docs.add(doc);
-            }
-            docs.setNumFound((long) (idScorePairs.length / 2));
-            return docs;
-        }
+        @Test
+        void preservesSolrsFusedOrder() throws Exception {
+            stubEmbedding();
+            stubCombinedResults(doc("b"), doc("a"), doc("c"));
 
-        private List<String> idsOf(SearchResponse response) {
-            return response.documents().stream()
-                    .map(d -> String.valueOf(d.get("id")))
-                    .toList();
-        }
+            SearchResponse response = searchRepository.executeHybridRerankSearch(
+                    COLLECTION, QUERY, 10, null, null, null);
 
-        private void stubLegs(String collection, String query,
-                             SolrDocumentList keywordDocs,
-                             SolrDocumentList vectorDocs) throws Exception {
-            when(embeddingService.embedAndFormatForSolr(query)).thenReturn("[0.1, 0.2, 0.3]");
-            QueryResponse kwResponse = org.mockito.Mockito.mock(QueryResponse.class);
-            QueryResponse vecResponse = org.mockito.Mockito.mock(QueryResponse.class);
-            when(kwResponse.getResults()).thenReturn(keywordDocs);
-            when(vecResponse.getResults()).thenReturn(vectorDocs);
-
-            // Dispatch on the actual query rather than call order: the fallback cascade
-            // issues extra calls, and an order-based stub would hand the keyword fallback
-            // the vector response.
-            when(solrClient.query(eq(collection), any(SolrParams.class), eq(SolrRequest.METHOD.POST)))
-                    .thenAnswer(invocation -> {
-                        SolrParams params = invocation.getArgument(1);
-                        return "edismax".equals(params.get("defType")) ? kwResponse : vecResponse;
-                    });
+            assertThat(response.documents()).extracting(d -> d.get("id"))
+                    .containsExactly("b", "a", "c");
+            assertThat(response.facetCounts()).isEmpty();
+            assertThat(response.spellCheckSuggestion()).isNull();
         }
 
         @Test
-        void appliesMinScoreToVectorLegBeforeFusion() throws Exception {
-            String collection = "test-collection";
-            String query = "vector leg filter";
-
-            // Vector scores are cosine similarity in [0..1]; 0.2 is below the threshold.
-            stubLegs(collection, query,
-                    docsWithScores("kwOnly", 3.0f),
-                    docsWithScores("vecHi", 0.9f, "vecLo", 0.2f));
+        void extractsFirstValueFromMultiValuedFields() throws Exception {
+            stubEmbedding();
+            SolrDocument doc = doc("1");
+            doc.addField("tags", List.of("java", "spring"));
+            stubCombinedResults(doc);
 
             SearchResponse response = searchRepository.executeHybridRerankSearch(
-                    collection, query, 10, null, null, 0.5);
+                    COLLECTION, QUERY, 10, null, null, null);
 
-            assertFalse(idsOf(response).contains("vecLo"),
-                    "Vector hit below minScore must be dropped before fusion");
-            assertTrue(idsOf(response).contains("vecHi"),
-                    "Vector hit above minScore must survive");
-        }
-
-        @Test
-        void doesNotApplyMinScoreToKeywordLeg() throws Exception {
-            String collection = "test-collection";
-            String query = "keyword leg unfiltered";
-
-            // BM25 is unbounded, so a [0..1] threshold has no meaning for the keyword leg.
-            stubLegs(collection, query,
-                    docsWithScores("kwLow", 0.1f),
-                    docsWithScores("vecHi", 0.9f));
-
-            SearchResponse response = searchRepository.executeHybridRerankSearch(
-                    collection, query, 10, null, null, 0.5);
-
-            assertTrue(idsOf(response).contains("kwLow"),
-                    "Keyword hits must not be filtered by minScore; BM25 is not a [0..1] scale");
-        }
-
-        @Test
-        void doesNotThresholdTheFusedRrfScore() throws Exception {
-            String collection = "test-collection";
-            String query = "fused score not thresholded";
-
-            stubLegs(collection, query,
-                    docsWithScores("A", 5.0f),
-                    docsWithScores("B", 0.8f));
-
-            // Every RRF score here is ~1/(60+1) = 0.0164, far below minScore=0.5.
-            // Thresholding the fused score would wrongly empty the result set.
-            SearchResponse response = searchRepository.executeHybridRerankSearch(
-                    collection, query, 10, null, null, 0.5);
-
-            assertEquals(2, response.documents().size(),
-                    "RRF scores are rank-derived and must never be compared against minScore");
-        }
-
-        @Test
-        void shouldReturnAllResultsWhenMinScoreIsNull() throws Exception {
-            String collection = "test-collection";
-            String query = "no filter test";
-            String vectorString = "[0.1, 0.2, 0.3]";
-
-            when(embeddingService.embedAndFormatForSolr(query)).thenReturn(vectorString);
-
-            SolrDocumentList docs = new SolrDocumentList();
-            SolrDocument doc = new SolrDocument();
-            doc.setField("id", "1");
-            doc.setField("score", 0.001f);
-            docs.add(doc);
-            docs.setNumFound(1L);
-
-            when(queryResponse.getResults()).thenReturn(docs);
-            when(solrClient.query(eq(collection), any(SolrParams.class), eq(SolrRequest.METHOD.POST)))
-                    .thenReturn(queryResponse);
-
-            SearchResponse response = searchRepository.executeHybridRerankSearch(
-                    collection, query, 10, null, null, null);
-
-            assertNotNull(response);
-            assertEquals(1, response.documents().size());
+            assertThat(response.documents().getFirst()).containsEntry("tags", "java");
         }
     }
 
-    // ==================== Fallback Behavior ====================
+    // ==================== Fallback ====================
 
     @Nested
-    class FallbackBehavior {
+    class Fallback {
 
         @Test
-        void shouldFallbackToKeywordWhenHybridReturnsEmpty() throws Exception {
-            String collection = "test-collection";
-            String query = "fallback test";
-            String vectorString = "[0.1, 0.2, 0.3]";
-
-            when(embeddingService.embedAndFormatForSolr(query)).thenReturn(vectorString);
-
-            // First two calls (hybrid) return empty
-            SolrDocumentList emptyDocs = new SolrDocumentList();
-            emptyDocs.setNumFound(0L);
-
-            // Third call (keyword fallback) returns results
-            SolrDocumentList fallbackDocs = new SolrDocumentList();
-            SolrDocument doc = new SolrDocument();
-            doc.setField("id", "fallback-1");
-            doc.setField("score", 5.0f);
-            fallbackDocs.add(doc);
-            fallbackDocs.setNumFound(1L);
-
-            QueryResponse emptyResponse = org.mockito.Mockito.mock(QueryResponse.class);
-            QueryResponse fallbackResponse = org.mockito.Mockito.mock(QueryResponse.class);
-            when(emptyResponse.getResults()).thenReturn(emptyDocs);
-            when(fallbackResponse.getResults()).thenReturn(fallbackDocs);
-
-            when(solrClient.query(eq(collection), any(SolrParams.class), eq(SolrRequest.METHOD.POST)))
-                    .thenReturn(emptyResponse, emptyResponse, fallbackResponse);
+        void fallsBackToKeywordWhenTheCombinedRequestFails() throws Exception {
+            stubEmbedding();
+            // e.g. a collection whose configset lacks the /hybrid handler (Solr answers 404)
+            when(solrClient.request(any(SolrRequest.class), eq(COLLECTION)))
+                    .thenThrow(new SolrServerException("404 Not Found"));
+            stubPlainQueryResults(doc("kw"));
 
             SearchResponse response = searchRepository.executeHybridRerankSearch(
-                    collection, query, 10, null, null, null);
+                    COLLECTION, QUERY, 10, null, null, null);
 
-            assertNotNull(response);
-            assertFalse(response.documents().isEmpty());
-            assertEquals("fallback-1", response.documents().get(0).get("id"));
+            assertThat(response.documents()).extracting(d -> d.get("id")).containsExactly("kw");
         }
 
         @Test
-        void shouldFallbackToVectorWhenKeywordFallbackFails() throws Exception {
-            String collection = "test-collection";
-            String query = "vector fallback";
-            String vectorString = "[0.1, 0.2, 0.3]";
-
-            when(embeddingService.embedAndFormatForSolr(query)).thenReturn(vectorString);
-
-            // Hybrid returns empty
-            SolrDocumentList emptyDocs = new SolrDocumentList();
-            emptyDocs.setNumFound(0L);
-
-            // Vector fallback returns result
-            SolrDocumentList vecDocs = new SolrDocumentList();
-            SolrDocument vecDoc = new SolrDocument();
-            vecDoc.setField("id", "vec-fallback");
-            vecDoc.setField("score", 0.8f);
-            vecDocs.add(vecDoc);
-            vecDocs.setNumFound(1L);
-
-            QueryResponse emptyResponse = org.mockito.Mockito.mock(QueryResponse.class);
-            QueryResponse vecResponse = org.mockito.Mockito.mock(QueryResponse.class);
-            when(emptyResponse.getResults()).thenReturn(emptyDocs);
-            when(vecResponse.getResults()).thenReturn(vecDocs);
-
-            // hybrid keyword (empty), hybrid vector (empty), keyword fallback (empty), vector fallback (result)
-            when(solrClient.query(eq(collection), any(SolrParams.class), eq(SolrRequest.METHOD.POST)))
-                    .thenReturn(emptyResponse, emptyResponse, emptyResponse, vecResponse);
+        void fallsBackToKeywordWhenTheQueryCannotBeEmbedded() throws Exception {
+            when(embeddingService.embedAndFormatForSolr(QUERY))
+                    .thenThrow(new IllegalStateException("embedding model unavailable"));
+            stubPlainQueryResults(doc("kw"));
 
             SearchResponse response = searchRepository.executeHybridRerankSearch(
-                    collection, query, 10, null, null, null);
+                    COLLECTION, QUERY, 10, null, null, null);
 
-            assertNotNull(response);
-            assertFalse(response.documents().isEmpty());
-            assertEquals("vec-fallback", response.documents().get(0).get("id"));
+            assertThat(response.documents()).extracting(d -> d.get("id")).containsExactly("kw");
+            verify(solrClient, never()).request(any(SolrRequest.class), any(String.class));
         }
 
         @Test
-        void shouldReturnEmptyWhenAllSearchStrategiesFail() throws Exception {
-            String collection = "test-collection";
-            String query = "total failure";
-            String vectorString = "[0.1, 0.2, 0.3]";
-
-            when(embeddingService.embedAndFormatForSolr(query)).thenReturn(vectorString);
-
-            SolrDocumentList emptyDocs = new SolrDocumentList();
-            emptyDocs.setNumFound(0L);
-
-            QueryResponse emptyResponse = org.mockito.Mockito.mock(QueryResponse.class);
-            when(emptyResponse.getResults()).thenReturn(emptyDocs);
-
-            when(solrClient.query(eq(collection), any(SolrParams.class), eq(SolrRequest.METHOD.POST)))
-                    .thenReturn(emptyResponse);
+        void fallsBackToVectorWhenKeywordFallbackIsEmpty() throws Exception {
+            stubEmbedding();
+            when(solrClient.request(any(SolrRequest.class), eq(COLLECTION)))
+                    .thenThrow(new IOException("connection reset"));
+            SolrDocument vectorHit = doc("vec");
+            vectorHit.addField("score", 0.9f);
+            SolrDocumentList empty = new SolrDocumentList();
+            SolrDocumentList vectorHits = new SolrDocumentList();
+            vectorHits.add(vectorHit);
+            when(queryResponse.getResults()).thenReturn(empty, vectorHits);
+            when(solrClient.query(eq(COLLECTION), any(SolrParams.class), eq(SolrRequest.METHOD.POST)))
+                    .thenReturn(queryResponse);
 
             SearchResponse response = searchRepository.executeHybridRerankSearch(
-                    collection, query, 10, null, null, null);
+                    COLLECTION, QUERY, 10, null, null, null);
 
-            assertNotNull(response);
-            assertTrue(response.documents().isEmpty());
+            assertThat(response.documents()).extracting(d -> d.get("id")).containsExactly("vec");
+            verify(solrClient, times(2)).query(eq(COLLECTION), any(SolrParams.class), eq(SolrRequest.METHOD.POST));
         }
 
         @Test
-        void shouldFallbackWhenHybridSearchThrowsException() throws Exception {
-            String collection = "test-collection";
-            String query = "error test";
-            String vectorString = "[0.1, 0.2, 0.3]";
-
-            when(embeddingService.embedAndFormatForSolr(query)).thenReturn(vectorString);
-
-            // First two calls throw (hybrid), third call (keyword fallback) succeeds
-            SolrDocumentList fallbackDocs = new SolrDocumentList();
-            SolrDocument doc = new SolrDocument();
-            doc.setField("id", "recovered");
-            doc.setField("score", 3.0f);
-            fallbackDocs.add(doc);
-            fallbackDocs.setNumFound(1L);
-
-            QueryResponse fallbackResponse = org.mockito.Mockito.mock(QueryResponse.class);
-            when(fallbackResponse.getResults()).thenReturn(fallbackDocs);
-
-            when(solrClient.query(eq(collection), any(SolrParams.class), eq(SolrRequest.METHOD.POST)))
-                    .thenThrow(new SolrServerException("Solr is down"))
-                    .thenThrow(new SolrServerException("Solr still down"))
-                    .thenReturn(fallbackResponse);
+        void returnsEmptyWhenEverythingFails() throws Exception {
+            stubEmbedding();
+            when(solrClient.request(any(SolrRequest.class), eq(COLLECTION)))
+                    .thenThrow(new SolrServerException("down"));
+            when(solrClient.query(eq(COLLECTION), any(SolrParams.class), eq(SolrRequest.METHOD.POST)))
+                    .thenThrow(new SolrServerException("down"));
 
             SearchResponse response = searchRepository.executeHybridRerankSearch(
-                    collection, query, 10, null, null, null);
+                    COLLECTION, QUERY, 10, null, null, null);
 
-            assertNotNull(response);
-            assertFalse(response.documents().isEmpty());
-            assertEquals("recovered", response.documents().get(0).get("id"));
+            assertThat(response.documents()).isEmpty();
         }
 
         @Test
-        void shouldReturnEmptyWhenEverythingFails() throws Exception {
-            String collection = "test-collection";
-            String query = "catastrophic failure";
-            String vectorString = "[0.1, 0.2, 0.3]";
-
-            when(embeddingService.embedAndFormatForSolr(query)).thenReturn(vectorString);
-
-            when(solrClient.query(eq(collection), any(SolrParams.class), eq(SolrRequest.METHOD.POST)))
-                    .thenThrow(new SolrServerException("All searches fail"));
+        void doesNotFallBackWhenSolrFindsNothing() throws Exception {
+            stubEmbedding();
+            stubCombinedResults();
 
             SearchResponse response = searchRepository.executeHybridRerankSearch(
-                    collection, query, 10, null, null, null);
+                    COLLECTION, QUERY, 10, null, null, null);
 
-            assertNotNull(response);
-            assertTrue(response.documents().isEmpty());
+            // An empty fusion means both legs were empty; repeating each leg alone cannot help.
+            assertThat(response.documents()).isEmpty();
+            verify(solrClient, never()).query(any(String.class), any(SolrParams.class), any(SolrRequest.METHOD.class));
         }
     }
 
-    // ==================== Field Selection ====================
+    // ==================== helpers ====================
 
-    @Nested
-    class FieldSelection {
-
-        @Test
-        void shouldPassFieldsCsvToQuery() throws Exception {
-            String collection = "test-collection";
-            String query = "field selection test";
-            String fieldsCsv = "id,title,author";
-            String vectorString = "[0.1, 0.2, 0.3]";
-
-            when(embeddingService.embedAndFormatForSolr(query)).thenReturn(vectorString);
-
-            SolrDocumentList docs = new SolrDocumentList();
-            SolrDocument doc = new SolrDocument();
-            doc.setField("id", "1");
-            doc.setField("title", "Test");
-            doc.setField("score", 5.0f);
-            docs.add(doc);
-            docs.setNumFound(1L);
-
-            when(queryResponse.getResults()).thenReturn(docs);
-            when(solrClient.query(eq(collection), any(SolrParams.class), eq(SolrRequest.METHOD.POST)))
-                    .thenReturn(queryResponse);
-
-            searchRepository.executeHybridRerankSearch(collection, query, 10, null, fieldsCsv, null);
-
-            ArgumentCaptor<SolrParams> queryCaptor = ArgumentCaptor.forClass(SolrParams.class);
-            verify(solrClient, times(2)).query(eq(collection), queryCaptor.capture(), eq(SolrRequest.METHOD.POST));
-
-            // Both queries should include the field list with score appended
-            for (SolrParams params : queryCaptor.getAllValues()) {
-                String fl = params.get("fl");
-                assertTrue(fl.contains("id,title,author"),
-                        "Should include requested fields: " + fl);
-                assertTrue(fl.contains("score"),
-                        "Should include score field: " + fl);
-            }
-        }
-
-        @Test
-        void shouldUseWildcardWhenFieldsCsvIsNull() throws Exception {
-            String collection = "test-collection";
-            String query = "wildcard fields";
-            String vectorString = "[0.1, 0.2, 0.3]";
-
-            when(embeddingService.embedAndFormatForSolr(query)).thenReturn(vectorString);
-
-            SolrDocumentList docs = new SolrDocumentList();
-            SolrDocument doc = new SolrDocument();
-            doc.setField("id", "1");
-            doc.setField("score", 5.0f);
-            docs.add(doc);
-            docs.setNumFound(1L);
-
-            when(queryResponse.getResults()).thenReturn(docs);
-            when(solrClient.query(eq(collection), any(SolrParams.class), eq(SolrRequest.METHOD.POST)))
-                    .thenReturn(queryResponse);
-
-            searchRepository.executeHybridRerankSearch(collection, query, 10, null, null, null);
-
-            ArgumentCaptor<SolrParams> queryCaptor = ArgumentCaptor.forClass(SolrParams.class);
-            verify(solrClient, times(2)).query(eq(collection), queryCaptor.capture(), eq(SolrRequest.METHOD.POST));
-
-            for (SolrParams params : queryCaptor.getAllValues()) {
-                assertEquals("*,score", params.get("fl"),
-                        "Should use wildcard with score when no fields specified");
-            }
-        }
+    private void stubEmbedding() {
+        when(embeddingService.embedAndFormatForSolr(QUERY)).thenReturn(VECTOR);
     }
 
-    // ==================== Filter Query ====================
-
-    @Nested
-    class FilterQuery {
-
-        @Test
-        void shouldPassFilterExpressionToBothSearches() throws Exception {
-            String collection = "test-collection";
-            String query = "filter test";
-            String filter = "category:tech AND year:[2023 TO *]";
-            String vectorString = "[0.1, 0.2, 0.3]";
-
-            when(embeddingService.embedAndFormatForSolr(query)).thenReturn(vectorString);
-
-            SolrDocumentList docs = new SolrDocumentList();
-            SolrDocument doc = new SolrDocument();
-            doc.setField("id", "1");
-            doc.setField("score", 5.0f);
-            docs.add(doc);
-            docs.setNumFound(1L);
-
-            when(queryResponse.getResults()).thenReturn(docs);
-            when(solrClient.query(eq(collection), any(SolrParams.class), eq(SolrRequest.METHOD.POST)))
-                    .thenReturn(queryResponse);
-
-            searchRepository.executeHybridRerankSearch(collection, query, 10, filter, null, null);
-
-            ArgumentCaptor<SolrParams> queryCaptor = ArgumentCaptor.forClass(SolrParams.class);
-            verify(solrClient, times(2)).query(eq(collection), queryCaptor.capture(), eq(SolrRequest.METHOD.POST));
-
-            for (SolrParams params : queryCaptor.getAllValues()) {
-                assertEquals(filter, params.get("fq"),
-                        "Both searches should include the filter expression");
-            }
-        }
-
-        @Test
-        void shouldOmitFilterQueryWhenNull() throws Exception {
-            String collection = "test-collection";
-            String query = "no filter";
-            String vectorString = "[0.1, 0.2, 0.3]";
-
-            when(embeddingService.embedAndFormatForSolr(query)).thenReturn(vectorString);
-
-            SolrDocumentList docs = new SolrDocumentList();
-            SolrDocument doc = new SolrDocument();
-            doc.setField("id", "1");
-            doc.setField("score", 5.0f);
-            docs.add(doc);
-            docs.setNumFound(1L);
-
-            when(queryResponse.getResults()).thenReturn(docs);
-            when(solrClient.query(eq(collection), any(SolrParams.class), eq(SolrRequest.METHOD.POST)))
-                    .thenReturn(queryResponse);
-
-            searchRepository.executeHybridRerankSearch(collection, query, 10, null, null, null);
-
-            ArgumentCaptor<SolrParams> queryCaptor = ArgumentCaptor.forClass(SolrParams.class);
-            verify(solrClient, times(2)).query(eq(collection), queryCaptor.capture(), eq(SolrRequest.METHOD.POST));
-
-            for (SolrParams params : queryCaptor.getAllValues()) {
-                assertNull(params.get("fq"),
-                        "Should not include fq when filter is null");
-            }
-        }
+    private void stubCombinedResults(SolrDocument... docs) throws Exception {
+        SolrDocumentList list = new SolrDocumentList();
+        list.addAll(List.of(docs));
+        list.setNumFound(docs.length);
+        NamedList<Object> raw = new NamedList<>();
+        raw.add("response", list);
+        when(solrClient.request(any(SolrRequest.class), eq(COLLECTION))).thenReturn(raw);
     }
 
-    // ==================== TopK Limiting ====================
-
-    @Nested
-    class TopKLimiting {
-
-        @Test
-        void shouldLimitResultsToTopK() throws Exception {
-            String collection = "test-collection";
-            String query = "limit test";
-            int topK = 2;
-            String vectorString = "[0.1, 0.2, 0.3]";
-
-            when(embeddingService.embedAndFormatForSolr(query)).thenReturn(vectorString);
-
-            // Return 5 documents from keyword search
-            SolrDocumentList docs = new SolrDocumentList();
-            for (int i = 0; i < 5; i++) {
-                SolrDocument doc = new SolrDocument();
-                doc.setField("id", "doc-" + i);
-                doc.setField("score", (float) (10.0 - i));
-                docs.add(doc);
-            }
-            docs.setNumFound(5L);
-
-            when(queryResponse.getResults()).thenReturn(docs);
-            when(solrClient.query(eq(collection), any(SolrParams.class), eq(SolrRequest.METHOD.POST)))
-                    .thenReturn(queryResponse);
-
-            SearchResponse response = searchRepository.executeHybridRerankSearch(
-                    collection, query, topK, null, null, null);
-
-            assertNotNull(response);
-            assertTrue(response.documents().size() <= topK,
-                    "Should return at most topK results, got: " + response.documents().size());
-        }
+    private void stubPlainQueryResults(SolrDocument... docs) throws Exception {
+        SolrDocumentList list = new SolrDocumentList();
+        list.addAll(List.of(docs));
+        when(queryResponse.getResults()).thenReturn(list);
+        when(solrClient.query(eq(COLLECTION), any(SolrParams.class), eq(SolrRequest.METHOD.POST)))
+                .thenReturn(queryResponse);
     }
 
-    // ==================== Multi-Valued Fields ====================
+    private SolrRequest<?> captureCombinedRequest() throws Exception {
+        @SuppressWarnings({"unchecked", "rawtypes"})
+        ArgumentCaptor<SolrRequest<?>> captor = (ArgumentCaptor) ArgumentCaptor.forClass(SolrRequest.class);
+        verify(solrClient).request(captor.capture(), eq(COLLECTION));
+        return captor.getValue();
+    }
 
-    @Nested
-    class MultiValuedFields {
+    private JsonNode body(SolrRequest<?> request) throws IOException {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        request.getContentWriter("application/json").write(out);
+        return mapper.readTree(out.toByteArray());
+    }
 
-        @Test
-        void shouldExtractFirstValueFromMultiValuedFields() throws Exception {
-            String collection = "test-collection";
-            String query = "multivalue test";
-            String vectorString = "[0.1, 0.2, 0.3]";
-
-            when(embeddingService.embedAndFormatForSolr(query)).thenReturn(vectorString);
-
-            SolrDocumentList docs = new SolrDocumentList();
-            SolrDocument doc = new SolrDocument();
-            doc.setField("id", "1");
-            doc.setField("score", 5.0f);
-            doc.setField("tags", List.of("java", "spring", "ai"));
-            docs.add(doc);
-            docs.setNumFound(1L);
-
-            when(queryResponse.getResults()).thenReturn(docs);
-            when(solrClient.query(eq(collection), any(SolrParams.class), eq(SolrRequest.METHOD.POST)))
-                    .thenReturn(queryResponse);
-
-            SearchResponse response = searchRepository.executeHybridRerankSearch(
-                    collection, query, 10, null, null, null);
-
-            assertNotNull(response);
-            assertEquals(1, response.documents().size());
-            // Multi-valued field should have first value extracted
-            assertEquals("java", response.documents().get(0).get("tags"));
-        }
+    private static SolrDocument doc(String id) {
+        SolrDocument doc = new SolrDocument();
+        doc.addField("id", id);
+        doc.addField("_text_", "content " + id);
+        return doc;
     }
 }

@@ -1,5 +1,7 @@
 package dev.aparikh.aipoweredsearch.search;
 
+import dev.aparikh.aipoweredsearch.config.SolrTestContainers;
+
 import dev.aparikh.aipoweredsearch.config.PostgresTestConfiguration;
 import dev.aparikh.aipoweredsearch.config.SolrTestConfiguration;
 import dev.aparikh.aipoweredsearch.indexing.IndexService;
@@ -136,6 +138,8 @@ class RagQuestionAnswerIntegrationTest {
 
             if (response.isSuccess()) {
                 log.info("Successfully created collection: {}", collection);
+                // _default lacks the /hybrid (combined query) handler that hybrid search uses
+                SolrTestContainers.registerHybridHandler(solrClient, collection);
             }
 
             // Wait for collection to be ready

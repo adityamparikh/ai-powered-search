@@ -9,14 +9,13 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.solr.SolrContainer;
-import org.testcontainers.utility.DockerImageName;
+import dev.aparikh.aipoweredsearch.config.SolrTestContainers;
 
 @Testcontainers
 public abstract class SolrTestBase {
 
     @Container
-    protected static final SolrContainer solrContainer = new SolrContainer(DockerImageName.parse("solr:9.10.1"))
-            .withEnv("SOLR_HEAP", "512m");
+    protected static final SolrContainer solrContainer = SolrTestContainers.newSolrContainer();
 
     @DynamicPropertySource
     static void solrProperties(DynamicPropertyRegistry registry) {
@@ -61,9 +60,9 @@ public abstract class SolrTestBase {
         }
 
         try {
-            // Create the collection using solr create_collection command
-            var result = solrContainer.execInContainer("/opt/solr/bin/solr", "create_collection",
-                "-c", collection, "-d", "_default", "-shards", "1", "-replicationFactor", "1");
+            // Create the collection using the solr create command
+            var result = solrContainer.execInContainer("/opt/solr/bin/solr", "create",
+                "-c", collection, "-d", "_default", "-sh", "1", "-rf", "1");
 
             System.out.println("Collection creation stdout: " + result.getStdout());
             System.out.println("Collection creation stderr: " + result.getStderr());
@@ -78,6 +77,9 @@ public abstract class SolrTestBase {
 
             // Add vector field to schema for hybrid search tests
             addVectorFieldToSchema(collection);
+
+            // _default lacks the /hybrid (combined query) handler that hybrid search uses
+            SolrTestContainers.registerHybridHandler(solrClient, collection);
 
         } catch (Exception e) {
             System.out.println("Exception during collection creation: " + e.getMessage());
