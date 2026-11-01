@@ -49,7 +49,7 @@ This document contains in-depth technical information about the AI-Powered Searc
                 │
     ┌───────────▼──────────┐   ┌──────────────────────┐
     │  OpenAI Embeddings   │   │  Anthropic Claude    │
-    │  text-embedding-3-   │   │  claude-sonnet-4-5   │
+    │  text-embedding-3-   │   │  claude-sonnet-5-5   │
     │  small (1536-dim)    │   │  Query generation    │
     └──────────────────────┘   └──────────────────────┘
                 │
@@ -279,7 +279,7 @@ lines 157-227
 
 ### Claude AI (Query Generation)
 
-**Model**: claude-sonnet-4-5
+**Model**: claude-sonnet-5-5
 
 **Capabilities:**
 - Converts natural language to Solr query syntax
@@ -318,7 +318,7 @@ spring.ai.vectorstore.solr.host=http://localhost:8983/solr
 
 # Anthropic Claude Configuration
 spring.ai.anthropic.api-key=${ANTHROPIC_API_KEY}
-spring.ai.anthropic.chat.options.model=claude-sonnet-4-5
+spring.ai.anthropic.chat.model=claude-sonnet-5-5
 
 # OpenAI Embeddings Configuration
 spring.ai.openai.api-key=${OPENAI_API_KEY}

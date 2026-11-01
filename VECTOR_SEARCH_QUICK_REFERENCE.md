@@ -18,7 +18,7 @@
 
 ### 3. Search Model
 - **Provider:** Anthropic
-- **Model:** claude-sonnet-4-5
+- **Model:** claude-sonnet-5-5
 - **Purpose:** Query generation and filter extraction
 - **Configured in:** `config/SpringAiConfig.java`
 
@@ -195,7 +195,7 @@ spring.ai.openai.api-key=${OPENAI_API_KEY}
 spring.ai.openai.embedding.options.model=text-embedding-3-small
 spring.ai.openai.embedding.options.dimensions=1536
 spring.ai.anthropic.api-key=${ANTHROPIC_API_KEY}
-spring.ai.anthropic.chat.options.model=claude-sonnet-4-5
+spring.ai.anthropic.chat.model=claude-sonnet-5-5
 spring.datasource.url=jdbc:postgresql://localhost:5432/chatmemory
 ```
 
@@ -334,7 +334,7 @@ metadata_category:AI
 - **Speed:** Fast, suitable for real-time embedding
 
 ### Chat Model
-- **Name:** claude-sonnet-4-5
+- **Name:** claude-sonnet-5-5
 - **Context:** 200k tokens
 - **Capabilities:** JSON output, tool use, vision
 - **Purpose:** Query parsing and filter generation
