@@ -66,8 +66,13 @@ public class SearchRepository {
     private final SolrClient solrClient;
     private final EmbeddingService embeddingService;
 
-    /** Collections already reported as lacking the /hybrid handler, so the warning is logged once. */
+    /**
+     * Collections already reported as lacking the /hybrid handler, so the warning is logged once.
+     * Bounded: collection names come from request paths, and Solr also answers 404 for a collection
+     * that does not exist, so arbitrary names must not grow this set without limit.
+     */
     private final Set<String> collectionsWithoutHybridHandler = ConcurrentHashMap.newKeySet();
+    static final int MAX_TRACKED_COLLECTIONS = 256;
 
     public SearchRepository(SolrClient solrClient, EmbeddingService embeddingService) {
         this.solrClient = solrClient;
@@ -314,7 +319,7 @@ public class SearchRepository {
             }
             if (e instanceof SolrException solrException && solrException.code() == HTTP_NOT_FOUND) {
                 // A configuration problem, not an outage: no stack trace, said once per collection.
-                if (collectionsWithoutHybridHandler.add(collection)) {
+                if (firstMissingHandlerReport(collection)) {
                     log.warn("Collection '{}' has no {} handler (solr.CombinedQuerySearchHandler, Solr 10.1+); "
                             + "hybrid search is degrading to keyword/vector fallback. Add the handler to the "
                             + "collection's configset (see solr-config/conf/solrconfig.xml).",
@@ -330,7 +335,20 @@ public class SearchRepository {
         }
     }
 
-    private static boolean isInterruption(Throwable e) {
+    int trackedMissingHandlerCollections() {
+        return collectionsWithoutHybridHandler.size();
+    }
+
+    private boolean firstMissingHandlerReport(String collection) {
+        if (collectionsWithoutHybridHandler.contains(collection)) {
+            return false;
+        }
+        // Past the cap, keep warning rather than remembering more names.
+        return collectionsWithoutHybridHandler.size() >= MAX_TRACKED_COLLECTIONS
+                || collectionsWithoutHybridHandler.add(collection);
+    }
+
+        private static boolean isInterruption(Throwable e) {
         for (Throwable t = e; t != null; t = t.getCause()) {
             if (t instanceof InterruptedException) {
                 return true;

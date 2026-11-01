@@ -342,6 +342,23 @@ class SearchRepositoryTest {
         }
 
         @Test
+        void missingHandlerTrackingIsBoundedForArbitraryCollectionNames() throws Exception {
+            when(embeddingService.embedAndFormatForSolr(QUERY)).thenReturn(VECTOR);
+            when(solrClient.request(any(SolrRequest.class), any(String.class)))
+                    .thenThrow(new RemoteSolrException("http://solr", 404, "Not Found", null));
+            when(queryResponse.getResults()).thenReturn(new SolrDocumentList());
+            when(solrClient.query(any(String.class), any(SolrParams.class), eq(SolrRequest.METHOD.POST)))
+                    .thenReturn(queryResponse);
+
+            for (int i = 0; i < SearchRepository.MAX_TRACKED_COLLECTIONS + 50; i++) {
+                searchRepository.executeHybridRerankSearch("no-such-collection-" + i, QUERY, 10, null, null, null);
+            }
+
+            assertThat(searchRepository.trackedMissingHandlerCollections())
+                    .isEqualTo(SearchRepository.MAX_TRACKED_COLLECTIONS);
+        }
+
+        @Test
         void fallsBackToKeywordWhenTheQueryCannotBeEmbedded() throws Exception {
             when(embeddingService.embedAndFormatForSolr(QUERY))
                     .thenThrow(new IllegalStateException("embedding model unavailable"));
