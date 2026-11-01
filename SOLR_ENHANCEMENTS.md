@@ -46,7 +46,7 @@ The following enhancements have been implemented to leverage native Solr capabil
 </requestHandler>
 
 <searchComponent name="combined_query" class="solr.CombinedQueryComponent">
-  <int name="maxCombinerQueries">3</int>
+  <int name="maxCombinerQueries">2</int>
 </searchComponent>
 ```
 
