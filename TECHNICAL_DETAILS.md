@@ -86,7 +86,7 @@ This document contains in-depth technical information about the AI-Powered Searc
 
 - **Chat Memory**: Conversation state management
   - PostgreSQL-backed persistence
-  - Conversation ID: "007" (hardcoded)
+  - Conversation ID: "007" (hardcoded) for query generation; `/ask` uses the request's `conversationId` ("default" when absent)
   - Maintains context across search refinements
 
 ## Search Approach Details

@@ -226,7 +226,7 @@ metadata_category:AI
 ```
 
 ### Conversation Memory
-- **ID:** "007" (hardcoded, constant across all searches)
+- **ID:** "007" (hardcoded, constant across all query-generation calls); `/ask` uses the request's `conversationId` ("default" when absent)
 - **Storage:** PostgreSQL JDBC repository
 - **Purpose:** Maintains context across multiple search requests
 - **Advisors:** MessageChatMemoryAdvisor + SimpleLoggerAdvisor

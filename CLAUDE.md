@@ -41,7 +41,9 @@ The application follows a **package-by-feature** structure organized around main
     - `AiConfig`: Multi-LLM configuration for Anthropic (chat) and OpenAI (embeddings)
   - `SolrConfig`: Solr client configuration with HttpJdkSolrClient
     - `PromptCacheMetricsAdvisor`: Logs Anthropic prompt caching metrics
-  - Chat Memory: PostgreSQL-backed conversational context, keyed by `conversationId` ("default" when absent)
+  - Chat Memory: PostgreSQL-backed conversational context. `/ask` keys it by `conversationId` ("default" when
+    absent); query generation (`SearchService`, keyword and hybrid search) uses one fixed conversation, "007",
+    shared by all callers
 
 ### Key Dependencies
 
