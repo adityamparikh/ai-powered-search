@@ -27,8 +27,13 @@ import java.nio.charset.StandardCharsets;
  */
 public final class SolrTestContainers {
 
-    /** Solr 10.1 is the first release with the combined query (server-side RRF) feature. */
-    public static final DockerImageName SOLR_IMAGE = DockerImageName.parse("solr:10.1.0");
+    /**
+     * Solr image under test. The combined query (server-side RRF) feature shipped in Solr 10.1
+     * and was backported to 9.11, so both are supported; CI runs the matrix by setting
+     * {@code SOLR_TEST_IMAGE} (e.g. {@code solr:9.11.0}). Defaults to 10.1.
+     */
+    public static final DockerImageName SOLR_IMAGE = DockerImageName.parse(
+            System.getenv().getOrDefault("SOLR_TEST_IMAGE", "solr:10.1.0"));
 
     private static final String HYBRID_HANDLER_CONFIG = """
             {

@@ -7,7 +7,7 @@ application.
 
 The following enhancements have been implemented to leverage native Solr capabilities:
 
-1. **Native RRF (Reciprocal Rank Fusion)** - Hybrid search fused inside Solr (Solr 10.1+)
+1. **Native RRF (Reciprocal Rank Fusion)** - Hybrid search fused inside Solr (Solr 10.1+ or 9.11+)
 2. **Highlighting** - Show users why results matched their query
 3. **Faceting for Semantic/Hybrid Search** - Filter results by categories
 4. **Spell Checking** - Suggest corrections for misspelled queries
@@ -22,7 +22,7 @@ The following enhancements have been implemented to leverage native Solr capabil
 
 - **Before**: Two separate Solr queries (keyword and vector) merged in the application by a
   client-side `RrfMerger`
-- **After**: One request to Solr 10.1's combined query handler (`solr.CombinedQuerySearchHandler`,
+- **After**: One request to Solr's combined query handler (10.1+, backported to 9.11) (`solr.CombinedQuerySearchHandler`,
   SOLR-17319), which runs both legs and fuses them with RRF server-side
 
 ### Benefits
@@ -677,7 +677,7 @@ Note: Some tests may need updates to handle the new response fields (`highlighti
 
 ### RRF Query Failing
 
-- Ensure you're using Solr 9.8 or later
+- Ensure you're using Solr 10.1+ or 9.11+ and that the collection has the `/hybrid` handler
 - Verify the vector field exists in the schema
 - Check that both subqueries are valid independently
 

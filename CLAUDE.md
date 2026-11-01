@@ -16,7 +16,7 @@ The application follows a **package-by-feature** structure organized around main
   - `SearchRepository`: Low-level Solr query execution and field introspection
   - Traditional search: Converts free-text queries into structured Solr queries using Claude AI
   - Semantic search: Uses vector embeddings (OpenAI) for similarity-based retrieval
-  - Hybrid search: Solr-native RRF (Reciprocal Rank Fusion, Solr 10.1 combined query) combining keyword and vector signals
+  - Hybrid search: Solr-native RRF (Reciprocal Rank Fusion, Solr 10.1 combined query, 10.1+ or 9.11+) combining keyword and vector signals
 
 - **Indexing Domain** (`dev.aparikh.aipoweredsearch.indexing`):
   - `IndexController`: REST endpoints for document indexing
@@ -30,7 +30,7 @@ The application follows a **package-by-feature** structure organized around main
   - Handles automatic embedding generation and vector similarity search
 
 - **RRF Fusion** (Solr, not the application):
-    - Solr 10.1's combined query feature (`solr.CombinedQuerySearchHandler`, SOLR-17319) fuses
+    - Solr's combined query feature (10.1+, backported to 9.11) (`solr.CombinedQuerySearchHandler`, SOLR-17319) fuses
       the keyword and vector legs server-side, in one request to the `/hybrid` handler
     - Formula: `score = sum(1 / (k + rank))` with `combiner.rrf.k` (Solr default: 60)
 
@@ -70,7 +70,7 @@ fields at runtime and adapts accordingly.
 
 The application leverages advanced Apache Solr features for enhanced search quality and user experience:
 
-- **Solr-native RRF (Reciprocal Rank Fusion)**: Balanced fusion of keyword and vector search inside Solr (combined query, Solr 10.1+)
+- **Solr-native RRF (Reciprocal Rank Fusion)**: Balanced fusion of keyword and vector search inside Solr (combined query, Solr 10.1+ or 9.11+)
 - **Highlighting**: Shows users why results matched their query
 - **Faceting**: Filter and aggregate results by category, year, etc.
 - **Spell Checking**: "Did you mean...?" suggestions for misspelled queries
@@ -257,7 +257,8 @@ The repository includes several helper scripts for common tasks:
 
 ### External Services
 - **Solr**: Expected at `http://localhost:8983/solr`
-  - Must be Solr 10.1+ (combined query / built-in RRF) with dense vector fields
+  - Must be Solr 10.1+ or 9.11+ (combined query / built-in RRF) with dense vector fields.
+    CI runs the hybrid tests against both (`SOLR_TEST_IMAGE=solr:9.11.0` selects 9.11 locally)
   - Collections must expose the `/hybrid` handler (`solr.CombinedQuerySearchHandler`); the
     project configset in `solr-config/conf` declares it
   - Collections must include vector field with DenseVectorField type
@@ -715,7 +716,7 @@ Vector searches use POST method to avoid "URI too long" errors when sending larg
 ### Hybrid Search with Solr-Native RRF
 
 `executeHybridRerankSearch()` in `SearchRepository` sends **one** JSON request to the collection's
-`/hybrid` handler (`solr.CombinedQuerySearchHandler`, Solr 10.1+, SOLR-17319). Solr runs both legs
+`/hybrid` handler (`solr.CombinedQuerySearchHandler`, Solr 10.1+ and 9.11+, SOLR-17319). Solr runs both legs
 and fuses them with RRF; the application does no merging:
 
 ```json

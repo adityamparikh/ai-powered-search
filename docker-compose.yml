@@ -19,6 +19,8 @@ services:
       retries: 5
 
   solr:
+    # 9.11 also supports hybrid search, but init-solr.sh starts SolrCloud without `-c`
+    # (the default only since Solr 10); add `-c` to its two `solr start` lines to use 9.11.
     image: solr:10.1.0-slim
     container_name: ai-powered-search-solr
     ports:
