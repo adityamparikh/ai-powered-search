@@ -12,6 +12,7 @@ import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
 import org.springframework.ai.chat.client.advisor.SimpleLoggerAdvisor;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.messages.MessageType;
+import org.springframework.ai.model.anthropic.autoconfigure.AnthropicChatProperties;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.openai.OpenAiEmbeddingModel;
@@ -77,23 +78,21 @@ public class AiConfig {
      * options instance, so this bean exposes the builder. Deferring the build lets Spring AI merge
      * per-request options over these defaults instead of replacing them wholesale.</p>
      *
-     * @param cachingEnabled whether prompt caching is enabled
+     * @param chatProperties Spring AI's bound {@code spring.ai.anthropic.chat.*} properties. These
+     *        options are the chat clients' defaults, so they start from every configured chat
+     *        property (model, max tokens, temperature, ...) rather than a fixed model.
      * @param cacheStrategyStr the cache strategy to use
-     * @param model the chat model, from {@code spring.ai.anthropic.chat.options.model}. These options
-     *        are the chat clients' defaults, so they must carry the configured model, not a fixed one.
      * @return configured AnthropicChatOptions builder
      */
     @Bean
     @ConditionalOnProperty(name = "spring.ai.anthropic.prompt-caching.enabled", havingValue = "true", matchIfMissing = true)
     public AnthropicChatOptions.Builder anthropicChatOptionsWithCaching(
-            @Value("${spring.ai.anthropic.prompt-caching.enabled:true}") boolean cachingEnabled,
-            @Value("${spring.ai.anthropic.prompt-caching.strategy:SYSTEM_AND_TOOLS}") String cacheStrategyStr,
-            @Value("${spring.ai.anthropic.chat.options.model:claude-sonnet-4-5}") String model) {
+            AnthropicChatProperties chatProperties,
+            @Value("${spring.ai.anthropic.prompt-caching.strategy:SYSTEM_AND_TOOLS}") String cacheStrategyStr) {
 
         AnthropicCacheStrategy cacheStrategy = AnthropicCacheStrategy.valueOf(cacheStrategyStr);
 
-        AnthropicChatOptions.Builder builder = AnthropicChatOptions.builder();
-        builder.model(model);
+        AnthropicChatOptions.Builder builder = chatProperties.toOptions().mutate();
         builder.cacheOptions(AnthropicCacheOptions.builder()
                 .strategy(cacheStrategy)
                 .messageTypeTtl(MessageType.SYSTEM, AnthropicCacheTtl.ONE_HOUR)
