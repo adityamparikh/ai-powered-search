@@ -8,6 +8,9 @@ This is an AI-powered search application built with Spring Boot 4.1.1 and Java 2
 
 ### Core Architecture
 
+Mermaid diagrams of the components and of the hybrid search, `/ask` and indexing flows are in
+[docs/architecture.md](docs/architecture.md). Update them when a request path changes.
+
 The application follows a **package-by-feature** structure organized around main domains:
 
 - **Search Domain** (`dev.aparikh.aipoweredsearch.search`):
@@ -38,7 +41,7 @@ The application follows a **package-by-feature** structure organized around main
     - `AiConfig`: Multi-LLM configuration for Anthropic (chat) and OpenAI (embeddings)
   - `SolrConfig`: Solr client configuration with HttpJdkSolrClient
     - `PromptCacheMetricsAdvisor`: Logs Anthropic prompt caching metrics
-  - Chat Memory: PostgreSQL-backed conversational context with conversation ID "007"
+  - Chat Memory: PostgreSQL-backed conversational context, keyed by `conversationId` ("default" when absent)
 
 ### Key Dependencies
 
