@@ -23,27 +23,26 @@ import org.springframework.context.annotation.Primary;
 
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.CopyOnWriteArrayList;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * {@code search.rag.rerank.provider=jev} against a TypeSafe API that cannot be reached: Jev reranks
- * instead of Claude, cannot score, keeps the candidates in retrieval order, and {@code /ask} still
- * answers. Needs no API keys: the chat model is a stub and the retriever returns fixed documents.
+ * Decision-model screening switched on with the TypeSafe provider (Jev), against a TypeSafe API
+ * that cannot be reached: the filter
+ * runs, cannot screen, and passes every candidate through, so {@code /ask} still answers with the
+ * full context. Needs no API keys: the chat model is a stub and the retriever returns fixed documents.
  */
 @SpringBootTest(properties = {
         "spring.ai.openai.api-key=test-key",
-        "search.rag.rerank.provider=jev",
+        "search.rag.decisions.enabled=true",
         "spring.ai.typesafe.api-key=test-key",
         "spring.ai.typesafe.base-url=http://127.0.0.1:9",
         "spring.ai.typesafe.timeout=1s"})
-@Import({PostgresTestConfiguration.class, SolrTestConfiguration.class, JevRerankingIT.StubModels.class})
+@Import({PostgresTestConfiguration.class, SolrTestConfiguration.class, TypeSafeDecisionsScreeningIT.StubModels.class})
 @ExtendWith(OutputCaptureExtension.class)
-class JevRerankingIT {
+class TypeSafeDecisionsScreeningIT {
 
-    static final List<String> RETRIEVED = List.of("grrm-01", "grrm-02", "grrm-03");
-    static final List<String> PROMPTS = new CopyOnWriteArrayList<>();
+    static final List<String> RETRIEVED = List.of("grrm-01", "inj-01", "grrm-02");
 
     @TestConfiguration(proxyBeanMethods = false)
     static class StubModels {
@@ -51,10 +50,7 @@ class JevRerankingIT {
         @Bean
         @Primary
         ChatModel stubChatModel() {
-            return prompt -> {
-                PROMPTS.add(prompt.getContents());
-                return new ChatResponse(List.of(new Generation(new AssistantMessage("stub answer"))));
-            };
+            return prompt -> new ChatResponse(List.of(new Generation(new AssistantMessage("stub answer"))));
         }
 
         @Bean
@@ -73,12 +69,12 @@ class JevRerankingIT {
     private SearchService searchService;
 
     @Test
-    void jevRerankingReplacesClaudeAndFallsBackToRetrievalOrder(CapturedOutput output) {
-        AskResponse response = searchService.ask(new AskRequest("A Clash of Kings", "jev-rerank"));
+    void anUnreachableTypeSafeApiPassesEveryCandidateThrough(CapturedOutput output) {
+        AskResponse response = searchService.ask(new AskRequest("A Clash of Kings", "jev-unreachable"));
 
-        assertThat(output).contains("Jev could not score 3 of 3 passages");
-        assertThat(PROMPTS).noneMatch(prompt -> prompt.startsWith("Rank the following documents"));
+        assertThat(output).contains("Jev could not screen 3 of 3 passages");
         assertThat(response.answer()).isEqualTo("stub answer");
+        // The stub's reply is not a ranking, so the reranker keeps the order it was given.
         assertThat(response.sources()).containsExactlyElementsOf(RETRIEVED);
     }
 }

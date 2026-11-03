@@ -3,8 +3,6 @@ package dev.aparikh.aipoweredsearch.config;
 import com.anthropic.models.messages.Model;
 import dev.aparikh.aipoweredsearch.search.HybridDocumentRetriever;
 import dev.aparikh.aipoweredsearch.search.RerankingDocumentPostProcessor;
-import org.springaicommunity.typesafe.rag.JevDocumentFilter;
-import org.springaicommunity.typesafe.rag.JevDocumentReranker;
 import org.springframework.ai.anthropic.AnthropicCacheOptions;
 import org.springframework.ai.anthropic.AnthropicCacheStrategy;
 import org.springframework.ai.anthropic.AnthropicCacheTtl;
@@ -61,6 +59,12 @@ import java.util.List;
 public class AiConfig {
 
     private static final Logger log = LoggerFactory.getLogger(AiConfig.class);
+
+    /** Bean name of a decisions provider's passage filter, see {@link TypeSafeDecisionsConfig}. */
+    public static final String DECISIONS_FILTER = "decisionsFilter";
+
+    /** Bean name of a decisions provider's reranker, see {@link TypeSafeDecisionsConfig}. */
+    public static final String DECISIONS_RERANKER = "decisionsReranker";
 
     /** Query-context key under which a follow-up's standalone rewrite reaches the post-processors. */
     static final String STANDALONE_QUERY = "rag.standalone";
@@ -225,9 +229,10 @@ public class AiConfig {
      * @param chatOptions the chat options with caching configured (optional, may be null if caching disabled)
      * @param reranker the reranking post-processor, absent when {@code search.rag.rerank.enabled=false}
      * @param queryTransformer rewrites each question into a standalone query using the conversation
-     * @param jevFilter the optional TypeSafe Jev passage filter, see {@link JevConfig}
-     * @param jevReranker the TypeSafe Jev reranker, used instead of {@code reranker} when present
-     * @param rerankProvider {@code search.rag.rerank.provider}: {@code claude} (default) or {@code jev}
+     * @param decisionsFilter a decisions provider's passage filter, present with {@code search.rag.decisions.enabled=true}
+     * @param decisionsReranker a decisions provider's reranker, used instead of {@code reranker} when present
+     * @param decisionsEnabled {@code search.rag.decisions.enabled}
+     * @param rerankProvider {@code search.rag.rerank.provider}: {@code claude} (default) or {@code decisions}
      * @return configured ChatClient instance with RAG capabilities
      */
     @Bean
@@ -238,8 +243,9 @@ public class AiConfig {
                                     @Autowired(required = false) @Qualifier("anthropicChatOptionsWithCaching") AnthropicChatOptions.@Nullable Builder chatOptions,
                                     @Autowired(required = false) @Nullable RerankingDocumentPostProcessor reranker,
                                     QueryTransformer queryTransformer,
-                                    @Autowired(required = false) @Nullable JevDocumentFilter jevFilter,
-                                    @Autowired(required = false) @Nullable JevDocumentReranker jevReranker,
+                                    @Autowired(required = false) @Qualifier(DECISIONS_FILTER) @Nullable DocumentPostProcessor decisionsFilter,
+                                    @Autowired(required = false) @Qualifier(DECISIONS_RERANKER) @Nullable DocumentPostProcessor decisionsReranker,
+                                    @Value("${search.rag.decisions.enabled:false}") boolean decisionsEnabled,
                                     @Value("${search.rag.rerank.provider:claude}") String rerankProvider) {
         ChatClient.Builder builder = ChatClient.builder(chatModel);
 
@@ -270,24 +276,30 @@ public class AiConfig {
                                         .flatMap(List::stream)
                                         .toList());
 
-        // Post-processing decides which candidates actually reach the prompt. The optional Jev
+        // Post-processing decides which candidates actually reach the prompt. The optional decisions
         // filter screens them first, so the reranker only reads passages that survived screening.
         // Each stage judges a follow-up's standalone rewrite rather than the raw follow-up.
         // Reranking is absent when search.rag.rerank.enabled=false.
         List<DocumentPostProcessor> postProcessors = new ArrayList<>(2);
-        if (jevFilter != null) {
-            postProcessors.add(judgedAgainstTheRewrite(jevFilter));
+        if (decisionsFilter != null) {
+            postProcessors.add(judgedAgainstTheRewrite(decisionsFilter));
+        } else if (decisionsEnabled) {
+            // Screening was asked for; serving unscreened passages must not go unnoticed.
+            log.warn("search.rag.decisions.enabled=true but no decisions provider is configured, so retrieved "
+                    + "passages are NOT screened. The 'typesafe' provider needs spring.ai.typesafe.api-key "
+                    + "(TYPESAFE_API_KEY; any placeholder for a local model such as Laya)");
         }
-        // Reranking is Claude's unless search.rag.rerank.provider=jev selected Jev (with a key).
-        DocumentPostProcessor rerank = jevReranker != null ? jevReranker : reranker;
-        if (jevReranker == null && !"claude".equalsIgnoreCase(rerankProvider.strip())) {
-            log.warn("search.rag.rerank.provider={} needs 'jev' and spring.ai.typesafe.api-key; reranking with Claude",
-                    rerankProvider);
+        // Reranking is Claude's unless search.rag.rerank.provider=decisions selected a decisions reranker.
+        DocumentPostProcessor rerank = decisionsReranker != null ? decisionsReranker : reranker;
+        if (decisionsReranker == null && !"claude".equalsIgnoreCase(rerankProvider.strip())) {
+            log.warn("search.rag.rerank.provider={} has no decisions reranker (use 'decisions' with a configured "
+                    + "decisions provider); reranking with Claude", rerankProvider);
         }
         if (rerank != null) {
             postProcessors.add(judgedAgainstTheRewrite(rerank));
         }
-        log.info("RAG post-processors: Jev filter {}, reranker {}", jevFilter != null ? "on" : "off",
+        log.info("RAG post-processors: decisions filter {}, reranker {}",
+                decisionsFilter == null ? "off" : decisionsFilter.getClass().getSimpleName(),
                 rerank == null ? "off" : rerank.getClass().getSimpleName());
         if (!postProcessors.isEmpty()) {
             ragAdvisor.documentPostProcessors(postProcessors);

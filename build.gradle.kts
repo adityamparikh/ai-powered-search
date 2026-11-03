@@ -40,9 +40,9 @@ dependencies {
     implementation("org.springframework.ai:spring-ai-vector-store-advisor")
     // Modular RAG: RetrievalAugmentationAdvisor, DocumentRetriever, DocumentJoiner
     implementation("org.springframework.ai:spring-ai-rag")
-    // TypeSafe Jev: optional passage screening for RAG (search.rag.jev.enabled). Pre-1.0 community
+    // TypeSafe: the 'typesafe' decisions provider for RAG (search.rag.decisions.*). Pre-1.0 community
     // releases. The starter auto-configures TypeSafeClient only when spring.ai.typesafe.api-key is set;
-    // JevDocumentFilter is in typesafe-spring-ai.
+    // JevDocumentFilter and JevDocumentReranker are in typesafe-spring-ai.
     implementation("org.springaicommunity:spring-ai-starter-typesafe:$typesafeVersion")
     implementation("org.springaicommunity:typesafe-spring-ai:$typesafeVersion")
     implementation("org.postgresql:postgresql")
