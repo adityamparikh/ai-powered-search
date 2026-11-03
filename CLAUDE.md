@@ -47,7 +47,7 @@ The application follows a **package-by-feature** structure organized around main
 
 ### Key Dependencies
 
-- **Spring Boot 4.1.1** with Spring AI 2.0.1
+- **Spring Boot 4.1.1** with Spring AI 2.0.2
 - **Anthropic Claude AI** (claude-sonnet-5-5) for query generation and chat
 - **OpenAI** (text-embedding-3-small) for vector embeddings (1536 dimensions)
 - **SolrJ 10.1.0** client against **Apache Solr 10.1.0** server, with dense vector support and
@@ -337,7 +337,7 @@ Controllers declare the version segment as a URI variable and the version as a m
 
 The `SolrVectorStore` is a custom implementation that:
 
-- Extends `AbstractObservationVectorStore` from Spring AI 2.0.1
+- Extends `AbstractObservationVectorStore` from Spring AI 2.0.2
 - Implements the `VectorStore` interface for document storage and similarity search
 - Uses Solr's `DenseVectorField` type for KNN (K-Nearest Neighbors) search with HNSW algorithm
 - Supports cosine similarity metric for vector comparison
