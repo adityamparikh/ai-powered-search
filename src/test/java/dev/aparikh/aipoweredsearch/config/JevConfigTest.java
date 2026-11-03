@@ -6,6 +6,7 @@ import org.springaicommunity.typesafe.autoconfigure.TypeSafeAutoConfiguration;
 import org.springaicommunity.typesafe.rag.JevDocumentFilter;
 import org.springaicommunity.typesafe.rag.JevDocumentReranker;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
+import org.springframework.boot.test.context.ConfigDataApplicationContextInitializer;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -57,5 +58,30 @@ class JevConfigTest {
         runner.withPropertyValues("search.rag.rerank.provider=jev", "spring.ai.typesafe.api-key=test-key",
                         "search.rag.rerank.enabled=false")
                 .run(context -> assertThat(context).doesNotHaveBean(JevDocumentReranker.class));
+    }
+
+    /** Like the application: application.properties is loaded, so its key mapping applies. */
+    private final ApplicationContextRunner withApplicationProperties = runner
+            .withInitializer(new ConfigDataApplicationContextInitializer());
+
+    @Test
+    void theTypeSafeApiKeyEnvironmentVariableEnablesJev() {
+        withApplicationProperties.withPropertyValues("TYPESAFE_API_KEY=test-key", "search.rag.jev.enabled=true")
+                .run(context -> {
+                    assertThat(context).hasSingleBean(TypeSafeClient.class);
+                    assertThat(context).hasSingleBean(JevDocumentFilter.class);
+                });
+    }
+
+    @Test
+    void falseIsWhatAnUnsetKeyResolvesToAndKeepsTypeSafeOff() {
+        // application.properties maps the key to ${TYPESAFE_API_KEY:false}. An empty default would
+        // activate the starter and fail startup; "false" leaves its condition, and JevConfig's, unmatched.
+        runner.withPropertyValues("spring.ai.typesafe.api-key=false", "search.rag.jev.enabled=true")
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    assertThat(context).doesNotHaveBean(TypeSafeClient.class);
+                    assertThat(context).doesNotHaveBean(JevDocumentFilter.class);
+                });
     }
 }

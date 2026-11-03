@@ -252,6 +252,7 @@ The repository includes several helper scripts for common tasks:
 - `ANTHROPIC_PROMPT_CACHING_ENABLED`: Enable Anthropic prompt caching (defaults to 'true')
 - `ANTHROPIC_PROMPT_CACHING_STRATEGY`: Cache strategy (defaults to 'SYSTEM_AND_TOOLS')
 - `OPENAI_API_KEY`: Required for OpenAI embeddings (vector search and indexing)
+- `TYPESAFE_API_KEY`: Optional; needed only for the opt-in TypeSafe Jev screening and reranking
 - `POSTGRES_USER`: PostgreSQL username (defaults to 'postgres')
 - `POSTGRES_PASSWORD`: PostgreSQL password (defaults to 'postgres')
 
@@ -824,10 +825,11 @@ public ChatClient ragChatClient(ChatModel chatModel,
 - **TypeSafe Jev screening (opt-in)**: `search.rag.jev.enabled=true` adds `JevDocumentFilter` before
   the reranker, screening candidates for prompt injection, contradiction, relevance and answer
   evidence. Off by default: it sends passages and the question to TypeSafe's hosted API, one call per
-  passage, which adds latency. Requires `spring.ai.typesafe.api-key` (`SPRING_AI_TYPESAFE_API_KEY`);
-  the starter auto-configures `TypeSafeClient` only when that key is set, so it must not be declared
-  empty in `application.properties`. Without a key the filter is not created (`JevConfig`). A
-  passage Jev cannot screen is passed through with a WARN.
+  passage, which adds latency. Requires `TYPESAFE_API_KEY`, which `application.properties` maps to
+  `spring.ai.typesafe.api-key=${TYPESAFE_API_KEY:false}`. The starter auto-configures `TypeSafeClient`
+  only when that property is present and not `false`, and an empty key fails startup, so an unset
+  variable resolves to `false` and TypeSafe stays off. Without a key the filter is not created
+  (`JevConfig`). A passage Jev cannot screen is passed through with a WARN.
 - **TypeSafe Jev reranking (opt-in)**: `search.rag.rerank.provider=jev` (with the same key) replaces the
   Claude reranker with `JevDocumentReranker`, which scores each passage on "could this answer the
   query?" and keeps the `search.rag.rerank.top-k` best. It discards only passages scoring below
