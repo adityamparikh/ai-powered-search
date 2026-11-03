@@ -226,10 +226,9 @@ metadata_category:AI
 ```
 
 ### Conversation Memory
-- **ID:** "007" (hardcoded, constant across all searches)
+- **Scope:** `/ask` only, keyed by the request's `conversationId` ("default" when absent)
 - **Storage:** PostgreSQL JDBC repository
-- **Purpose:** Maintains context across multiple search requests
-- **Advisors:** MessageChatMemoryAdvisor + SimpleLoggerAdvisor
+- **Search query generation:** stateless (no memory advisor); it previously shared a hardcoded "007" conversation across all callers
 
 ### Similarity Threshold Filtering
 - Applied AFTER query (post-query filtering)

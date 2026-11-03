@@ -68,7 +68,7 @@ Apache Solr search with AI-driven query generation and semantic vector search. B
 - **IndexService**: Handles document indexing with automatic embedding generation
 - **SearchService**: Orchestrates both semantic and keyword search
 - **SearchRepository**: Solr query execution and schema introspection
-- **Chat Memory**: PostgreSQL-backed conversation history (conversation ID: "007")
+- **Chat Memory**: PostgreSQL-backed conversation history for `/ask`, keyed by the request's `conversationId` (`"default"` when none is given). Search query generation is stateless.
 
 ## 📋 Prerequisites
 
