@@ -17,57 +17,68 @@ Apache Solr search with AI-driven query generation and semantic vector search. B
 
 ### System Overview
 
+```mermaid
+flowchart TB
+    client([Client])
+
+    subgraph app["Spring Boot application"]
+        direction TB
+        IC[IndexController]
+        SC[SearchController]
+        IS[IndexService]
+        SS[SearchService]
+        SR[SearchRepository]
+        VS["SolrVectorStore<br/>(Spring AI VectorStore)"]
+        RAG["ragChatClient<br/>RetrievalAugmentationAdvisor"]
+        HDR[HybridDocumentRetriever]
+        RR["RerankingDocumentPostProcessor<br/>(optional)"]
+        EMB[EmbeddingService]
+    end
+
+    subgraph solr["Apache Solr 10.1+ / 9.11+ (SolrCloud)"]
+        direction TB
+        SEL["/select<br/>keyword, kNN"]
+        HYB["/hybrid<br/>CombinedQuerySearchHandler<br/>(server-side RRF)"]
+        UPD["/update"]
+    end
+
+    openai[["OpenAI<br/>text-embedding-3-small"]]
+    claude[["Anthropic Claude"]]
+    pg[("PostgreSQL<br/>chat memory")]
+
+    client -->|"POST /api/v1/index/{c}[/batch]"| IC --> IS --> VS
+    client -->|"GET /api/v1/search/{c}, /semantic, /hybrid<br/>POST /api/v1/search/ask"| SC --> SS
+
+    SS -->|keyword| SR
+    SS -->|semantic| VS
+    SS -->|hybrid| SR
+    SS -->|ask| RAG
+    SS -->|"query generation<br/>(keyword, hybrid)"| claude
+
+    RAG --> HDR --> SR
+    RAG --> RR --> claude
+    RAG -->|answer| claude
+    RAG <-->|"history (per conversationId)"| pg
+
+    SR -->|keyword search| SEL
+    SR -->|"hybrid: one combined query"| HYB
+    SR -.->|fallback| SEL
+    SR --> EMB --> openai
+    VS --> openai
+    VS -->|kNN| SEL
+    VS -->|add| UPD
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                        Client Application                        │
-└───────────────┬─────────────────────────┬──────────────────────┘
-                │                         │
-        Indexing API              Search API
-                │                         │
-    ┌───────────▼──────────┐   ┌─────────▼────────────┐
-    │  IndexController     │   │  SearchController    │
-    │  - Single document   │   │  - Semantic search   │
-    │  - Batch indexing    │   │  - Keyword search    │
-    └───────────┬──────────┘   └─────────┬────────────┘
-                │                        │
-    ┌───────────▼──────────┐   ┌─────────▼────────────┐
-    │   IndexService       │   │   SearchService      │
-    │  - Auto embeddings   │   │  - Query generation  │
-    └───────────┬──────────┘   └─────────┬────────────┘
-                │                        │
-                │              ┌─────────▼────────────┐
-                │              │  SearchRepository    │
-                │              │  - Schema retrieval  │
-                │              └─────────┬────────────┘
-                │                        │
-    ┌───────────▼────────────────────────▼────────────┐
-    │           SolrVectorStore (Spring AI)           │
-    │  - Embedding integration                        │
-    │  - Vector similarity search                     │
-    │  - Document persistence                         │
-    └───────────┬─────────────────────────────────────┘
-                │
-    ┌───────────▼──────────┐   ┌──────────────────────┐
-    │  OpenAI Embeddings   │   │  Anthropic Claude    │
-    │  text-embedding-3-   │   │  claude-sonnet-5-5   │
-    │  small (1536-dim)    │   │  Query generation    │
-    └──────────────────────┘   └──────────────────────┘
-                │
-    ┌───────────▼──────────────────────────────────────┐
-    │        Apache Solr 10.1.0 + ZooKeeper            │
-    │  - DenseVectorField (HNSW, cosine)              │
-    │  - KNN search                                    │
-    │  - Typed schema fields                           │
-    │  - PostgreSQL (chat memory)                      │
-    └──────────────────────────────────────────────────┘
-```
+
+Sequence diagrams for hybrid search, RAG (`/ask`) and indexing are in
+[docs/architecture.md](docs/architecture.md).
 
 ### Key Components
 
-- **SolrVectorStore**: Custom Spring AI vector store implementation for Solr
+- **SolrVectorStore**: Custom Spring AI vector store implementation for Solr (indexing and semantic search)
 - **IndexService**: Handles document indexing with automatic embedding generation
-- **SearchService**: Orchestrates both semantic and keyword search
-- **SearchRepository**: Solr query execution and schema introspection
+- **SearchService**: Orchestrates keyword, semantic and hybrid search, and RAG (`/ask`)
+- **SearchRepository**: Solr query execution, hybrid search via Solr's `/hybrid` combined query (RRF), and schema introspection
+- **HybridDocumentRetriever** and **RerankingDocumentPostProcessor**: retrieval and optional reranking for `/ask`
 - **Chat Memory**: PostgreSQL-backed conversation history for `/ask`, keyed by the request's `conversationId` (`"default"` when none is given). Search query generation is stateless.
 
 ## 📋 Prerequisites

@@ -233,8 +233,9 @@ public class AiConfig {
                                         .build())
                                 // Pass-through joiner. The default ConcatenationDocumentJoiner
                                 // re-sorts documents by their individual score, which would undo
-                                // the RRF ranking the retriever just computed — our score IS the
-                                // fused RRF value and is not comparable across retrieval strategies.
+                                // the RRF order Solr returned. Hybrid documents carry no score
+                                // (Solr's per-document score in combined mode is a raw per-leg
+                                // score, not the fused one), so list order is the only ranking.
                                 .documentJoiner(documentsForQuery -> documentsForQuery.values().stream()
                                         .flatMap(List::stream)
                                         .flatMap(List::stream)

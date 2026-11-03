@@ -8,6 +8,9 @@ This is an AI-powered search application built with Spring Boot 4.1.1 and Java 2
 
 ### Core Architecture
 
+Mermaid diagrams of the components and of the hybrid search, `/ask` and indexing flows are in
+[docs/architecture.md](docs/architecture.md). Update them when a request path changes.
+
 The application follows a **package-by-feature** structure organized around main domains:
 
 - **Search Domain** (`dev.aparikh.aipoweredsearch.search`):
@@ -633,13 +636,11 @@ When using both Anthropic and OpenAI, Spring AI cannot auto-configure `ChatClien
 in `AiConfig`:
 ```java
 @Bean
-@Qualifier("searchChatClient")
-public ChatClient chatClient(
-        ChatModel chatModel,
-    ChatMemory chatMemory
-) {
+public ChatClient searchChatClient(ChatModel chatModel, ...) {
+    // Stateless: query generation keeps no chat memory. Only ragChatClient (/ask) has a
+    // MessageChatMemoryAdvisor, keyed by the request's conversationId.
     return ChatClient.builder(chatModel)
-        .defaultAdvisors(new MessageChatMemoryAdvisor(chatMemory))
+        .defaultAdvisors(SimpleLoggerAdvisor.builder().build(), ...)
         .build();
 }
 ```
