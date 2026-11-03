@@ -12,6 +12,7 @@ import org.springframework.ai.rag.Query;
 import org.springframework.ai.rag.advisor.RetrievalAugmentationAdvisor;
 import org.springframework.ai.rag.generation.augmentation.ContextualQueryAugmenter;
 import org.springframework.ai.rag.preretrieval.query.expansion.QueryExpander;
+import org.springframework.ai.rag.preretrieval.query.transformation.QueryTransformer;
 import org.springframework.ai.rag.retrieval.search.DocumentRetriever;
 
 import java.util.HashMap;
@@ -87,6 +88,30 @@ class RetrievalAugmentationAdvisorContractTest {
                 "Try A Game of Thrones by George R.R. Martin.",
                 "Anything cheaper by the same author?");
         assertThat(original.context()).containsEntry(ChatMemory.CONVERSATION_ID, "conversation-1");
+    }
+
+    @Test
+    void aTransformerCanHandDataToPostProcessorsThroughTheOriginalQueryContext() {
+        // AiConfig's query rewrite relies on this: the first transformer is given the original query
+        // itself, so its context write reaches the post-processors, which still get the original text.
+        QueryTransformer handOff = query -> {
+            query.context().put(STANDALONE_KEY, STANDALONE_TEXT);
+            return query.mutate().text(STANDALONE_TEXT).build();
+        };
+        RetrievalAugmentationAdvisor.builder()
+                .queryTransformers(handOff)
+                .documentRetriever(recordingRetriever)
+                .documentPostProcessors((query, documents) -> {
+                    postProcessed.set(query);
+                    return documents;
+                })
+                .queryAugmenter(ContextualQueryAugmenter.builder().allowEmptyContext(true).build())
+                .build()
+                .before(twoTurnRequest(), null);
+
+        assertThat(retrieved.get().text()).isEqualTo(STANDALONE_TEXT);
+        assertThat(postProcessed.get().text()).isEqualTo("Anything cheaper by the same author?");
+        assertThat(postProcessed.get().context()).containsEntry(STANDALONE_KEY, STANDALONE_TEXT);
     }
 
     @Test
