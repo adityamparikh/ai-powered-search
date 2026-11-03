@@ -25,6 +25,7 @@ import org.springframework.ai.rag.postretrieval.document.DocumentPostProcessor;
 import org.springframework.ai.rag.preretrieval.query.transformation.CompressionQueryTransformer;
 import org.springframework.ai.rag.preretrieval.query.transformation.QueryTransformer;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.config.BeanPostProcessor;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
@@ -62,6 +63,24 @@ public class AiConfig {
 
     /** Query-context key under which a follow-up's standalone rewrite reaches the post-processors. */
     static final String STANDALONE_QUERY = "rag.standalone";
+
+    /**
+     * Wraps every {@link ChatModel} so a thinking block cannot hide the answer; see
+     * {@link ThinkingFilteringChatModel}. Done in a post-processor, not on one chat client, so
+     * Spring AI's own callers of the model (the query rewrite, for one) are covered too.
+     */
+    @Bean
+    static BeanPostProcessor thinkingFilteringChatModelPostProcessor() {
+        return new BeanPostProcessor() {
+            @Override
+            public Object postProcessAfterInitialization(Object bean, String beanName) {
+                if (bean instanceof ChatModel chatModel && !(bean instanceof ThinkingFilteringChatModel)) {
+                    return new ThinkingFilteringChatModel(chatModel);
+                }
+                return bean;
+            }
+        };
+    }
 
     /**
      * Creates default AnthropicChatOptions with prompt caching enabled.

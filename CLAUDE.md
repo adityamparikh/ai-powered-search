@@ -648,6 +648,19 @@ public ChatClient searchChatClient(ChatModel chatModel, ...) {
 
 **Note**: The configuration class is `AiConfig.java`, not `SpringAiConfig`.
 
+### Thinking Blocks (Claude 5 models)
+
+Claude 5 models think by default, and Spring AI returns each thinking block as its own `Generation`
+*ahead of* the answer, with blank text. `ChatResponse.getResult()`, and so `ChatClient...content()`
+and `...entity()`, reads the first generation: without a guard, `/ask` answers come back blank and
+query generation fails to parse. `ThinkingFilteringChatModel` (wired by a `BeanPostProcessor` in
+`AiConfig`) drops blank, tool-call-free generations when another generation has text.
+
+It is a response-side filter on purpose. Turning thinking off is model-specific (`sonnet-5-5` accepts
+only `thinking.type=between_tools`, `haiku-5-5` only `disabled`, `opus-5-5` and `fable-5-1` cannot be
+turned off, and the 4.x models reject `between_tools`), so a request-side switch would need a table
+that goes stale. Thinking tokens and latency are therefore still spent.
+
 ### Vector Store Builder Pattern
 `SolrVectorStore` uses the builder pattern extending `AbstractVectorStoreBuilder`:
 ```java
