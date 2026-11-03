@@ -47,7 +47,7 @@ export POSTGRES_PASSWORD="postgres"
 spring.ai.vectorstore.solr.host=http://localhost:8983/solr
 
 # AI Models
-spring.ai.anthropic.chat.options.model=claude-sonnet-4-5
+spring.ai.anthropic.chat.model=claude-sonnet-5-5
 spring.ai.openai.embedding.options.model=text-embedding-3-small
 
 # Database

@@ -117,6 +117,7 @@ class PromptCacheMetricsAdvisorIT {
 
         // When - First request (cache miss expected)
         ChatResponse response = chatClient.prompt()
+                .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, TEST_CONVERSATION_ID))
                 .system("You are a helpful math assistant. Always provide concise answers.")
                 .user(question)
                 .call()
@@ -189,6 +190,7 @@ class PromptCacheMetricsAdvisorIT {
         // When - First request (cache miss)
         logAppender.list.clear();
         ChatResponse response1 = chatClient.prompt()
+                .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, TEST_CONVERSATION_ID))
                 .system(systemPrompt)
                 .user(question1)
                 .call()
@@ -205,6 +207,7 @@ class PromptCacheMetricsAdvisorIT {
         logAppender.list.clear();
         String question2 = "What is the capital of Germany?";
         ChatResponse response2 = chatClient.prompt()
+                .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, TEST_CONVERSATION_ID))
                 .system(systemPrompt)
                 .user(question2)
                 .call()
@@ -267,6 +270,7 @@ class PromptCacheMetricsAdvisorIT {
 
         // When - First request
         chatClient.prompt()
+                .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, TEST_CONVERSATION_ID))
                 .system(systemPrompt)
                 .user(question1)
                 .call()
@@ -283,6 +287,7 @@ class PromptCacheMetricsAdvisorIT {
         logAppender.list.clear();
         String question2 = "What is a composite number?";
         ChatResponse response = chatClient.prompt()
+                .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, TEST_CONVERSATION_ID))
                 .system(systemPrompt)
                 .user(question2)
                 .call()
@@ -343,6 +348,7 @@ class PromptCacheMetricsAdvisorIT {
             logAppender.list.clear();
 
             ChatResponse response = chatClient.prompt()
+                    .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, TEST_CONVERSATION_ID))
                     .system(systemPrompt)
                     .user(questions[i])
                     .call()
@@ -401,6 +407,7 @@ class PromptCacheMetricsAdvisorIT {
         // When - Make a request
         logAppender.list.clear();
         ChatResponse response = chatClient.prompt()
+                .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, TEST_CONVERSATION_ID))
                 .system(systemPrompt)
                 .user(question)
                 .call()

@@ -597,7 +597,7 @@ spring.ai.vectorstore.solr.host=http://localhost:8983/solr
 
 # Anthropic Claude Configuration
 spring.ai.anthropic.api-key=${ANTHROPIC_API_KEY}
-spring.ai.anthropic.chat.options.model=claude-sonnet-4-5
+spring.ai.anthropic.chat.model=claude-sonnet-5-5
 # Anthropic Prompt Caching (90% cost reduction on cache hits)
 spring.ai.anthropic.prompt-caching.enabled=${ANTHROPIC_PROMPT_CACHING_ENABLED:true}
 spring.ai.anthropic.prompt-caching.strategy=${ANTHROPIC_PROMPT_CACHING_STRATEGY:SYSTEM_AND_TOOLS}
