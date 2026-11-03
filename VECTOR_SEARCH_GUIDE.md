@@ -1,5 +1,11 @@
 # Vector Search Implementation Guide
 
+> **Note:** hybrid search no longer fuses results in the application. Since the upgrade to
+> Solr 10.1, `SearchRepository.executeHybridRerankSearch()` sends a single combined query to
+> Solr's `/hybrid` handler and Solr performs the RRF fusion. `RrfMerger` has been removed;
+> references to it below are historical. See `SOLR_ENHANCEMENTS.md` §1.
+
+
 This guide provides comprehensive documentation on the vector store implementation, semantic search, and indexing capabilities in the AI-Powered Search application.
 
 ## Table of Contents

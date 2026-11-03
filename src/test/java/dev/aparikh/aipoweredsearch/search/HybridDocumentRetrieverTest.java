@@ -85,23 +85,19 @@ class HybridDocumentRetrieverTest {
     }
 
     @Test
-    void carriesRrfProvenanceIntoDocumentMetadata() {
+    void keepsOnlyMetadataFieldsInDocumentMetadata() {
         stubHybridResults(List.of(
                 solrDoc("doc-1", "content", Map.of(
-                        "rrf_score", 0.032,
-                        "keyword_rank", 1,
-                        "vector_rank", 2,
-                        "keyword_score", 8.4,
-                        "vector_score", 0.91))));
+                        "metadata_author", "Craig",
+                        "score", 0.91,
+                        "_version_", 42L))));
 
         List<Document> documents = retriever.retrieve(Query.builder().text("q").build());
 
-        // RRF discards raw scores by construction; keeping the provenance is what makes
-        // "why was this chunk in the prompt?" answerable after the fact.
+        // Solr's per-document score in a combined (RRF) query is a raw per-leg score, not the
+        // fused one, so it must not leak into the context as if it meant something.
         assertThat(documents.get(0).getMetadata())
-                .containsEntry("rrf_score", 0.032)
-                .containsEntry("keyword_rank", 1)
-                .containsEntry("vector_rank", 2);
+                .containsOnlyKeys("author");
     }
 
     @Test

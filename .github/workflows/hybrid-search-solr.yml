@@ -1,0 +1,39 @@
+name: Hybrid search on Solr
+
+# Hybrid search relies on Solr's combined query (server-side RRF), available in Solr 10.1
+# and 9.11. Run the keyless Solr tests against both. No API keys are needed: the embedding
+# and chat models are mocked, and tests that need real keys skip themselves.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  solr:
+    name: Solr ${{ matrix.solr }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        solr: ["10.1.0", "9.11.0"]
+    env:
+      SOLR_TEST_IMAGE: solr:${{ matrix.solr }}
+      # Dummy values so the Spring context starts; nothing calls the real APIs.
+      ANTHROPIC_API_KEY: dummy
+      OPENAI_API_KEY: dummy
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 25
+      - uses: gradle/actions/setup-gradle@v5
+      - name: Hybrid search tests
+        run: >
+          ./gradlew test
+          --tests "dev.aparikh.aipoweredsearch.search.SolrHybridSearchIT"
+          --tests "dev.aparikh.aipoweredsearch.search.SearchRepositoryTest"
+          --tests "dev.aparikh.aipoweredsearch.search.SearchRepositoryIT"

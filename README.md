@@ -54,7 +54,7 @@ Apache Solr search with AI-driven query generation and semantic vector search. B
     └──────────────────────┘   └──────────────────────┘
                 │
     ┌───────────▼──────────────────────────────────────┐
-    │         Apache Solr 9.9.0 + ZooKeeper            │
+    │        Apache Solr 10.1.0 + ZooKeeper            │
     │  - DenseVectorField (HNSW, cosine)              │
     │  - KNN search                                    │
     │  - Typed schema fields                           │
@@ -74,7 +74,7 @@ Apache Solr search with AI-driven query generation and semantic vector search. B
 
 - **Java 25** or higher
 - **Docker** and **Docker Desktop** (for Solr, ZooKeeper, and PostgreSQL)
-- **Apache Solr 9.9.0** (provided via Docker)
+- **Apache Solr 10.1.0** (provided via Docker; built-in RRF hybrid search needs Solr 10.1+ or 9.11+)
 - **ZooKeeper 3.9** (provided via Docker)
 - **PostgreSQL 16** (provided via Docker)
 - **Anthropic API Key** (for Claude AI)
@@ -256,7 +256,7 @@ curl "http://localhost:8080/api/v1/search/books/hybrid?query=machine%20learning%
 
 **How it works:**
 
-- Uses Solr's native `{!rrf}` query parser (Solr 9.8+)
+- Uses Solr's built-in RRF combined query (Solr 10.1+ or 9.11+, `/hybrid` handler): one request, fused server-side
 - Combines edismax keyword search on `_text_` field with KNN vector search
 - RRF formula: `score = sum(1 / (k + rank))` balances both signals
 - Schema-agnostic: works with any Solr collection

@@ -70,7 +70,7 @@ class SolrVectorStoreObservationIT {
     void setUp() throws Exception {
         // Create collection and schema idempotently
         try {
-            solrContainer.execInContainer("/opt/solr/bin/solr", "create_collection", "-c", COLLECTION_NAME, "-d", "_default");
+            solrContainer.execInContainer("/opt/solr/bin/solr", "create", "-c", COLLECTION_NAME, "-d", "_default");
         } catch (Exception ignored) {
         }
         try {

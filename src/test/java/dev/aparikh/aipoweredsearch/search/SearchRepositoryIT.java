@@ -102,11 +102,9 @@ class SearchRepositoryIT extends SolrTestBase {
         // RRF combines lexical and semantic search, should return relevant documents
         assertTrue(response.documents().size() > 0, "Should return at least some documents");
 
-        // Verify documents have scores
-        response.documents().forEach(doc -> {
-            assertNotNull(doc.get("id"), "Document should have id");
-            assertNotNull(doc.get("score"), "Document should have RRF score");
-        });
+        // Verify documents have ids (combined-mode per-doc scores are not the fused score,
+        // so the repository does not request them)
+        response.documents().forEach(doc -> assertNotNull(doc.get("id"), "Document should have id"));
     }
 
     @Test
@@ -166,10 +164,10 @@ class SearchRepositoryIT extends SolrTestBase {
         assertNotNull(response);
         assertNotNull(response.documents());
 
-        // Verify only requested fields are returned (plus score which is always included)
+        // Verify only requested fields are returned
         response.documents().forEach(doc -> {
             assertNotNull(doc.get("id"), "id field should be present");
-            assertNotNull(doc.get("score"), "score field should be present");
+            assertTrue(!doc.containsKey("vector"), "unrequested fields should not be returned");
             // Other fields from the CSV should be present if they exist in the document
             assertTrue(doc.containsKey("name") || doc.containsKey("category"),
                     "At least one of the requested fields should be present");
@@ -200,14 +198,9 @@ class SearchRepositoryIT extends SolrTestBase {
         assertNotNull(response);
         assertNotNull(response.documents());
 
-        // Verify all results meet minimum score threshold
-        response.documents().forEach(doc -> {
-            Object scoreObj = doc.get("score");
-            assertNotNull(scoreObj, "Document should have a score");
-            double score = ((Number) scoreObj).doubleValue();
-            assertTrue(score >= minScore,
-                    "Score " + score + " should be >= " + minScore);
-        });
+        // Every test vector is within cosine 0.01 of the query, so the vectorSimilarity leg
+        // keeps all three documents.
+        assertEquals(3, response.documents().size());
     }
 
     @Test
@@ -259,14 +252,12 @@ class SearchRepositoryIT extends SolrTestBase {
         assertNotNull(response.documents());
         assertTrue(response.documents().size() > 0, "Should return results");
 
-        // RRF should prioritize documents that match in both searches
-        // Document with id=1 has "Spring Boot Application" in name field
+        // RRF should prioritize documents that match in both searches.
+        // Document 1 has "Spring Boot Application" in its name and the exact query vector.
         Map<String, Object> firstDoc = response.documents().get(0);
-        assertNotNull(firstDoc.get("score"), "First document should have high RRF score");
-
-        // Verify score is a reasonable RRF value (typically between 0 and some positive number)
-        double score = ((Number) firstDoc.get("score")).doubleValue();
-        assertTrue(score > 0, "RRF score should be positive");
+        assertEquals("1", firstDoc.get("id"));
+        // Solr's per-document score in combined mode is a raw per-leg score, so none is requested.
+        assertTrue(!firstDoc.containsKey("score"), "combined-mode per-doc scores are not fused; none requested");
     }
 
     @Test
@@ -292,15 +283,10 @@ class SearchRepositoryIT extends SolrTestBase {
         assertNotNull(response);
         List<Map<String, Object>> docs = response.documents();
 
-        if (docs.size() > 1) {
-            // Verify results are sorted by score in descending order
-            for (int i = 0; i < docs.size() - 1; i++) {
-                double currentScore = ((Number) docs.get(i).get("score")).doubleValue();
-                double nextScore = ((Number) docs.get(i + 1).get("score")).doubleValue();
-                assertTrue(currentScore >= nextScore,
-                        "Results should be sorted by RRF score in descending order");
-            }
-        }
+        // _default never populates _text_, so only the vector leg contributes here and the
+        // fused order is the cosine order: document 1 holds the exact query vector.
+        // SolrHybridSearchIT covers genuine two-leg fusion on the project configset.
+        assertEquals(List.of("1", "2", "3"), docs.stream().map(d -> d.get("id")).toList());
     }
 
     @Test

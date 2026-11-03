@@ -1,5 +1,11 @@
 # Vector Store, Indexing, and Semantic Search Implementation Analysis
 
+> **Note:** hybrid search no longer fuses results in the application. Since the upgrade to
+> Solr 10.1, `SearchRepository.executeHybridRerankSearch()` sends a single combined query to
+> Solr's `/hybrid` handler and Solr performs the RRF fusion. `RrfMerger` has been removed;
+> references to it below are historical. See `SOLR_ENHANCEMENTS.md` §1.
+
+
 ## Executive Summary
 
 This AI-powered search application is built on Spring Boot 3.5.4 with Java 21, integrating Apache Solr 9.9.0 for vector-based semantic search. The architecture combines:

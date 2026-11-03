@@ -54,7 +54,7 @@ This document contains in-depth technical information about the AI-Powered Searc
     └──────────────────────┘   └──────────────────────┘
                 │
     ┌───────────▼──────────────────────────────────────┐
-    │         Apache Solr 9.9.0 + ZooKeeper            │
+    │        Apache Solr 10.1.0 + ZooKeeper            │
     │  - DenseVectorField (HNSW, cosine)              │
     │  - KNN search                                    │
     │  - Typed schema fields                           │
@@ -178,15 +178,14 @@ lines 157-227
 
 1. Client sends natural language query with optional parameters (k, minScore, fields)
 2. Claude AI parses query to extract filter criteria
-3. Executes two searches in parallel:
-    - **Keyword search**: Using edismax query parser with `_text_` catch-all field
-    - **Vector search**: KNN similarity search with OpenAI embeddings
-4. Merges results using client-side RRF (Reciprocal Rank Fusion):
-    - Formula: `rrf_score = sum(1 / (k + rank))` where k=60 (default)
+3. Sends one combined query to Solr's `/hybrid` handler (Solr 10.1+ or 9.11+) with two legs:
+    - **Keyword leg**: edismax over the `_text_` catch-all field
+    - **Vector leg**: KNN over OpenAI embeddings (`vectorSimilarity` when `minScore` is set)
+4. Solr fuses the legs with RRF (Reciprocal Rank Fusion):
+    - Formula: `score = sum(1 / (k + rank))` where k=60 (default)
     - Documents appearing in both result sets get combined scores
-5. Re-ranks merged results by RRF score
-6. Applies minScore filtering and topK limiting
-7. Implements intelligent fallback: hybrid → keyword → vector if no results
+5. Solr returns the top `k` of the fused list
+6. Falls back to keyword-only, then vector-only, if the combined request fails
 
 **Strengths:**
 
@@ -200,9 +199,9 @@ lines 157-227
 
 **Limitations:**
 
-- ❌ Higher computational cost (two searches + merging)
+- ❌ Higher computational cost (two searches + fusion, though in one Solr request)
 - ❌ Requires both embedding generation and keyword indexing
-- ❌ Client-side merging adds latency
+- ❌ Requires Solr 10.1+ or 9.11+ and the `/hybrid` handler in the collection's configset
 - ❌ RRF k parameter may need tuning for optimal results
 - ❌ More complex debugging when results are unexpected
 

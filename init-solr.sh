@@ -19,9 +19,9 @@ set -e
 # Enable verbose error reporting
 exec 2>&1
 
-echo "Starting Solr in SolrCloud mode..."
+echo "Starting Solr in SolrCloud mode (the default since Solr 10)..."
 # Start Solr in background
-/opt/solr/bin/solr start -c -z zoo:2181
+/opt/solr/bin/solr start -z zoo:2181
 
 # Wait for Solr to be up
 until curl -s http://localhost:8983/solr/ > /dev/null; do
@@ -109,4 +109,4 @@ echo "=========================================="
 
 # Stop background Solr and run in foreground
 /opt/solr/bin/solr stop
-exec /opt/solr/bin/solr start -c -z zoo:2181 -f
+exec /opt/solr/bin/solr start -z zoo:2181 -f
