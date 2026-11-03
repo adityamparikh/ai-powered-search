@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariables;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -70,6 +71,9 @@ class QuestionAnswerAdvisorIT {
     @Autowired
     @Qualifier("ragChatClient")
     private ChatClient ragChatClient;
+
+    /** Spring AI 2.0 no longer defaults the id; MessageChatMemoryAdvisor rejects null. */
+    private static final String CONVERSATION_ID = "question-answer-advisor-it";
 
     @Autowired
     private VectorStore vectorStore;
@@ -255,6 +259,7 @@ class QuestionAnswerAdvisorIT {
     void shouldAnswerQuestionUsingRetrievedContext() {
         // When
         String answer = ragChatClient.prompt()
+                .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, CONVERSATION_ID))
                 .user("Who is the author of Spring Boot in Action?")
                 .call()
                 .content();
@@ -268,6 +273,7 @@ class QuestionAnswerAdvisorIT {
     void shouldAnswerQuestionAboutMultipleBooks() {
         // When
         String answer = ragChatClient.prompt()
+                .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, CONVERSATION_ID))
                 .user("What books are available about Java and Spring?")
                 .call()
                 .content();
@@ -281,6 +287,7 @@ class QuestionAnswerAdvisorIT {
     void shouldAnswerQuestionAboutBookContent() {
         // When
         String answer = ragChatClient.prompt()
+                .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, CONVERSATION_ID))
                 .user("What topics does Effective Java cover?")
                 .call()
                 .content();
@@ -294,6 +301,7 @@ class QuestionAnswerAdvisorIT {
     void shouldProvideStructuredAnswer() {
         // When
         BookInfo bookInfo = ragChatClient.prompt()
+                .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, CONVERSATION_ID))
                 .user("Tell me about Clean Code book. Include title, author, and main topic.")
                 .call()
                 .entity(BookInfo.class);
@@ -308,6 +316,7 @@ class QuestionAnswerAdvisorIT {
     void shouldHandleQuestionWithNoRelevantDocuments() {
         // When
         String answer = ragChatClient.prompt()
+                .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, CONVERSATION_ID))
                 .user("What is the best book about quantum physics?")
                 .call()
                 .content();
@@ -322,6 +331,7 @@ class QuestionAnswerAdvisorIT {
     void shouldRetrieveMultipleDocumentsForComplexQuestion() {
         // When
         String answer = ragChatClient.prompt()
+                .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, CONVERSATION_ID))
                 .user("Compare the books about software design and architecture. " +
                       "Which ones focus on code quality and which focus on system design?")
                 .call()
