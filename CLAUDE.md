@@ -43,7 +43,7 @@ The application follows a **package-by-feature** structure organized around main
 ### Key Dependencies
 
 - **Spring Boot 4.1.1** with Spring AI 2.0.1
-- **Anthropic Claude AI** (claude-sonnet-4-5) for query generation and chat
+- **Anthropic Claude AI** (claude-sonnet-5-5) for query generation and chat
 - **OpenAI** (text-embedding-3-small) for vector embeddings (1536 dimensions)
 - **SolrJ 10.0.0** client against **Apache Solr 9.10.1** server, with dense vector support
 - **ZooKeeper 3.9** for SolrCloud coordination
@@ -248,6 +248,7 @@ The repository includes several helper scripts for common tasks:
 
 ### Environment Variables
 - `ANTHROPIC_API_KEY`: Required for Claude AI integration (query generation and chat)
+- `ANTHROPIC_CHAT_MODEL`: Claude model for chat, query generation and reranking (defaults to 'claude-sonnet-5-5')
 - `ANTHROPIC_PROMPT_CACHING_ENABLED`: Enable Anthropic prompt caching (defaults to 'true')
 - `ANTHROPIC_PROMPT_CACHING_STRATEGY`: Cache strategy (defaults to 'SYSTEM_AND_TOOLS')
 - `OPENAI_API_KEY`: Required for OpenAI embeddings (vector search and indexing)
