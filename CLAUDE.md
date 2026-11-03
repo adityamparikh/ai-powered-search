@@ -636,13 +636,11 @@ When using both Anthropic and OpenAI, Spring AI cannot auto-configure `ChatClien
 in `AiConfig`:
 ```java
 @Bean
-@Qualifier("searchChatClient")
-public ChatClient chatClient(
-        ChatModel chatModel,
-    ChatMemory chatMemory
-) {
+public ChatClient searchChatClient(ChatModel chatModel, ...) {
+    // Stateless: query generation keeps no chat memory. Only ragChatClient (/ask) has a
+    // MessageChatMemoryAdvisor, keyed by the request's conversationId.
     return ChatClient.builder(chatModel)
-        .defaultAdvisors(new MessageChatMemoryAdvisor(chatMemory))
+        .defaultAdvisors(SimpleLoggerAdvisor.builder().build(), ...)
         .build();
 }
 ```

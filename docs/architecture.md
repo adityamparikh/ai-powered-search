@@ -3,6 +3,10 @@
 How a request moves through the application, endpoint by endpoint. The diagrams are
 [Mermaid](https://mermaid.js.org/) and render on GitHub.
 
+Query generation for keyword and hybrid search is stateless (no chat memory); only `/ask` keeps
+conversation history. Not yet drawn: conversation-aware query rewriting (#50) and Jev screening
+and reranking (#51), which are open PRs.
+
 ## Components
 
 ```mermaid
@@ -98,9 +102,8 @@ sequenceDiagram
             SR->>S: vector-only (kNN, reusing the embedding)
             S-->>SR: results
         end
-    else interrupted
-        SR-->>SR: restore interrupt flag, throw
     end
+    Note over SR: an interrupted request restores the interrupt flag<br/>and throws, with no fallback
 ```
 
 - **No `score` on hybrid rows.** Solr orders hits by fused score, but the per-document `score`
