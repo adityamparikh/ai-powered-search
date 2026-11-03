@@ -136,27 +136,31 @@ public class AiConfig {
     /**
      * Creates a ChatClient bean for query generation (without RAG).
      *
-     * <p>This bean is used by the SearchService for query generation and conversational search.
-     * It must be explicitly defined because Spring AI cannot auto-configure when multiple
-     * LLM providers are present.</p>
+     * <p>This bean is used by the SearchService to turn a free-text query into Solr query
+     * parameters. It must be explicitly defined because Spring AI cannot auto-configure when
+     * multiple LLM providers are present.</p>
+     *
+     * <p><strong>Stateless by design: no chat memory.</strong> Each search is independent. A
+     * memory advisor here would need a conversation ID, and the search endpoints have none to
+     * give it: it used to be a hardcoded {@code "007"} shared by every caller, so one user's
+     * queries (and Claude's earlier JSON answers) leaked into everyone else's query generation,
+     * and the growing history defeated prompt caching. Conversational context belongs to
+     * {@code /ask}, whose {@code ragChatClient} keys memory by the request's conversation ID.</p>
      *
      * <p>The ChatClient is configured with default advisors:
      * <ul>
-     *   <li>MessageChatMemoryAdvisor - Maintains conversational context across requests</li>
      *   <li>SimpleLoggerAdvisor - Logs chat interactions for debugging</li>
      *   <li>PromptCacheMetricsAdvisor - Logs cache metrics when prompt caching is enabled</li>
      * </ul>
      * </p>
      *
      * @param chatModel the ChatModel (Anthropic) auto-configured by Spring AI
-     * @param chatMemory the ChatMemory for maintaining conversation history
      * @param cachingEnabled whether prompt caching is enabled
      * @param chatOptions the chat options with caching configured (optional, may be null if caching disabled)
      * @return configured ChatClient instance
      */
     @Bean
     public ChatClient searchChatClient(ChatModel chatModel,
-                                 ChatMemory chatMemory,
                                  @Value("${spring.ai.anthropic.prompt-caching.enabled:true}") boolean cachingEnabled,
                                  @Autowired(required = false) @Qualifier("anthropicChatOptionsWithCaching") AnthropicChatOptions.@Nullable Builder chatOptions) {
         ChatClient.Builder builder = ChatClient.builder(chatModel);
@@ -167,7 +171,6 @@ public class AiConfig {
         }
 
         return builder.defaultAdvisors(
-                        MessageChatMemoryAdvisor.builder(chatMemory).build(),
                         SimpleLoggerAdvisor.builder().build(),
                         PromptCacheMetricsAdvisor.builder()
                                 .cachingEnabled(cachingEnabled)

@@ -84,10 +84,10 @@ This document contains in-depth technical information about the AI-Powered Searc
   - Schema introspection for field types
   - Faceting and aggregation support
 
-- **Chat Memory**: Conversation state management
+- **Chat Memory**: Conversation state management for `/ask`
   - PostgreSQL-backed persistence
-  - Conversation ID: "007" (hardcoded) for query generation; `/ask` uses the request's `conversationId` ("default" when absent)
-  - Maintains context across search refinements
+  - Keyed by the request's `conversationId` ("default" when absent)
+  - Search query generation is stateless: no memory, so concurrent users never share context
 
 ## Search Approach Details
 

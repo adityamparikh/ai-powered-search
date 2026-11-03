@@ -350,7 +350,7 @@ docker-compose logs solr | grep "QTime"
 - **topK**: 10 results
 - **Similarity Threshold**: 0.7
 - **Collection**: "books" (default)
-- **Conversation ID**: "007" for query-generation chat memory; `/ask` uses the request's `conversationId` ("default" when absent)
+- **Conversation ID**: `/ask` uses the request's `conversationId` ("default" when absent); query generation keeps no memory
 
 ### Solr
 

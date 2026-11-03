@@ -59,7 +59,6 @@ flowchart TB
     RAG --> RR --> claude
     RAG -->|answer| claude
     RAG <-->|"history (per conversationId)"| pg
-    SS <-->|"query-generation history<br/>(fixed conversation 007)"| pg
 
     SR -->|keyword search| SEL
     SR -->|"hybrid: one combined query"| HYB
@@ -80,7 +79,7 @@ Sequence diagrams for hybrid search, RAG (`/ask`) and indexing are in
 - **SearchService**: Orchestrates keyword, semantic and hybrid search, and RAG (`/ask`)
 - **SearchRepository**: Solr query execution, hybrid search via Solr's `/hybrid` combined query (RRF), and schema introspection
 - **HybridDocumentRetriever** and **RerankingDocumentPostProcessor**: retrieval and optional reranking for `/ask`
-- **Chat Memory**: PostgreSQL-backed conversation history. `/ask` keys it by `conversationId` (`"default"` when none is given); Claude query generation for keyword and hybrid search uses one fixed conversation, `"007"`, shared by all callers
+- **Chat Memory**: PostgreSQL-backed conversation history for `/ask`, keyed by the request's `conversationId` (`"default"` when none is given). Search query generation is stateless.
 
 ## 📋 Prerequisites
 

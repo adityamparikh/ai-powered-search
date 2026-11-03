@@ -47,7 +47,6 @@ flowchart TB
     RAG --> RR --> claude
     RAG -->|answer| claude
     RAG <-->|"history (per conversationId)"| pg
-    SS <-->|"query-generation history<br/>(fixed conversation 007)"| pg
 
     SR -->|keyword search| SEL
     SR -->|"hybrid: one combined query"| HYB
