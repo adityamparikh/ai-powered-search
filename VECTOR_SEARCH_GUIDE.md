@@ -1,5 +1,11 @@
 # Vector Search Implementation Guide
 
+> **Note:** hybrid search no longer fuses results in the application. Since the upgrade to
+> Solr 10.1, `SearchRepository.executeHybridRerankSearch()` sends a single combined query to
+> Solr's `/hybrid` handler and Solr performs the RRF fusion. `RrfMerger` has been removed;
+> references to it below are historical. See `SOLR_ENHANCEMENTS.md` §1.
+
+
 This guide provides comprehensive documentation on the vector store implementation, semantic search, and indexing capabilities in the AI-Powered Search application.
 
 ## Table of Contents
@@ -22,7 +28,7 @@ The AI-Powered Search application combines traditional keyword search with moder
 
 - **Apache Solr** for storage and vector similarity search
 - **OpenAI embeddings** (text-embedding-3-small) for semantic representation
-- **Anthropic Claude** (claude-sonnet-4-5) for intelligent query generation
+- **Anthropic Claude** (claude-sonnet-5-5) for intelligent query generation
 - **Spring AI** for abstraction and integration
 
 ### Key Features
@@ -71,7 +77,7 @@ The AI-Powered Search application combines traditional keyword search with moder
                 │
     ┌───────────▼──────────┐   ┌──────────────────────┐
     │  OpenAI Embeddings   │   │  Anthropic Claude    │
-    │  text-embedding-3-   │   │  claude-sonnet-4-5   │
+    │  text-embedding-3-   │   │  claude-sonnet-5-5   │
     │  small (1536-dim)    │   │  Query generation    │
     └──────────────────────┘   └──────────────────────┘
                 │
@@ -707,7 +713,7 @@ spring.ai.vectorstore.solr.host=http://localhost:8983/solr
 
 # Anthropic Claude Configuration
 spring.ai.anthropic.api-key=${ANTHROPIC_API_KEY}
-spring.ai.anthropic.chat.options.model=claude-sonnet-4-5
+spring.ai.anthropic.chat.model=claude-sonnet-5-5
 
 # OpenAI Configuration
 spring.ai.openai.api-key=${OPENAI_API_KEY}

@@ -42,7 +42,7 @@ dependencies {
     implementation("org.postgresql:postgresql")
     // Apache Solr client. SolrJ 10 dropped Jetty in favour of the JDK HttpClient
     // (HttpJdkSolrClient), so no Jetty artifacts or version pinning are needed.
-    implementation("org.apache.solr:solr-solrj:10.0.0")
+    implementation("org.apache.solr:solr-solrj:10.1.0")
 
     // Swagger UI / OpenAPI documentation
     implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:3.1.1")

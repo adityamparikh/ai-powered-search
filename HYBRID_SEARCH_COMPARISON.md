@@ -1,5 +1,11 @@
 # Hybrid Search: this repo (Solr) vs. Craig Walls' Spring AI recipe (Lucene)
 
+> **Note:** hybrid search no longer fuses results in the application. Since the upgrade to
+> Solr 10.1, `SearchRepository.executeHybridRerankSearch()` sends a single combined query to
+> Solr's `/hybrid` handler and Solr performs the RRF fusion. `RrfMerger` has been removed;
+> references to it below are historical. See `SOLR_ENHANCEMENTS.md` §1.
+
+
 Comparison of `ai-powered-search`'s hybrid search against
 *"Spring AI Recipe: Better RAG Results with Hybrid Search"* by Craig Walls
 (author of *Spring AI in Action* / *Spring in Action*), Aug 2026.

@@ -8,11 +8,14 @@ import dev.aparikh.aipoweredsearch.solr.SolrQueryUtils;
 import org.apache.solr.client.solrj.SolrClient;
 import org.apache.solr.client.solrj.SolrRequest;
 import org.apache.solr.client.solrj.request.SolrQuery;
+import org.apache.solr.client.solrj.request.json.JsonQueryRequest;
 import org.apache.solr.client.solrj.request.schema.SchemaRequest;
 import org.apache.solr.client.solrj.response.QueryResponse;
 import org.apache.solr.client.solrj.response.schema.SchemaResponse;
 import org.apache.solr.common.SolrDocument;
+import org.apache.solr.common.SolrException;
 import org.apache.solr.common.params.ModifiableSolrParams;
+import org.apache.solr.common.params.ShardParams;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Repository;
@@ -20,14 +23,14 @@ import org.springframework.stereotype.Repository;
 import org.jspecify.annotations.Nullable;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 
@@ -47,11 +50,29 @@ public class SearchRepository {
      * Multiplier applied to topK when fetching from individual searches.
      * Over-fetching improves fusion quality by giving RRF more candidates.
      */
-    private static final int OVER_FETCH_MULTIPLIER = 2;
+    static final int OVER_FETCH_MULTIPLIER = 2;
+
+    // Solr combined query (server-side RRF) constants. See solr-config/conf/solrconfig.xml.
+    static final String HYBRID_HANDLER = "/hybrid";
+    static final String KEYWORD_LEG = "keyword";
+    static final String VECTOR_LEG = "vector";
+    static final String COMBINER = "combiner";
+    static final String COMBINER_QUERY = "combiner.query";
+    static final String COMBINER_ALGORITHM = "combiner.algorithm";
+    static final String COMBINER_RRF = "rrf";
+    private static final int HTTP_NOT_FOUND = 404;
 
     Logger log = LoggerFactory.getLogger(SearchRepository.class);
     private final SolrClient solrClient;
     private final EmbeddingService embeddingService;
+
+    /**
+     * Collections already reported as lacking the /hybrid handler, so the warning is logged once.
+     * Bounded: collection names come from request paths, and Solr also answers 404 for a collection
+     * that does not exist, so arbitrary names must not grow this set without limit.
+     */
+    private final Set<String> collectionsWithoutHybridHandler = ConcurrentHashMap.newKeySet();
+    static final int MAX_TRACKED_COLLECTIONS = 256;
 
     public SearchRepository(SolrClient solrClient, EmbeddingService embeddingService) {
         this.solrClient = solrClient;
@@ -230,34 +251,39 @@ public class SearchRepository {
     }
 
     /**
-     * Executes hybrid search combining keyword and vector search using client-side RRF
-     * (Reciprocal Rank Fusion).
+     * Executes hybrid search: a keyword (edismax) query and a vector (kNN) query fused with
+     * Reciprocal Rank Fusion <strong>inside Solr</strong>, in a single request.
      *
-     * <p>This method runs keyword and vector searches <strong>concurrently</strong> and then
-     * merges the results using the RRF algorithm. If the merged results are empty, it falls
-     * back through a cascade: keyword-only, then vector-only.</p>
+     * <p>Uses Solr's combined query feature (Solr 10.1+, SOLR-17319): a JSON request whose
+     * {@code queries} map names both legs, sent with {@code combiner=true} to the
+     * {@link #HYBRID_HANDLER} handler ({@code solr.CombinedQuerySearchHandler}). Solr runs both
+     * legs against the same filters, fuses their rankings with
+     * {@code score = sum(1 / (k + rank))} and returns the fused order. Fusion happens per
+     * collection, across shards, so ranks are global rather than per shard.</p>
      *
-     * <p>Execution flow:
-     * <ol>
-     *   <li>Launch keyword search (edismax) and vector search (KNN) in parallel</li>
-     *   <li>Await both results</li>
-     *   <li>Apply minScore to the vector results only, while their scores are still
-     *       cosine similarities</li>
-     *   <li>Merge using {@link RrfMerger}</li>
-     *   <li>Limit to topK</li>
-     *   <li>If empty, try keyword-only fallback, then vector-only fallback</li>
-     * </ol>
+     * <p>Candidate depth: each leg contributes up to {@code shards.rows} candidates, set to
+     * {@code topK * }{@value #OVER_FETCH_MULTIPLIER} so RRF sees more than the final page.</p>
+     *
+     * <p>Fallback: if the combined request fails (for example a collection whose configset
+     * lacks the {@code /hybrid} handler, which Solr answers with 404) or the query cannot be
+     * embedded, this degrades to keyword-only and then vector-only search.</p>
+     *
+     * <p><strong>Scores.</strong> Returned rows carry no {@code score}: Solr orders hits by
+     * fused RRF score, but the per-document {@code score} it returns is the raw score from
+     * one of the legs (BM25 or cosine), which is misleading next to a fused order.</p>
      *
      * @param collection       the Solr collection to search
-     * @param query            the text query for keyword search
+     * @param query            the text query; used verbatim by the keyword leg and embedded for
+     *                         the vector leg
      * @param topK             number of results to return
-     * @param filterExpression optional filter query
+     * @param filterExpression optional Solr filter query, applied to both legs
      * @param fieldsCsv        optional comma-separated list of fields to return
-     * @param minScore         optional minimum cosine similarity in {@code [0..1]}, applied to
-     *                         the vector leg before fusion. It is deliberately not applied to
-     *                         keyword results (BM25 is unbounded) nor to the fused output (RRF
-     *                         scores are rank-derived, with a maximum of {@code 2/(k+1)}, so
-     *                         comparing them against a similarity threshold is meaningless).
+     * @param minScore         optional minimum cosine similarity in {@code [0..1]}. When set,
+     *                         the vector leg becomes a {@code vectorSimilarity} query with
+     *                         {@code minReturn=minScore}, so only sufficiently similar
+     *                         documents enter fusion. It is deliberately not applied to the
+     *                         keyword leg (BM25 is unbounded) nor to the fused output (RRF
+     *                         scores are rank-derived).
      * @return search response with hybrid-ranked documents
      */
     public SearchResponse executeHybridRerankSearch(String collection,
@@ -266,72 +292,145 @@ public class SearchRepository {
                                                     @Nullable String filterExpression,
                                                     @Nullable String fieldsCsv,
                                                     @Nullable Double minScore) {
-        log.debug("Performing hybrid search (client-side RRF) in collection: {} with query: {}", collection, query);
+        log.debug("Performing hybrid search (Solr RRF) in collection: {} with query: {}", collection, query);
 
-        int fetchSize = topK * OVER_FETCH_MULTIPLIER;
-
+        // Kept outside the try so a failed combined request does not pay for a second embedding
+        // call in the vector-only fallback.
+        @Nullable String vector = null;
         try {
-            // The two legs are independent network round-trips on the critical path, so they run
-            // concurrently: hybrid search then costs roughly one Solr round-trip instead of two.
-            //
-            // Virtual threads make blocking cheap, but cheap blocking is not concurrency — two
-            // sequential calls on a virtual thread are still sequential. The overlap has to be
-            // asked for explicitly.
-            List<Map<String, Object>> keywordResults;
-            List<Map<String, Object>> vectorResults;
-            try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
-                Future<List<Map<String, Object>>> keywordLeg = executor.submit(() ->
-                        executeKeywordSearch(collection, query, fetchSize, filterExpression, fieldsCsv));
-                Future<List<Map<String, Object>>> vectorLeg = executor.submit(() ->
-                        executeVectorSearch(collection, query, fetchSize, filterExpression, fieldsCsv));
+            vector = embeddingService.embedAndFormatForSolr(query);
+            JsonQueryRequest request = buildHybridRequest(
+                    query, vector, topK, filterExpression, fieldsCsv, minScore);
 
-                // Either get() may throw ExecutionException; the surrounding catch degrades to
-                // the fallback cascade exactly as it did when these ran inline.
-                keywordResults = keywordLeg.get();
-                vectorResults = vectorLeg.get();
-            }
-
-            log.debug("Keyword search returned {} results, vector search returned {} results",
-                    keywordResults.size(), vectorResults.size());
-
-            // Apply minScore to the vector leg only, before fusion, while the score is still
-            // a cosine similarity in [0..1]. The keyword leg is left alone because BM25 is
-            // unbounded, and the fused score is never thresholded because RRF scores are
-            // rank-derived and carry no absolute meaning.
-            vectorResults = filterByMinScore(vectorResults, minScore);
-
-            // Merge using RRF
-            RrfMerger rrfMerger = new RrfMerger();
-            List<Map<String, Object>> mergedResults = rrfMerger.merge(keywordResults, vectorResults);
-            log.debug("RRF merged results: {} unique documents", mergedResults.size());
-
-            // Limit to topK (no score threshold — see above)
-            List<Map<String, Object>> finalResults = mergedResults.stream()
-                    .limit(topK)
+            List<Map<String, Object>> results = request.process(solrClient, collection)
+                    .getResults().stream()
+                    .map(this::convertSolrDocumentToMap)
                     .collect(Collectors.toList());
 
-            log.debug("Final hybrid results after filtering and limiting: {} documents", finalResults.size());
+            log.debug("Hybrid search (Solr RRF) returned {} documents", results.size());
+            return new SearchResponse(results, Map.of(), Map.of(), null);
 
-            if (!finalResults.isEmpty()) {
-                return new SearchResponse(finalResults, Map.of(), Map.of(), null);
-            }
-
-            // Fallback cascade
-            log.warn("Hybrid search returned no results, attempting fallback");
-            return fallbackSearch(collection, query, topK, filterExpression, fieldsCsv, minScore);
-
-        } catch (InterruptedException e) {
-            // An interrupt means this caller is being cancelled. Falling back would issue more
-            // Solr queries on a thread that has been asked to stop, and would swallow the
-            // interrupt for everyone above us. Restore the flag and propagate instead.
-            Thread.currentThread().interrupt();
-            log.warn("Hybrid search interrupted for collection: {}", collection);
-            throw new IllegalStateException("Hybrid search was interrupted", e);
         } catch (Exception e) {
-            log.error("Error performing hybrid search with RRF in collection: {}", collection, e);
-            log.warn("Hybrid search failed, attempting fallback");
-            return fallbackSearch(collection, query, topK, filterExpression, fieldsCsv, minScore);
+            if (isInterruption(e)) {
+                // The caller is being cancelled: running fallback queries on this thread would ignore
+                // that and swallow the interrupt. Restore the flag and propagate instead.
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException("Hybrid search was interrupted", e);
+            }
+            if (e instanceof SolrException solrException && solrException.code() == HTTP_NOT_FOUND) {
+                // A configuration problem, not an outage: no stack trace, said once per collection.
+                if (firstMissingHandlerReport(collection)) {
+                    log.warn("Collection '{}' has no {} handler (solr.CombinedQuerySearchHandler, Solr 10.1+); "
+                            + "hybrid search is degrading to keyword/vector fallback. Add the handler to the "
+                            + "collection's configset (see solr-config/conf/solrconfig.xml).",
+                            collection, HYBRID_HANDLER);
+                } else {
+                    log.debug("Collection '{}' still has no {} handler; using fallback", collection, HYBRID_HANDLER);
+                }
+            } else {
+                log.error("Error performing hybrid search with Solr RRF in collection: {}", collection, e);
+                log.warn("Hybrid search failed, attempting fallback");
+            }
+            return fallbackSearch(collection, query, vector, topK, filterExpression, fieldsCsv, minScore);
         }
+    }
+
+    int trackedMissingHandlerCollections() {
+        return collectionsWithoutHybridHandler.size();
+    }
+
+    private boolean firstMissingHandlerReport(String collection) {
+        if (collectionsWithoutHybridHandler.contains(collection)) {
+            return false;
+        }
+        // Past the cap, keep warning rather than remembering more names.
+        return collectionsWithoutHybridHandler.size() >= MAX_TRACKED_COLLECTIONS
+                || collectionsWithoutHybridHandler.add(collection);
+    }
+
+        private static boolean isInterruption(Throwable e) {
+        for (Throwable t = e; t != null; t = t.getCause()) {
+            if (t instanceof InterruptedException) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Builds the combined-query JSON request for {@link #executeHybridRerankSearch}.
+     * Public so diagnostics (e.g. the RAG evaluation harness) can re-issue the exact request
+     * with extra parameters such as {@code debug=results}, which returns Solr's per-document
+     * RRF explanation including each document's rank in each leg.
+     *
+     * <p>Equivalent JSON:</p>
+     * <pre>{@code
+     * POST /solr/{collection}/hybrid
+     * {
+     *   "queries": {
+     *     "keyword": { "edismax": { "query": "...", "qf": "_text_" } },
+     *     "vector":  { "knn": { "f": "vector", "topK": 2*topK, "query": "[...]" } }
+     *   },
+     *   "limit": topK,
+     *   "fields": [...],
+     *   "filter": [...],
+     *   "params": {
+     *     "combiner": true,
+     *     "combiner.query": ["keyword", "vector"],
+     *     "combiner.algorithm": "rrf",
+     *     "shards.rows": 2*topK
+     *   }
+     * }
+     * }</pre>
+     */
+    public JsonQueryRequest buildHybridRequest(String query,
+                                               String vector,
+                                               int topK,
+                                               @Nullable String filterExpression,
+                                               @Nullable String fieldsCsv,
+                                               @Nullable Double minScore) {
+        int fetchSize = topK * OVER_FETCH_MULTIPLIER;
+
+        Map<String, Object> keywordLeg = Map.of(QUERY_TYPE_EDISMAX, Map.of(
+                "query", query,
+                "qf", FIELD_TEXT_CATCHALL));
+
+        Map<String, Object> vectorLeg = minScore == null
+                ? Map.of("knn", Map.of(
+                        "f", FIELD_VECTOR,
+                        // Same as shards.rows below: kNN should find as many candidates as the
+                        // combiner will consider from this leg.
+                        "topK", fetchSize,
+                        "query", vector))
+                : Map.of("vectorSimilarity", Map.of(
+                        "f", FIELD_VECTOR,
+                        "minReturn", minScore,
+                        "query", vector));
+
+        Map<String, Object> queries = new LinkedHashMap<>();
+        queries.put(KEYWORD_LEG, keywordLeg);
+        queries.put(VECTOR_LEG, vectorLeg);
+
+        JsonQueryRequest request = new JsonQueryRequest()
+                .setQueries(queries)
+                .setLimit(topK)
+                .withParam(COMBINER, true)
+                .withParam(COMBINER_QUERY, List.of(KEYWORD_LEG, VECTOR_LEG))
+                .withParam(COMBINER_ALGORITHM, COMBINER_RRF)
+                // Per-leg candidate depth is max(start + rows, shards.rows)
+                .withParam(ShardParams.SHARDS_ROWS, fetchSize);
+        request.setPath(HYBRID_HANDLER);
+
+        if (filterExpression != null && !filterExpression.isEmpty()) {
+            request.withFilter(filterExpression);
+        }
+        if (fieldsCsv != null && !fieldsCsv.isEmpty()) {
+            request.returnFields(Arrays.stream(fieldsCsv.split(","))
+                    .map(String::trim)
+                    .filter(f -> !f.isEmpty())
+                    .toList());
+        }
+        return request;
     }
 
     /**
@@ -380,7 +479,18 @@ public class SearchRepository {
                                                   int rows,
                                                   @Nullable String filterExpression,
                                                   @Nullable String fieldsCsv) throws Exception {
-        String vectorString = embeddingService.embedAndFormatForSolr(query);
+        return executeVectorSearch(collection, query, null, rows, filterExpression, fieldsCsv);
+    }
+
+    private List<Map<String, Object>> executeVectorSearch(String collection,
+                                                          String query,
+                                                          @Nullable String precomputedVector,
+                                                          int rows,
+                                                          @Nullable String filterExpression,
+                                                          @Nullable String fieldsCsv) throws Exception {
+        String vectorString = precomputedVector != null
+                ? precomputedVector
+                : embeddingService.embedAndFormatForSolr(query);
 
         ModifiableSolrParams params = new ModifiableSolrParams();
         params.set("q", SolrQueryUtils.buildKnnQuery(FIELD_VECTOR, rows, vectorString));
@@ -397,11 +507,12 @@ public class SearchRepository {
     }
 
     /**
-     * Fallback strategy when hybrid search produces no results.
+     * Fallback strategy when the combined (Solr RRF) request fails.
      * Tries keyword-only first, then vector-only as a last resort.
      */
     private SearchResponse fallbackSearch(String collection,
                                           String query,
+                                          @Nullable String vector,
                                           int topK,
                                           @Nullable String filterExpression,
                                           @Nullable String fieldsCsv,
@@ -423,7 +534,7 @@ public class SearchRepository {
         // Try vector-only as last resort. minScore applies here — these are cosine similarities.
         try {
             List<Map<String, Object>> vectorResults = filterByMinScore(executeVectorSearch(
-                    collection, query, topK, filterExpression, fieldsCsv), minScore);
+                    collection, query, vector, topK, filterExpression, fieldsCsv), minScore);
 
             if (!vectorResults.isEmpty()) {
                 log.info("Vector-only fallback returned {} results", vectorResults.size());

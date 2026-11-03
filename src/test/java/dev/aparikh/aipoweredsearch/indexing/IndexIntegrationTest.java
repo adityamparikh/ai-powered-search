@@ -82,7 +82,7 @@ class IndexIntegrationTest {
 
         // Create collection if it doesn't exist
         try {
-            solrContainer.execInContainer("/opt/solr/bin/solr", "create_collection", "-c", COLLECTION, "-d", "_default");
+            solrContainer.execInContainer("/opt/solr/bin/solr", "create", "-c", COLLECTION, "-d", "_default");
         } catch (Exception e) {
             // Collection might already exist, ignore
         }

@@ -62,47 +62,26 @@ class ChatMemoryIntegrationTest {
 
 
     @Test
-    void searchChatClientShouldMaintainConversationMemory() {
-        // Given
+    void searchChatClientKeepsNoConversationMemory() {
+        // Query generation is stateless: even when a caller passes a conversation ID, nothing is
+        // stored and no earlier turn reaches the model. (It used to share one hardcoded "007"
+        // conversation across every caller.)
         String conversationId = UUID.randomUUID().toString();
 
-        // When - Send messages through the ChatClient with a conversation ID
-        String response1 = searchChatClient.prompt()
+        searchChatClient.prompt()
                 .user("Hello, my name is Alice")
                 .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, conversationId))
                 .call()
                 .content();
-
-        String response2 = searchChatClient.prompt()
+        String response = searchChatClient.prompt()
                 .user("What is my name?")
                 .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, conversationId))
                 .call()
                 .content();
 
-        // Then - Verify the messages were stored and retrieved
-        assertThat(response1).isNotNull();
-        assertThat(response2).isNotNull();
-        assertThat(response2).containsIgnoringCase("alice");
-
-        // Verify that the chat memory contains messages for this conversation
-        List<Message> messages = chatMemory.get(conversationId);
-        assertThat(messages).isNotEmpty();
-        assertThat(messages).hasSizeGreaterThanOrEqualTo(4); // 2 user messages and 2 assistant responses
-
-        // Verify message types
-        long userMessageCount = messages.stream().filter(msg -> msg instanceof UserMessage).count();
-        long assistantMessageCount = messages.stream().filter(msg -> msg instanceof AssistantMessage).count();
-        assertThat(userMessageCount).isGreaterThanOrEqualTo(2);
-        assertThat(assistantMessageCount).isGreaterThanOrEqualTo(2);
-
-        // Verify the first user message contains the name
-        UserMessage firstUserMessage = messages.stream()
-                .filter(msg -> msg instanceof UserMessage)
-                .map(msg -> (UserMessage) msg)
-                .findFirst()
-                .orElse(null);
-        assertThat(firstUserMessage).isNotNull();
-        assertThat(firstUserMessage.getText()).containsIgnoringCase("alice");
+        assertThat(response).doesNotContainIgnoringCase("alice");
+        assertThat(chatMemory.get(conversationId)).isEmpty();
+        assertThat(chatMemory.get("007")).isEmpty();
     }
 
     @Test
@@ -141,25 +120,25 @@ class ChatMemoryIntegrationTest {
         String conversationId2 = UUID.randomUUID().toString();
 
         // When - Send messages to different conversations
-        searchChatClient.prompt()
+        ragChatClient.prompt()
                 .user("My name is Bob")
                 .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, conversationId1))
                 .call()
                 .content();
 
-        searchChatClient.prompt()
+        ragChatClient.prompt()
                 .user("My name is Charlie")
                 .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, conversationId2))
                 .call()
                 .content();
 
-        String response1 = searchChatClient.prompt()
+        String response1 = ragChatClient.prompt()
                 .user("What is my name?")
                 .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, conversationId1))
                 .call()
                 .content();
 
-        String response2 = searchChatClient.prompt()
+        String response2 = ragChatClient.prompt()
                 .user("What is my name?")
                 .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, conversationId2))
                 .call()
