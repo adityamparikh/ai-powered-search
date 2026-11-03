@@ -150,6 +150,8 @@ sequenceDiagram
     SS-->>U: {answer, conversationId,<br/>sources = IDs of documents in the prompt}
 ```
 
+- **Memory runs before retrieval** even though `AiConfig.ragChatClient` lists the RAG advisor
+  first: advisors run by `getOrder()`, not list position. `RagAdvisorOrderingIT` pins this.
 - Retrieval skips `SearchService`'s Claude query-generation step: the question goes to Solr
   as asked.
 - **Retrieval over-fetches on purpose.** `search.rag.hybrid.top-k` (20) is a candidate count;
