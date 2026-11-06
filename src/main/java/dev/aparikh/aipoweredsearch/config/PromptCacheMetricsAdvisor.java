@@ -199,7 +199,7 @@ public class PromptCacheMetricsAdvisor implements BaseAdvisor {
       // According to Anthropic: cache reads are 90% cheaper than regular input tokens
       // Reference: https://www.anthropic.com/news/prompt-caching
       double savingsPercentage = calculateSavings(cacheReadTokens, regularInputTokens);
-      log.info("[Prompt Caching] Cost savings: ~{}%", String.format("%.1f", savingsPercentage));
+      log.info("[Prompt Caching] Cost savings: ~{}%", Math.round(savingsPercentage * 10) / 10.0);
 
     } else if (cacheCreationTokens != null && cacheCreationTokens > 0) {
       log.info(

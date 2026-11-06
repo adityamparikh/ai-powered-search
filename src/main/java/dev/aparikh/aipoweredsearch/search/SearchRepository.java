@@ -5,6 +5,7 @@ import dev.aparikh.aipoweredsearch.search.model.FieldInfo;
 import dev.aparikh.aipoweredsearch.search.model.SearchRequest;
 import dev.aparikh.aipoweredsearch.search.model.SearchResponse;
 import dev.aparikh.aipoweredsearch.solr.SolrQueryUtils;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -17,6 +18,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 import org.apache.solr.client.solrj.SolrClient;
 import org.apache.solr.client.solrj.SolrRequest;
+import org.apache.solr.client.solrj.SolrServerException;
 import org.apache.solr.client.solrj.request.SolrQuery;
 import org.apache.solr.client.solrj.request.json.JsonQueryRequest;
 import org.apache.solr.client.solrj.request.schema.SchemaRequest;
@@ -461,7 +463,7 @@ public class SearchRepository {
       int rows,
       @Nullable String filterExpression,
       @Nullable String fieldsCsv)
-      throws Exception {
+      throws SolrServerException, IOException {
     ModifiableSolrParams params = new ModifiableSolrParams();
     params.set("q", query);
     params.set("defType", QUERY_TYPE_EDISMAX);
@@ -494,7 +496,7 @@ public class SearchRepository {
       int rows,
       @Nullable String filterExpression,
       @Nullable String fieldsCsv)
-      throws Exception {
+      throws SolrServerException, IOException {
     return executeVectorSearch(collection, query, null, rows, filterExpression, fieldsCsv);
   }
 
@@ -505,7 +507,7 @@ public class SearchRepository {
       int rows,
       @Nullable String filterExpression,
       @Nullable String fieldsCsv)
-      throws Exception {
+      throws SolrServerException, IOException {
     String vectorString =
         precomputedVector != null
             ? precomputedVector

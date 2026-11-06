@@ -113,7 +113,8 @@ class RagMetricsTest {
   void percentileIgnoresNaNAndRejectsOutOfRange() {
     assertThat(RagMetrics.percentile(List.of(Double.NaN, 3.0), 100)).isEqualTo(3.0);
     assertThat(RagMetrics.percentile(List.of(), 50)).isNaN();
-    assertThatThrownBy(() -> RagMetrics.percentile(List.of(1.0), 0))
+    List<Double> single = List.of(1.0);
+    assertThatThrownBy(() -> RagMetrics.percentile(single, 0))
         .isInstanceOf(IllegalArgumentException.class);
   }
 

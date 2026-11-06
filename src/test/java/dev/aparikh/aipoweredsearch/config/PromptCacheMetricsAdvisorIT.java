@@ -192,14 +192,13 @@ class PromptCacheMetricsAdvisorIT {
 
     // When - First request (cache miss)
     logAppender.list.clear();
-    ChatResponse response1 =
-        chatClient
-            .prompt()
-            .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, TEST_CONVERSATION_ID))
-            .system(systemPrompt)
-            .user(question1)
-            .call()
-            .chatResponse();
+    chatClient
+        .prompt()
+        .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, TEST_CONVERSATION_ID))
+        .system(systemPrompt)
+        .user(question1)
+        .call()
+        .chatResponse();
 
     // Wait briefly to ensure cache is ready
     try {

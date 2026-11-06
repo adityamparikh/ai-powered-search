@@ -1,7 +1,5 @@
 package dev.aparikh.aipoweredsearch.solr.vectorstore;
 
-import static java.util.stream.Collectors.toList;
-
 import dev.aparikh.aipoweredsearch.embedding.VectorFormatUtils;
 import dev.aparikh.aipoweredsearch.solr.SolrQueryUtils;
 import java.io.IOException;
@@ -99,6 +97,7 @@ import org.springframework.util.Assert;
  * @see SolrVectorStoreOptions
  */
 public class SolrVectorStore extends AbstractObservationVectorStore {
+  private static final String SCORE_FIELD = "score";
 
   private static final Logger log = LoggerFactory.getLogger(SolrVectorStore.class);
 
@@ -152,9 +151,7 @@ public class SolrVectorStore extends AbstractObservationVectorStore {
               .filter(
                   doc -> {
                     Object embedding = doc.getMetadata().get("embedding");
-                    return embedding == null
-                        || !(embedding instanceof float[])
-                        || ((float[]) embedding).length == 0;
+                    return !(embedding instanceof float[]) || ((float[]) embedding).length == 0;
                   })
               .toList();
 
@@ -165,7 +162,7 @@ public class SolrVectorStore extends AbstractObservationVectorStore {
         EmbeddingResponse embeddingResponse = this.embeddingModel.embedForResponse(texts);
 
         if (embeddingResponse.getResults().size() != documentsWithoutEmbeddings.size()) {
-          throw new RuntimeException(
+          throw new IllegalStateException(
               "Expected "
                   + documentsWithoutEmbeddings.size()
                   + " embeddings but got "
@@ -181,8 +178,7 @@ public class SolrVectorStore extends AbstractObservationVectorStore {
       }
 
       // Convert to Solr documents
-      List<SolrInputDocument> solrDocs =
-          documents.stream().map(this::toSolrDocument).collect(toList());
+      List<SolrInputDocument> solrDocs = documents.stream().map(this::toSolrDocument).toList();
 
       // Add to Solr using commitWithin, then perform an explicit soft commit to
       // make documents immediately searchable for tests/integration scenarios.
@@ -267,7 +263,7 @@ public class SolrVectorStore extends AbstractObservationVectorStore {
       query.setFields(
           options.idFieldName(),
           options.contentFieldName(),
-          "score",
+          SCORE_FIELD,
           options.metadataPrefix() + "*");
 
       // Note: Similarity threshold filtering must be done post-query
@@ -291,7 +287,7 @@ public class SolrVectorStore extends AbstractObservationVectorStore {
               doc -> {
                 // Filter by threshold if specified
                 if (threshold >= 0) {
-                  Object scoreObj = doc.getMetadata().get("score");
+                  Object scoreObj = doc.getMetadata().get(SCORE_FIELD);
                   if (scoreObj instanceof Number) {
                     double score = ((Number) scoreObj).doubleValue();
                     return score >= threshold;
@@ -458,7 +454,7 @@ public class SolrVectorStore extends AbstractObservationVectorStore {
     }
 
     // Extract score and normalize for cosine similarity
-    Number scoreNum = (Number) solrDoc.getFieldValue("score");
+    Number scoreNum = (Number) solrDoc.getFieldValue(SCORE_FIELD);
     @Nullable Double score = scoreNum != null ? scoreNum.doubleValue() : null;
 
     // Apply similarity threshold if score is available
@@ -504,7 +500,7 @@ public class SolrVectorStore extends AbstractObservationVectorStore {
 
     // Add score if present
     if (score != null) {
-      metadata.put("score", score);
+      metadata.put(SCORE_FIELD, score);
     }
 
     // Build document

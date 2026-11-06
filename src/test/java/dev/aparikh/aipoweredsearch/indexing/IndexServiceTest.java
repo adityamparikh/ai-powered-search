@@ -4,9 +4,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import dev.aparikh.aipoweredsearch.indexing.model.BatchIndexRequest;
 import dev.aparikh.aipoweredsearch.indexing.model.IndexRequest;
@@ -34,9 +36,7 @@ class IndexServiceTest {
   @BeforeEach
   void setUp() {
     indexService = new IndexService(vectorStoreFactory);
-    org.mockito.Mockito.when(
-            vectorStoreFactory.forCollection(org.mockito.ArgumentMatchers.anyString()))
-        .thenReturn(vectorStore);
+    when(vectorStoreFactory.forCollection(anyString())).thenReturn(vectorStore);
   }
 
   @Test

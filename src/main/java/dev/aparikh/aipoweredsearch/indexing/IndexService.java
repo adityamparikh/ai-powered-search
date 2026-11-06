@@ -48,7 +48,7 @@ public class IndexService {
    * @return response with indexing results
    */
   public IndexResponse indexDocument(String collection, IndexRequest indexRequest) {
-    log.debug("Indexing document in collection: {}", collection);
+    log.debug("Indexing document in collection: {}", sanitize(collection));
 
     try {
       // Generate document ID if not provided
@@ -68,12 +68,13 @@ public class IndexService {
       VectorStore vs = vectorStoreFactory.forCollection(collection);
       vs.add(Collections.singletonList(document));
 
-      log.info("Successfully indexed document '{}' in collection '{}'", docId, collection);
+      log.info(
+          "Successfully indexed document '{}' in collection '{}'", docId, sanitize(collection));
 
       return new IndexResponse(
           1, 0, Collections.singletonList(docId), "Successfully indexed document");
     } catch (Exception e) {
-      log.error("Failed to index document in collection '{}'", collection, e);
+      log.error("Failed to index document in collection '{}'", sanitize(collection), e);
       return new IndexResponse(
           0, 1, Collections.emptyList(), "Failed to index document: " + e.getMessage());
     }
@@ -91,7 +92,7 @@ public class IndexService {
     log.debug(
         "Batch indexing {} documents in collection: {}",
         batchRequest.documents().size(),
-        collection);
+        sanitize(collection));
 
     List<String> indexedIds = new ArrayList<>();
     int failed = 0;
@@ -125,7 +126,9 @@ public class IndexService {
         VectorStore vs = vectorStoreFactory.forCollection(collection);
         vs.add(documents);
         log.info(
-            "Successfully indexed {} documents in collection '{}'", documents.size(), collection);
+            "Successfully indexed {} documents in collection '{}'",
+            documents.size(),
+            sanitize(collection));
       }
 
       return new IndexResponse(
@@ -141,5 +144,10 @@ public class IndexService {
           indexedIds,
           "Batch indexing partially failed: " + e.getMessage());
     }
+  }
+
+  /** Strips line breaks and tabs from a caller-supplied value so it cannot forge log lines. */
+  private static String sanitize(String value) {
+    return value.replaceAll("[\\r\\n\\t]", "_");
   }
 }
