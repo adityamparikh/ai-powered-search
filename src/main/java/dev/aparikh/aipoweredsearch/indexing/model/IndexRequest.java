@@ -1,26 +1,28 @@
 package dev.aparikh.aipoweredsearch.indexing.model;
 
 import io.swagger.v3.oas.annotations.media.Schema;
-import org.jspecify.annotations.Nullable;
-
 import java.util.Map;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Request model for indexing a single document with vector embeddings.
  *
- * @param id       Unique document identifier (optional - will be generated if not provided)
- * @param content  The text content to be embedded and indexed
+ * @param id Unique document identifier (optional - will be generated if not provided)
+ * @param content The text content to be embedded and indexed
  * @param metadata Additional metadata fields to store with the document
  */
 @Schema(description = "Request to index a single document with vector embeddings")
 public record IndexRequest(
-        @Schema(description = "Unique document identifier (auto-generated if not provided)", example = "doc-001")
+    @Schema(
+            description = "Unique document identifier (auto-generated if not provided)",
+            example = "doc-001")
         @Nullable String id,
-
-        @Schema(description = "Text content to be embedded and indexed", example = "Spring Boot is a powerful framework for building Java applications", requiredMode = Schema.RequiredMode.REQUIRED)
+    @Schema(
+            description = "Text content to be embedded and indexed",
+            example = "Spring Boot is a powerful framework for building Java applications",
+            requiredMode = Schema.RequiredMode.REQUIRED)
         String content,
-
-        @Schema(description = "Additional metadata fields", example = "{\"category\": \"framework\", \"tags\": [\"java\", \"spring\"]}")
-        @Nullable Map<String, Object> metadata
-) {
-}
+    @Schema(
+            description = "Additional metadata fields",
+            example = "{\"category\": \"framework\", \"tags\": [\"java\", \"spring\"]}")
+        @Nullable Map<String, Object> metadata) {}

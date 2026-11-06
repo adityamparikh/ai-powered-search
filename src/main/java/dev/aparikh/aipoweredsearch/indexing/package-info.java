@@ -1,6 +1,4 @@
-/**
- * Document indexing with automatic vector embedding generation.
- */
+/** Document indexing with automatic vector embedding generation. */
 @NullMarked
 package dev.aparikh.aipoweredsearch.indexing;
 

@@ -8,8 +8,7 @@ import org.springframework.resilience.annotation.EnableResilientMethods;
 @EnableResilientMethods
 public class AiPoweredSearchApplication {
 
-    public static void main(String[] args) {
-        SpringApplication.run(AiPoweredSearchApplication.class, args);
-    }
-
+  public static void main(String[] args) {
+    SpringApplication.run(AiPoweredSearchApplication.class, args);
+  }
 }

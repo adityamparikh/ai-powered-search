@@ -1,9 +1,16 @@
 package dev.aparikh.aipoweredsearch.solr.vectorstore;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
+
 import dev.aparikh.aipoweredsearch.config.PostgresTestConfiguration;
 import dev.aparikh.aipoweredsearch.config.RestClientConfig;
 import dev.aparikh.aipoweredsearch.config.SolrConfig;
 import dev.aparikh.aipoweredsearch.config.SolrTestConfiguration;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.stream.IntStream;
 import org.apache.solr.client.solrj.SolrClient;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -24,51 +31,47 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.solr.SolrContainer;
 
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-import java.util.stream.IntStream;
-
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.awaitility.Awaitility.await;
-
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE,
-        properties = {
-                "spring.ai.openai.embedding.options.model=text-embedding-3-small"
-        })
+@SpringBootTest(
+    webEnvironment = SpringBootTest.WebEnvironment.NONE,
+    properties = {"spring.ai.openai.embedding.options.model=text-embedding-3-small"})
 @Testcontainers
-@Import({PostgresTestConfiguration.class, RestClientConfig.class, SolrConfig.class, SolrTestConfiguration.class, SolrVectorStoreIT.TestConfig.class})
+@Import({
+  PostgresTestConfiguration.class,
+  RestClientConfig.class,
+  SolrConfig.class,
+  SolrTestConfiguration.class,
+  SolrVectorStoreIT.TestConfig.class
+})
 @EnabledIfEnvironmentVariable(named = "OPENAI_API_KEY", matches = ".+")
 class SolrVectorStoreIT {
 
-    private static final String COLLECTION_NAME = "test_collection";
+  private static final String COLLECTION_NAME = "test_collection";
 
-    @Autowired
-    SolrContainer solrContainer;
+  @Autowired SolrContainer solrContainer;
 
-    @Autowired
-    private SolrClient solrClient;
+  @Autowired private SolrClient solrClient;
 
-    @Autowired
-    private VectorStore vectorStore;
+  @Autowired private VectorStore vectorStore;
 
-    @DynamicPropertySource
-    static void dynamicProps(DynamicPropertyRegistry registry) {
-        registry.add("solr.default.collection", () -> COLLECTION_NAME);
+  @DynamicPropertySource
+  static void dynamicProps(DynamicPropertyRegistry registry) {
+    registry.add("solr.default.collection", () -> COLLECTION_NAME);
+  }
+
+  private List<Document> documents;
+
+  @BeforeEach
+  void setUp() throws Exception {
+    // Create collection (idempotent) and schema
+    try {
+      solrContainer.execInContainer(
+          "/opt/solr/bin/solr", "create", "-c", COLLECTION_NAME, "-d", "_default");
+    } catch (Exception ignored) {
     }
-
-    private List<Document> documents;
-
-    @BeforeEach
-    void setUp() throws Exception {
-        // Create collection (idempotent) and schema
-        try {
-            solrContainer.execInContainer("/opt/solr/bin/solr", "create", "-c", COLLECTION_NAME, "-d", "_default");
-        } catch (Exception ignored) {
-        }
-        // Add vector field type and field
-        try {
-            String addFieldTypeJson = """
+    // Add vector field type and field
+    try {
+      String addFieldTypeJson =
+          """
                     {
                       "add-field-type": {
                         "name": "knn_vector_1536",
@@ -79,7 +82,8 @@ class SolrVectorStoreIT {
                       }
                     }
                     """;
-            String addFieldJson = """
+      String addFieldJson =
+          """
                     {
                       "add-field": {
                         "name": "vector",
@@ -89,298 +93,319 @@ class SolrVectorStoreIT {
                       }
                     }
                     """;
-            solrContainer.execInContainer("curl", "-X", "POST",
-                    "http://localhost:8983/solr/" + COLLECTION_NAME + "/schema",
-                    "-H", "Content-Type: application/json",
-                    "-d", addFieldTypeJson);
-            solrContainer.execInContainer("curl", "-X", "POST",
-                    "http://localhost:8983/solr/" + COLLECTION_NAME + "/schema",
-                    "-H", "Content-Type: application/json",
-                    "-d", addFieldJson);
-            Thread.sleep(500);
-        } catch (Exception ignored) {
-        }
-
-        // Clean database before each test
-        try {
-            solrClient.deleteByQuery(COLLECTION_NAME, "*:*");
-            solrClient.commit(COLLECTION_NAME);
-        } catch (Exception ignored) {
-        }
-
-        // Initialize test documents
-        documents = List.of(
-                new Document("1", "Spring AI provides abstractions for AI models", Map.of("category", "AI", "year", 2024)),
-                new Document("2", "Vector databases store embeddings for similarity search", Map.of("category", "Database", "year", 2024)),
-                new Document("3", "Apache Solr supports dense vector fields for KNN search", Map.of("category", "Search", "year", 2023))
-        );
+      solrContainer.execInContainer(
+          "curl",
+          "-X",
+          "POST",
+          "http://localhost:8983/solr/" + COLLECTION_NAME + "/schema",
+          "-H",
+          "Content-Type: application/json",
+          "-d",
+          addFieldTypeJson);
+      solrContainer.execInContainer(
+          "curl",
+          "-X",
+          "POST",
+          "http://localhost:8983/solr/" + COLLECTION_NAME + "/schema",
+          "-H",
+          "Content-Type: application/json",
+          "-d",
+          addFieldJson);
+      Thread.sleep(500);
+    } catch (Exception ignored) {
     }
 
-    @Test
-    void addAndDeleteDocumentsTest() throws Exception {
-        // Initially should have 0 documents
-        long initialCount = solrClient.query(COLLECTION_NAME, new org.apache.solr.client.solrj.request.SolrQuery("*:*"))
-                .getResults().getNumFound();
-        assertThat(initialCount).isEqualTo(0);
-
-        // Add documents
-        vectorStore.add(documents);
-
-        // Wait for indexing to complete
-        await().untilAsserted(() -> {
-            long count = solrClient.query(COLLECTION_NAME, new org.apache.solr.client.solrj.request.SolrQuery("*:*"))
-                    .getResults().getNumFound();
-            assertThat(count).isEqualTo(3);
-        });
-
-        // Delete documents
-        vectorStore.delete(List.of("1", "2", "3"));
-
-        // Wait for deletion to complete
-        await().untilAsserted(() -> {
-            long count = solrClient.query(COLLECTION_NAME, new org.apache.solr.client.solrj.request.SolrQuery("*:*"))
-                    .getResults().getNumFound();
-            assertThat(count).isEqualTo(0);
-        });
+    // Clean database before each test
+    try {
+      solrClient.deleteByQuery(COLLECTION_NAME, "*:*");
+      solrClient.commit(COLLECTION_NAME);
+    } catch (Exception ignored) {
     }
 
-    @Test
-    void addAndSearchTest() {
-        // Add documents
-        vectorStore.add(documents);
+    // Initialize test documents
+    documents =
+        List.of(
+            new Document(
+                "1",
+                "Spring AI provides abstractions for AI models",
+                Map.of("category", "AI", "year", 2024)),
+            new Document(
+                "2",
+                "Vector databases store embeddings for similarity search",
+                Map.of("category", "Database", "year", 2024)),
+            new Document(
+                "3",
+                "Apache Solr supports dense vector fields for KNN search",
+                Map.of("category", "Search", "year", 2023)));
+  }
 
-        // Wait for indexing
-        await().untilAsserted(() -> {
-            List<Document> results = vectorStore.similaritySearch(
-                    SearchRequest.builder()
-                            .query("AI abstractions")
-                            .topK(5)
-                            .build()
-            );
-            assertThat(results).isNotEmpty();
-        });
+  @Test
+  void addAndDeleteDocumentsTest() throws Exception {
+    // Initially should have 0 documents
+    long initialCount =
+        solrClient
+            .query(COLLECTION_NAME, new org.apache.solr.client.solrj.request.SolrQuery("*:*"))
+            .getResults()
+            .getNumFound();
+    assertThat(initialCount).isEqualTo(0);
 
-        // Search for AI-related content
-        List<Document> results = vectorStore.similaritySearch(
-                SearchRequest.builder()
-                        .query("AI abstractions")
-                        .topK(5)
-                        .build()
-        );
+    // Add documents
+    vectorStore.add(documents);
 
-        assertThat(results).hasSizeGreaterThanOrEqualTo(1);
+    // Wait for indexing to complete
+    await()
+        .untilAsserted(
+            () -> {
+              long count =
+                  solrClient
+                      .query(
+                          COLLECTION_NAME,
+                          new org.apache.solr.client.solrj.request.SolrQuery("*:*"))
+                      .getResults()
+                      .getNumFound();
+              assertThat(count).isEqualTo(3);
+            });
 
-        // The first result should be the most relevant
-        Document firstResult = results.get(0);
-        assertThat(firstResult.getId()).isEqualTo("1");
-        assertThat(firstResult.getText()).contains("Spring AI");
+    // Delete documents
+    vectorStore.delete(List.of("1", "2", "3"));
 
-        // Verify metadata is preserved
-        assertThat(firstResult.getMetadata()).containsEntry("category", "AI");
+    // Wait for deletion to complete
+    await()
+        .untilAsserted(
+            () -> {
+              long count =
+                  solrClient
+                      .query(
+                          COLLECTION_NAME,
+                          new org.apache.solr.client.solrj.request.SolrQuery("*:*"))
+                      .getResults()
+                      .getNumFound();
+              assertThat(count).isEqualTo(0);
+            });
+  }
 
-        // Verify score exists
-        assertThat(firstResult.getMetadata()).containsKey("score");
-    }
+  @Test
+  void addAndSearchTest() {
+    // Add documents
+    vectorStore.add(documents);
 
-    @Test
-    void searchWithFiltersTest() {
-        // Add documents
-        vectorStore.add(documents);
+    // Wait for indexing
+    await()
+        .untilAsserted(
+            () -> {
+              List<Document> results =
+                  vectorStore.similaritySearch(
+                      SearchRequest.builder().query("AI abstractions").topK(5).build());
+              assertThat(results).isNotEmpty();
+            });
 
-        // Wait for indexing
-        await().untilAsserted(() -> {
-            List<Document> results = vectorStore.similaritySearch(
-                    SearchRequest.builder()
-                            .query("database")
-                            .topK(5)
-                            .build()
-            );
-            assertThat(results).isNotEmpty();
-        });
+    // Search for AI-related content
+    List<Document> results =
+        vectorStore.similaritySearch(
+            SearchRequest.builder().query("AI abstractions").topK(5).build());
 
-        // Note: SolrVectorStore supports Spring AI filter expression syntax (e.g., "category == 'AI'")
-        // The filter is converted to Solr query syntax internally by SolrVectorStore.convertFilterToSolrQuery()
+    assertThat(results).hasSizeGreaterThanOrEqualTo(1);
 
-        // Test filter: category == 'AI' (Spring AI syntax)
-        List<Document> aiResults = vectorStore.similaritySearch(
-                SearchRequest.builder()
-                        .query("technology")
-                        .topK(5)
-                        .filterExpression("category == 'AI'")
-                        .build()
-        );
-        assertThat(aiResults).hasSize(1);
-        assertThat(aiResults.get(0).getMetadata().get("category")).isEqualTo("AI");
+    // The first result should be the most relevant
+    Document firstResult = results.get(0);
+    assertThat(firstResult.getId()).isEqualTo("1");
+    assertThat(firstResult.getText()).contains("Spring AI");
 
-        // Test filter: year == 2024 (Spring AI syntax)
-        List<Document> year2024Results = vectorStore.similaritySearch(
-                SearchRequest.builder()
-                        .query("information")
-                        .topK(5)
-                        .filterExpression("year == '2024'")
-                        .build()
-        );
-        assertThat(year2024Results).hasSize(2);
+    // Verify metadata is preserved
+    assertThat(firstResult.getMetadata()).containsEntry("category", "AI");
 
-        // Test filter: year == 2023 (Spring AI syntax)
-        List<Document> year2023Results = vectorStore.similaritySearch(
-                SearchRequest.builder()
-                        .query("search")
-                        .topK(5)
-                        .filterExpression("year == '2023'")
-                        .build()
-        );
-        assertThat(year2023Results).hasSize(1);
-        assertThat(year2023Results.get(0).getMetadata().get("category")).isEqualTo("Search");
-    }
+    // Verify score exists
+    assertThat(firstResult.getMetadata()).containsKey("score");
+  }
 
-    @Test
-    void documentUpdateTest() {
-        // Add initial document
-        Document originalDoc = new Document("update-test", "Original content", Map.of("version", 1));
-        vectorStore.add(List.of(originalDoc));
+  @Test
+  void searchWithFiltersTest() {
+    // Add documents
+    vectorStore.add(documents);
 
-        // Wait for indexing
-        await().untilAsserted(() -> {
-            List<Document> results = vectorStore.similaritySearch(
-                    SearchRequest.builder()
-                            .query("Original")
-                            .topK(1)
-                            .build()
-            );
-            assertThat(results).hasSize(1);
-        });
+    // Wait for indexing
+    await()
+        .untilAsserted(
+            () -> {
+              List<Document> results =
+                  vectorStore.similaritySearch(
+                      SearchRequest.builder().query("database").topK(5).build());
+              assertThat(results).isNotEmpty();
+            });
 
-        // Update document with same ID
-        Document updatedDoc = new Document("update-test", "Updated content", Map.of("version", 2));
-        vectorStore.add(List.of(updatedDoc));
+    // Note: SolrVectorStore supports Spring AI filter expression syntax (e.g., "category == 'AI'")
+    // The filter is converted to Solr query syntax internally by
+    // SolrVectorStore.convertFilterToSolrQuery()
 
-        // Wait for update
-        await().untilAsserted(() -> {
-            List<Document> results = vectorStore.similaritySearch(
-                    SearchRequest.builder()
-                            .query("Updated")
-                            .topK(1)
-                            .build()
-            );
-            assertThat(results).hasSize(1);
-            assertThat(results.get(0).getText()).isEqualTo("Updated content");
-            assertThat(results.get(0).getMetadata().get("version")).isEqualTo(2L);
-        });
-    }
+    // Test filter: category == 'AI' (Spring AI syntax)
+    List<Document> aiResults =
+        vectorStore.similaritySearch(
+            SearchRequest.builder()
+                .query("technology")
+                .topK(5)
+                .filterExpression("category == 'AI'")
+                .build());
+    assertThat(aiResults).hasSize(1);
+    assertThat(aiResults.get(0).getMetadata().get("category")).isEqualTo("AI");
 
-    @Test
-    void searchThresholdTest() {
-        // Add documents
-        vectorStore.add(documents);
+    // Test filter: year == 2024 (Spring AI syntax)
+    List<Document> year2024Results =
+        vectorStore.similaritySearch(
+            SearchRequest.builder()
+                .query("information")
+                .topK(5)
+                .filterExpression("year == '2024'")
+                .build());
+    assertThat(year2024Results).hasSize(2);
 
-        // Wait for indexing
-        await().untilAsserted(() -> {
-            List<Document> results = vectorStore.similaritySearch(
-                    SearchRequest.builder()
-                            .query("AI")
-                            .topK(5)
-                            .build()
-            );
-            assertThat(results).isNotEmpty();
-        });
+    // Test filter: year == 2023 (Spring AI syntax)
+    List<Document> year2023Results =
+        vectorStore.similaritySearch(
+            SearchRequest.builder()
+                .query("search")
+                .topK(5)
+                .filterExpression("year == '2023'")
+                .build());
+    assertThat(year2023Results).hasSize(1);
+    assertThat(year2023Results.get(0).getMetadata().get("category")).isEqualTo("Search");
+  }
 
-        // Get results without threshold
-        List<Document> allResults = vectorStore.similaritySearch(
-                SearchRequest.builder()
-                        .query("AI technology")
-                        .topK(3)
-                        .build()
-        );
+  @Test
+  void documentUpdateTest() {
+    // Add initial document
+    Document originalDoc = new Document("update-test", "Original content", Map.of("version", 1));
+    vectorStore.add(List.of(originalDoc));
 
-        assertThat(allResults).hasSizeGreaterThanOrEqualTo(2);
+    // Wait for indexing
+    await()
+        .untilAsserted(
+            () -> {
+              List<Document> results =
+                  vectorStore.similaritySearch(
+                      SearchRequest.builder().query("Original").topK(1).build());
+              assertThat(results).hasSize(1);
+            });
 
-        // Get scores
-        double score1 = ((Number) allResults.get(0).getMetadata().get("score")).doubleValue();
-        double score2 = ((Number) allResults.get(1).getMetadata().get("score")).doubleValue();
+    // Update document with same ID
+    Document updatedDoc = new Document("update-test", "Updated content", Map.of("version", 2));
+    vectorStore.add(List.of(updatedDoc));
 
-        // Set threshold between first and second result
-        double threshold = (score1 + score2) / 2.0;
+    // Wait for update
+    await()
+        .untilAsserted(
+            () -> {
+              List<Document> results =
+                  vectorStore.similaritySearch(
+                      SearchRequest.builder().query("Updated").topK(1).build());
+              assertThat(results).hasSize(1);
+              assertThat(results.get(0).getText()).isEqualTo("Updated content");
+              assertThat(results.get(0).getMetadata().get("version")).isEqualTo(2L);
+            });
+  }
 
-        // Search with threshold
-        List<Document> filteredResults = vectorStore.similaritySearch(
-                SearchRequest.builder()
-                        .query("AI technology")
-                        .topK(3)
-                        .similarityThreshold(threshold)
-                        .build()
-        );
+  @Test
+  void searchThresholdTest() {
+    // Add documents
+    vectorStore.add(documents);
 
-        // Should only get the top result
-        assertThat(filteredResults).hasSize(1);
-        assertThat(filteredResults.get(0).getId()).isEqualTo(allResults.get(0).getId());
-    }
+    // Wait for indexing
+    await()
+        .untilAsserted(
+            () -> {
+              List<Document> results =
+                  vectorStore.similaritySearch(SearchRequest.builder().query("AI").topK(5).build());
+              assertThat(results).isNotEmpty();
+            });
 
-    @Test
-    void overDefaultSizeTest() {
-        // Create 15 documents
-        List<Document> manyDocs = IntStream.range(0, 15)
-                .mapToObj(i -> new Document(
+    // Get results without threshold
+    List<Document> allResults =
+        vectorStore.similaritySearch(
+            SearchRequest.builder().query("AI technology").topK(3).build());
+
+    assertThat(allResults).hasSizeGreaterThanOrEqualTo(2);
+
+    // Get scores
+    double score1 = ((Number) allResults.get(0).getMetadata().get("score")).doubleValue();
+    double score2 = ((Number) allResults.get(1).getMetadata().get("score")).doubleValue();
+
+    // Set threshold between first and second result
+    double threshold = (score1 + score2) / 2.0;
+
+    // Search with threshold
+    List<Document> filteredResults =
+        vectorStore.similaritySearch(
+            SearchRequest.builder()
+                .query("AI technology")
+                .topK(3)
+                .similarityThreshold(threshold)
+                .build());
+
+    // Should only get the top result
+    assertThat(filteredResults).hasSize(1);
+    assertThat(filteredResults.get(0).getId()).isEqualTo(allResults.get(0).getId());
+  }
+
+  @Test
+  void overDefaultSizeTest() {
+    // Create 15 documents
+    List<Document> manyDocs =
+        IntStream.range(0, 15)
+            .mapToObj(
+                i ->
+                    new Document(
                         "doc-" + i,
                         "Document number " + i + " about various topics",
-                        Map.of("index", i)
-                ))
-                .toList();
+                        Map.of("index", i)))
+            .toList();
 
-        // Add documents
-        vectorStore.add(manyDocs);
+    // Add documents
+    vectorStore.add(manyDocs);
 
-        // Wait for indexing
-        await().untilAsserted(() -> {
-            List<Document> results = vectorStore.similaritySearch(
-                    SearchRequest.builder()
-                            .query("topics")
-                            .topK(15)
-                            .build()
-            );
-            assertThat(results).hasSizeGreaterThanOrEqualTo(10);
-        });
+    // Wait for indexing
+    await()
+        .untilAsserted(
+            () -> {
+              List<Document> results =
+                  vectorStore.similaritySearch(
+                      SearchRequest.builder().query("topics").topK(15).build());
+              assertThat(results).hasSizeGreaterThanOrEqualTo(10);
+            });
 
-        // Search with topK > default size
-        List<Document> results = vectorStore.similaritySearch(
-                SearchRequest.builder()
-                        .query("topics")
-                        .topK(15)
-                        .build()
-        );
+    // Search with topK > default size
+    List<Document> results =
+        vectorStore.similaritySearch(SearchRequest.builder().query("topics").topK(15).build());
 
-        assertThat(results).hasSizeGreaterThanOrEqualTo(10);
+    assertThat(results).hasSizeGreaterThanOrEqualTo(10);
+  }
+
+  @Test
+  void getNativeClientTest() {
+    // Get native client
+    Optional<Object> nativeClient = vectorStore.getNativeClient();
+
+    // Verify native client is available
+    assertThat(nativeClient).isPresent();
+    assertThat(nativeClient.get()).isInstanceOf(SolrClient.class);
+
+    // Verify native client is functional
+    SolrClient client = (SolrClient) nativeClient.get();
+    assertThat(client).isNotNull();
+  }
+
+  @TestConfiguration
+  static class TestConfig {
+
+    @Bean
+    EmbeddingModel embeddingModel() {
+      return new OpenAiEmbeddingModel(
+          OpenAiEmbeddingOptions.builder().apiKey(System.getenv("OPENAI_API_KEY")).build());
     }
 
-    @Test
-    void getNativeClientTest() {
-        // Get native client
-        Optional<Object> nativeClient = vectorStore.getNativeClient();
-
-        // Verify native client is available
-        assertThat(nativeClient).isPresent();
-        assertThat(nativeClient.get()).isInstanceOf(SolrClient.class);
-
-        // Verify native client is functional
-        SolrClient client = (SolrClient) nativeClient.get();
-        assertThat(client).isNotNull();
+    @Bean
+    VectorStore vectorStore(SolrClient solrClient, EmbeddingModel embeddingModel) {
+      return SolrVectorStore.builder(solrClient, COLLECTION_NAME, embeddingModel)
+          .options(SolrVectorStoreOptions.defaults())
+          .build();
     }
-
-    @TestConfiguration
-    static class TestConfig {
-
-        @Bean
-        EmbeddingModel embeddingModel() {
-            return new OpenAiEmbeddingModel(OpenAiEmbeddingOptions.builder()
-                    .apiKey(System.getenv("OPENAI_API_KEY"))
-                    .build());
-        }
-
-        @Bean
-        VectorStore vectorStore(SolrClient solrClient, EmbeddingModel embeddingModel) {
-            return SolrVectorStore.builder(solrClient, COLLECTION_NAME, embeddingModel)
-                    .options(SolrVectorStoreOptions.defaults())
-                    .build();
-        }
-    }
+  }
 }

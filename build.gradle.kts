@@ -11,6 +11,7 @@ plugins {
     id("org.sonarqube") version "7.5.0.8588"
     jacoco
     id("net.ltgt.errorprone") version "5.1.1"
+    id("com.diffplug.spotless") version "8.0.0"
 }
 
 group = "dev.aparikh"
@@ -143,5 +144,13 @@ sonar {
         property("sonar.java.test.binaries", "build/classes/java/test")
         property("sonar.coverage.jacoco.xmlReportPaths", "build/reports/jacoco/test/jacocoTestReport.xml")
         property("sonar.exclusions", "**/*Application.java,**/*Config.java,**/model/**,**/dto/**")
+    }
+}
+
+// Google Java Format, enforced by `check` (and so by `build`). Run `./gradlew spotlessApply` to fix.
+spotless {
+    java {
+        target("src/**/*.java")
+        googleJavaFormat()
     }
 }

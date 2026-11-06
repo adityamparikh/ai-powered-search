@@ -14,14 +14,11 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 @SpringBootTest
 class AiPoweredSearchApplicationTests {
 
+  @DynamicPropertySource
+  static void configureSolrProperties(DynamicPropertyRegistry registry) {
+    registry.add("spring.ai.openai.api-key", () -> "test-key");
+  }
 
-    @DynamicPropertySource
-    static void configureSolrProperties(DynamicPropertyRegistry registry) {
-        registry.add("spring.ai.openai.api-key", () -> "test-key");
-    }
-
-    @Test
-    void contextLoads() {
-    }
-
+  @Test
+  void contextLoads() {}
 }

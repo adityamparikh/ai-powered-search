@@ -13,20 +13,22 @@ import org.springframework.ai.chat.model.ChatResponse;
 /**
  * Advisor that logs Anthropic prompt caching metrics when caching is enabled.
  *
- * <p>This advisor intercepts chat responses and extracts cache-related token usage
- * statistics from the Anthropic API response. It logs cache hits, misses, and cost
- * savings when prompt caching is active.</p>
+ * <p>This advisor intercepts chat responses and extracts cache-related token usage statistics from
+ * the Anthropic API response. It logs cache hits, misses, and cost savings when prompt caching is
+ * active.
  *
- * <p>Logged metrics include:</p>
+ * <p>Logged metrics include:
+ *
  * <ul>
- *   <li>Cache creation tokens - Input tokens written to cache (cache miss)</li>
- *   <li>Cache read tokens - Input tokens read from cache (cache hit)</li>
- *   <li>Regular input tokens - Input tokens not eligible for caching</li>
- *   <li>Output tokens - Tokens generated in the response</li>
- *   <li>Cost savings - Percentage reduction in costs from cache hits</li>
+ *   <li>Cache creation tokens - Input tokens written to cache (cache miss)
+ *   <li>Cache read tokens - Input tokens read from cache (cache hit)
+ *   <li>Regular input tokens - Input tokens not eligible for caching
+ *   <li>Output tokens - Tokens generated in the response
+ *   <li>Cost savings - Percentage reduction in costs from cache hits
  * </ul>
  *
- * <p>Example log output:</p>
+ * <p>Example log output:
+ *
  * <pre>
  * [Prompt Caching] Cache HIT - Read: 2048 tokens, Regular: 256 tokens, Output: 150 tokens
  * [Prompt Caching] Cost savings: ~80% (cache read is 90% cheaper than regular input)
@@ -37,232 +39,266 @@ import org.springframework.ai.chat.model.ChatResponse;
  */
 public class PromptCacheMetricsAdvisor implements BaseAdvisor {
 
-    private static final Logger log = LoggerFactory.getLogger(PromptCacheMetricsAdvisor.class);
+  private static final Logger log = LoggerFactory.getLogger(PromptCacheMetricsAdvisor.class);
 
-    private final boolean cachingEnabled;
+  private final boolean cachingEnabled;
 
-    public PromptCacheMetricsAdvisor(boolean cachingEnabled) {
-        this.cachingEnabled = cachingEnabled;
+  public PromptCacheMetricsAdvisor(boolean cachingEnabled) {
+    this.cachingEnabled = cachingEnabled;
+  }
+
+  /**
+   * Returns a new builder for {@link PromptCacheMetricsAdvisor}.
+   *
+   * <p>This enables a consistent builder paradigm alongside other Spring AI advisors that already
+   * expose builders.
+   */
+  public static Builder builder() {
+    return new Builder();
+  }
+
+  /** Fluent builder for {@link PromptCacheMetricsAdvisor}. */
+  public static final class Builder {
+    private boolean cachingEnabled;
+
+    private Builder() {}
+
+    /**
+     * Enables or disables prompt caching metrics logging.
+     *
+     * @param cachingEnabled whether caching is enabled
+     * @return this builder instance
+     */
+    public Builder cachingEnabled(boolean cachingEnabled) {
+      this.cachingEnabled = cachingEnabled;
+      return this;
     }
 
     /**
-     * Returns a new builder for {@link PromptCacheMetricsAdvisor}.
+     * Builds the {@link PromptCacheMetricsAdvisor}.
      *
-     * <p>This enables a consistent builder paradigm alongside other Spring AI advisors
-     * that already expose builders.</p>
+     * @return a configured advisor instance
      */
-    public static Builder builder() {
-        return new Builder();
+    public PromptCacheMetricsAdvisor build() {
+      return new PromptCacheMetricsAdvisor(this.cachingEnabled);
+    }
+  }
+
+  @Override
+  public ChatClientRequest before(ChatClientRequest request, AdvisorChain advisorChain) {
+    if (cachingEnabled) {
+      log.debug(
+          "[Prompt Caching] PromptCacheMetricsAdvisor@{}.before() invoked",
+          System.identityHashCode(this));
+    }
+    // Just pass through - we only care about the response
+    return request;
+  }
+
+  @Override
+  public ChatClientResponse after(ChatClientResponse response, AdvisorChain advisorChain) {
+    if (!cachingEnabled) {
+      return response;
+    }
+    try {
+      log.debug(
+          "[Prompt Caching] PromptCacheMetricsAdvisor@{}.after() invoked, cachingEnabled={}, response={}, chatResponse={}",
+          System.identityHashCode(this),
+          cachingEnabled,
+          response != null,
+          response != null && response.chatResponse() != null);
+
+      // Log cache metrics if caching is enabled
+      if (response != null && response.chatResponse() != null) {
+        logCacheMetrics(response.chatResponse());
+      }
+
+      log.debug(
+          "[Prompt Caching] PromptCacheMetricsAdvisor@{}.after() END",
+          System.identityHashCode(this));
+      return response;
+    } catch (Exception e) {
+      log.error(
+          "[Prompt Caching] PromptCacheMetricsAdvisor@{}.after() ERROR",
+          System.identityHashCode(this),
+          e);
+      throw e;
+    }
+  }
+
+  /**
+   * Extracts and logs cache-related metrics from the chat response.
+   *
+   * @param response the chat response from Anthropic API
+   */
+  private void logCacheMetrics(ChatResponse response) {
+    Usage usage = response.getMetadata().getUsage();
+    if (usage == null || usage.getNativeUsage() == null) {
+      log.debug("[Prompt Caching] No usage metadata available");
+      return;
     }
 
-    /**
-     * Fluent builder for {@link PromptCacheMetricsAdvisor}.
-     */
-    public static final class Builder {
-        private boolean cachingEnabled;
-
-        private Builder() {
-        }
-
-        /**
-         * Enables or disables prompt caching metrics logging.
-         *
-         * @param cachingEnabled whether caching is enabled
-         * @return this builder instance
-         */
-        public Builder cachingEnabled(boolean cachingEnabled) {
-            this.cachingEnabled = cachingEnabled;
-            return this;
-        }
-
-        /**
-         * Builds the {@link PromptCacheMetricsAdvisor}.
-         *
-         * @return a configured advisor instance
-         */
-        public PromptCacheMetricsAdvisor build() {
-            return new PromptCacheMetricsAdvisor(this.cachingEnabled);
-        }
+    Object nativeUsage = usage.getNativeUsage();
+    // Spring AI 2.x reports native usage using the official Anthropic SDK type rather than its
+    // own AnthropicApi.Usage. Cache counters are optional there and token counts are longs.
+    if (!(nativeUsage instanceof com.anthropic.models.messages.Usage anthropicUsage)) {
+      log.debug(
+          "[Prompt Caching] Native usage is not an Anthropic Usage: {}",
+          nativeUsage != null ? nativeUsage.getClass().getName() : "null");
+      return;
     }
 
-    @Override
-    public ChatClientRequest before(ChatClientRequest request, AdvisorChain advisorChain) {
-        if (cachingEnabled) {
-            log.debug("[Prompt Caching] PromptCacheMetricsAdvisor@{}.before() invoked",
-                    System.identityHashCode(this));
-        }
-        // Just pass through - we only care about the response
-        return request;
+    Integer cacheCreationTokens =
+        anthropicUsage.cacheCreationInputTokens().map(Math::toIntExact).orElse(null);
+    Integer cacheReadTokens =
+        anthropicUsage.cacheReadInputTokens().map(Math::toIntExact).orElse(null);
+    Integer regularInputTokens = Math.toIntExact(anthropicUsage.inputTokens());
+    Integer outputTokens = Math.toIntExact(anthropicUsage.outputTokens());
+
+    log.debug(
+        "[Prompt Caching] Token metrics - Creation: {}, Read: {}, Regular: {}, Output: {}",
+        cacheCreationTokens,
+        cacheReadTokens,
+        regularInputTokens,
+        outputTokens);
+
+    // Only log if there's cache activity
+    if ((cacheCreationTokens != null && cacheCreationTokens > 0)
+        || (cacheReadTokens != null && cacheReadTokens > 0)) {
+
+      logCacheActivity(cacheCreationTokens, cacheReadTokens, regularInputTokens, outputTokens);
+    } else {
+      log.debug(
+          "[Prompt Caching] No cache activity detected. "
+              + "Prompt may be too small (<1024 tokens) or caching not configured properly.");
+    }
+  }
+
+  /**
+   * Logs cache activity with detailed metrics and cost savings calculation.
+   *
+   * @param cacheCreationTokens tokens written to cache (cache miss)
+   * @param cacheReadTokens tokens read from cache (cache hit)
+   * @param regularInputTokens regular input tokens not cached
+   * @param outputTokens output tokens generated
+   */
+  private void logCacheActivity(
+      @Nullable Integer cacheCreationTokens,
+      @Nullable Integer cacheReadTokens,
+      @Nullable Integer regularInputTokens,
+      @Nullable Integer outputTokens) {
+
+    if (cacheReadTokens != null && cacheReadTokens > 0) {
+      log.info(
+          "[Prompt Caching] Cache HIT - Read: {} tokens, Regular input: {} tokens, Output: {} tokens",
+          cacheReadTokens,
+          regularInputTokens != null ? regularInputTokens : 0,
+          outputTokens != null ? outputTokens : 0);
+
+      // Calculate approximate cost savings
+      // According to Anthropic: cache reads are 90% cheaper than regular input tokens
+      // Reference: https://www.anthropic.com/news/prompt-caching
+      double savingsPercentage = calculateSavings(cacheReadTokens, regularInputTokens);
+      log.info("[Prompt Caching] Cost savings: ~{}%", String.format("%.1f", savingsPercentage));
+
+    } else if (cacheCreationTokens != null && cacheCreationTokens > 0) {
+      log.info(
+          "[Prompt Caching] Cache MISS - Created: {} tokens, Regular input: {} tokens, Output: {} tokens",
+          cacheCreationTokens,
+          regularInputTokens != null ? regularInputTokens : 0,
+          outputTokens != null ? outputTokens : 0);
+      log.info(
+          "[Prompt Caching] Cache created. Subsequent requests with identical prompts will benefit from ~90% cost reduction");
+    }
+  }
+
+  /**
+   * Calculates the approximate cost savings from cache hits.
+   *
+   * <h3>Background: Anthropic Prompt Caching</h3>
+   *
+   * <p>When a cached prompt is reused, Anthropic charges 90% less for those input tokens compared
+   * to a regular (uncached) prompt. So, cached reads cost only 10% of regular input tokens.
+   *
+   * <h3>Cost Calculation Logic</h3>
+   *
+   * <p>Let's define:
+   *
+   * <ul>
+   *   <li><b>C</b> = cacheReadTokens (number of tokens read from cache)
+   *   <li><b>R</b> = regularInputTokens (regular tokens, not eligible for caching)
+   *   <li><b>Total Input Tokens</b>: T = C + R
+   *   <li><b>Regular cost per token</b>: Assume it's 1 unit of cost
+   * </ul>
+   *
+   * <p><b>Step 1: Cost Without Caching</b>
+   *
+   * <p>If there were no caching, you'd pay full price for all input tokens:
+   *
+   * <pre>costWithoutCaching = (C + R) × 1.0</pre>
+   *
+   * <p><b>Step 2: Cost With Caching</b>
+   *
+   * <p>Now, with Anthropic caching:
+   *
+   * <ul>
+   *   <li>Cached tokens cost: C × 0.1 (since cache reads are 90% cheaper)
+   *   <li>Regular tokens cost: R × 1.0
+   * </ul>
+   *
+   * <pre>totalEffectiveCost = (C × 0.1) + (R × 1.0)</pre>
+   *
+   * <p><b>Step 3: Cost Savings Calculation</b>
+   *
+   * <p>The percentage saved compared to no caching:
+   *
+   * <pre>savings = ((costWithoutCaching - totalEffectiveCost) / costWithoutCaching) × 100</pre>
+   *
+   * <p><b>Example:</b>
+   *
+   * <p>Suppose C = 1000 (cached) and R = 100 (regular):
+   *
+   * <ul>
+   *   <li>Without caching: 1100 × 1.0 = 1100
+   *   <li>With caching: (1000 × 0.1) + (100 × 1.0) = 100 + 100 = 200
+   *   <li>Savings: (1100 - 200) / 1100 × 100 = 900 / 1100 × 100 ≈ 81.8%
+   * </ul>
+   *
+   * @param cacheReadTokens number of tokens read from cache
+   * @param regularInputTokens number of regular input tokens
+   * @return percentage of cost savings due to prompt caching
+   */
+  private double calculateSavings(Integer cacheReadTokens, @Nullable Integer regularInputTokens) {
+    if (cacheReadTokens == null || cacheReadTokens == 0) {
+      return 0.0;
     }
 
-    @Override
-    public ChatClientResponse after(ChatClientResponse response, AdvisorChain advisorChain) {
-        if (!cachingEnabled) {
-            return response;
-        }
-        try {
-            log.debug("[Prompt Caching] PromptCacheMetricsAdvisor@{}.after() invoked, cachingEnabled={}, response={}, chatResponse={}",
-                    System.identityHashCode(this), cachingEnabled, response != null, response != null && response.chatResponse() != null);
+    int regularTokens = regularInputTokens != null ? regularInputTokens : 0;
+    int totalInputTokens = cacheReadTokens + regularTokens;
 
-            // Log cache metrics if caching is enabled
-            if (response != null && response.chatResponse() != null) {
-                logCacheMetrics(response.chatResponse());
-            }
-
-            log.debug("[Prompt Caching] PromptCacheMetricsAdvisor@{}.after() END", System.identityHashCode(this));
-            return response;
-        } catch (Exception e) {
-            log.error("[Prompt Caching] PromptCacheMetricsAdvisor@{}.after() ERROR", System.identityHashCode(this), e);
-            throw e;
-        }
+    if (totalInputTokens == 0) {
+      return 0.0;
     }
 
-    /**
-     * Extracts and logs cache-related metrics from the chat response.
-     *
-     * @param response the chat response from Anthropic API
-     */
-    private void logCacheMetrics(ChatResponse response) {
-        Usage usage = response.getMetadata().getUsage();
-        if (usage == null || usage.getNativeUsage() == null) {
-            log.debug("[Prompt Caching] No usage metadata available");
-            return;
-        }
+    // Cache reads cost 10% of regular reads (90% savings)
+    double effectiveCachedCost = cacheReadTokens * 0.1;
+    double regularCost = regularTokens * 1.0;
+    double totalEffectiveCost = effectiveCachedCost + regularCost;
 
-        Object nativeUsage = usage.getNativeUsage();
-        // Spring AI 2.x reports native usage using the official Anthropic SDK type rather than its
-        // own AnthropicApi.Usage. Cache counters are optional there and token counts are longs.
-        if (!(nativeUsage instanceof com.anthropic.models.messages.Usage anthropicUsage)) {
-            log.debug("[Prompt Caching] Native usage is not an Anthropic Usage: {}",
-                    nativeUsage != null ? nativeUsage.getClass().getName() : "null");
-            return;
-        }
+    // What would it have cost without caching?
+    double costWithoutCaching = totalInputTokens * 1.0;
 
-        Integer cacheCreationTokens = anthropicUsage.cacheCreationInputTokens()
-                .map(Math::toIntExact).orElse(null);
-        Integer cacheReadTokens = anthropicUsage.cacheReadInputTokens()
-                .map(Math::toIntExact).orElse(null);
-        Integer regularInputTokens = Math.toIntExact(anthropicUsage.inputTokens());
-        Integer outputTokens = Math.toIntExact(anthropicUsage.outputTokens());
+    return ((costWithoutCaching - totalEffectiveCost) / costWithoutCaching) * 100;
+  }
 
-        log.debug("[Prompt Caching] Token metrics - Creation: {}, Read: {}, Regular: {}, Output: {}",
-                cacheCreationTokens, cacheReadTokens, regularInputTokens, outputTokens);
+  @Override
+  public String getName() {
+    return "PromptCacheMetricsAdvisor";
+  }
 
-        // Only log if there's cache activity
-        if ((cacheCreationTokens != null && cacheCreationTokens > 0) ||
-                (cacheReadTokens != null && cacheReadTokens > 0)) {
-
-            logCacheActivity(cacheCreationTokens, cacheReadTokens, regularInputTokens, outputTokens);
-        } else {
-            log.debug("[Prompt Caching] No cache activity detected. " +
-                    "Prompt may be too small (<1024 tokens) or caching not configured properly.");
-        }
-    }
-
-    /**
-     * Logs cache activity with detailed metrics and cost savings calculation.
-     *
-     * @param cacheCreationTokens tokens written to cache (cache miss)
-     * @param cacheReadTokens     tokens read from cache (cache hit)
-     * @param regularInputTokens  regular input tokens not cached
-     * @param outputTokens        output tokens generated
-     */
-    private void logCacheActivity(@Nullable Integer cacheCreationTokens, @Nullable Integer cacheReadTokens,
-                                  @Nullable Integer regularInputTokens, @Nullable Integer outputTokens) {
-
-        if (cacheReadTokens != null && cacheReadTokens > 0) {
-            log.info("[Prompt Caching] Cache HIT - Read: {} tokens, Regular input: {} tokens, Output: {} tokens",
-                    cacheReadTokens, regularInputTokens != null ? regularInputTokens : 0, outputTokens != null ? outputTokens : 0);
-
-            // Calculate approximate cost savings
-            // According to Anthropic: cache reads are 90% cheaper than regular input tokens
-            // Reference: https://www.anthropic.com/news/prompt-caching
-            double savingsPercentage = calculateSavings(cacheReadTokens, regularInputTokens);
-            log.info("[Prompt Caching] Cost savings: ~{}%",
-                    String.format("%.1f", savingsPercentage));
-
-        } else if (cacheCreationTokens != null && cacheCreationTokens > 0) {
-            log.info("[Prompt Caching] Cache MISS - Created: {} tokens, Regular input: {} tokens, Output: {} tokens",
-                    cacheCreationTokens, regularInputTokens != null ? regularInputTokens : 0, outputTokens != null ? outputTokens : 0);
-            log.info("[Prompt Caching] Cache created. Subsequent requests with identical prompts will benefit from ~90% cost reduction");
-        }
-    }
-
-    /**
-     * Calculates the approximate cost savings from cache hits.
-     *
-     * <h3>Background: Anthropic Prompt Caching</h3>
-     * <p>When a cached prompt is reused, Anthropic charges 90% less for those input tokens
-     * compared to a regular (uncached) prompt. So, cached reads cost only 10% of regular input tokens.</p>
-     *
-     * <h3>Cost Calculation Logic</h3>
-     * <p>Let's define:</p>
-     * <ul>
-     *   <li><b>C</b> = cacheReadTokens (number of tokens read from cache)</li>
-     *   <li><b>R</b> = regularInputTokens (regular tokens, not eligible for caching)</li>
-     *   <li><b>Total Input Tokens</b>: T = C + R</li>
-     *   <li><b>Regular cost per token</b>: Assume it's 1 unit of cost</li>
-     * </ul>
-     *
-     * <p><b>Step 1: Cost Without Caching</b></p>
-     * <p>If there were no caching, you'd pay full price for all input tokens:</p>
-     * <pre>costWithoutCaching = (C + R) × 1.0</pre>
-     *
-     * <p><b>Step 2: Cost With Caching</b></p>
-     * <p>Now, with Anthropic caching:</p>
-     * <ul>
-     *   <li>Cached tokens cost: C × 0.1 (since cache reads are 90% cheaper)</li>
-     *   <li>Regular tokens cost: R × 1.0</li>
-     * </ul>
-     * <pre>totalEffectiveCost = (C × 0.1) + (R × 1.0)</pre>
-     *
-     * <p><b>Step 3: Cost Savings Calculation</b></p>
-     * <p>The percentage saved compared to no caching:</p>
-     * <pre>savings = ((costWithoutCaching - totalEffectiveCost) / costWithoutCaching) × 100</pre>
-     *
-     * <p><b>Example:</b></p>
-     * <p>Suppose C = 1000 (cached) and R = 100 (regular):</p>
-     * <ul>
-     *   <li>Without caching: 1100 × 1.0 = 1100</li>
-     *   <li>With caching: (1000 × 0.1) + (100 × 1.0) = 100 + 100 = 200</li>
-     *   <li>Savings: (1100 - 200) / 1100 × 100 = 900 / 1100 × 100 ≈ 81.8%</li>
-     * </ul>
-     *
-     * @param cacheReadTokens    number of tokens read from cache
-     * @param regularInputTokens number of regular input tokens
-     * @return percentage of cost savings due to prompt caching
-     */
-    private double calculateSavings(Integer cacheReadTokens, @Nullable Integer regularInputTokens) {
-        if (cacheReadTokens == null || cacheReadTokens == 0) {
-            return 0.0;
-        }
-
-        int regularTokens = regularInputTokens != null ? regularInputTokens : 0;
-        int totalInputTokens = cacheReadTokens + regularTokens;
-
-        if (totalInputTokens == 0) {
-            return 0.0;
-        }
-
-        // Cache reads cost 10% of regular reads (90% savings)
-        double effectiveCachedCost = cacheReadTokens * 0.1;
-        double regularCost = regularTokens * 1.0;
-        double totalEffectiveCost = effectiveCachedCost + regularCost;
-
-        // What would it have cost without caching?
-        double costWithoutCaching = totalInputTokens * 1.0;
-
-        return ((costWithoutCaching - totalEffectiveCost) / costWithoutCaching) * 100;
-    }
-
-    @Override
-    public String getName() {
-        return "PromptCacheMetricsAdvisor";
-    }
-
-    @Override
-    public int getOrder() {
-        // Use same order as SimpleLoggerAdvisor (0) to ensure we're invoked
-        return 0;
-    }
+  @Override
+  public int getOrder() {
+    // Use same order as SimpleLoggerAdvisor (0) to ensure we're invoked
+    return 0;
+  }
 }

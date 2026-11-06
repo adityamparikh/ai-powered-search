@@ -5,8 +5,9 @@ import org.springframework.boot.SpringApplication;
 
 public class TestAiPoweredSearchApplication {
 
-    static void main(String[] args) {
-        SpringApplication.from(AiPoweredSearchApplication::main).with(SolrTestConfiguration.class).run(args);
-    }
-
+  static void main(String[] args) {
+    SpringApplication.from(AiPoweredSearchApplication::main)
+        .with(SolrTestConfiguration.class)
+        .run(args);
+  }
 }

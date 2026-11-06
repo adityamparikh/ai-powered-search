@@ -1,5 +1,13 @@
 package dev.aparikh.aipoweredsearch.search;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.client.ChatClientRequest;
 import org.springframework.ai.chat.memory.ChatMemory;
@@ -15,15 +23,6 @@ import org.springframework.ai.rag.preretrieval.query.expansion.QueryExpander;
 import org.springframework.ai.rag.preretrieval.query.transformation.QueryTransformer;
 import org.springframework.ai.rag.retrieval.search.DocumentRetriever;
 
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.atomic.AtomicReference;
-
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
-
 /**
  * Pins the {@link RetrievalAugmentationAdvisor} behaviour (Spring AI 2.0.1) that the modular-RAG
  * stages of epic #32 rely on. These are W0 findings A1, kept as regression tests so a Spring AI
@@ -31,128 +30,134 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  */
 class RetrievalAugmentationAdvisorContractTest {
 
-    private static final String STANDALONE_KEY = "rag.standalone";
-    private static final String STANDALONE_TEXT = "Books by George R.R. Martin cheaper than A Game of Thrones";
+  private static final String STANDALONE_KEY = "rag.standalone";
+  private static final String STANDALONE_TEXT =
+      "Books by George R.R. Martin cheaper than A Game of Thrones";
 
-    private final AtomicReference<Query> retrieved = new AtomicReference<>();
-    private final AtomicReference<Query> postProcessed = new AtomicReference<>();
-    private final List<String> retrieverThreads = new CopyOnWriteArrayList<>();
+  private final AtomicReference<Query> retrieved = new AtomicReference<>();
+  private final AtomicReference<Query> postProcessed = new AtomicReference<>();
+  private final List<String> retrieverThreads = new CopyOnWriteArrayList<>();
 
-    private final DocumentRetriever recordingRetriever = query -> {
+  private final DocumentRetriever recordingRetriever =
+      query -> {
         retrieved.set(query);
         retrieverThreads.add(Thread.currentThread().getName());
         return List.of(new Document("doc-1", "A Game of Thrones", Map.of()));
-    };
+      };
 
-    /** An expander that writes into the original query's context and returns a rewritten query. */
-    private final QueryExpander handOffExpander = query -> {
+  /** An expander that writes into the original query's context and returns a rewritten query. */
+  private final QueryExpander handOffExpander =
+      query -> {
         query.context().put(STANDALONE_KEY, STANDALONE_TEXT);
-        return List.of(query.mutate()
-                .text(STANDALONE_TEXT)
-                .context(new HashMap<>(query.context()))
-                .build());
-    };
+        return List.of(
+            query.mutate().text(STANDALONE_TEXT).context(new HashMap<>(query.context())).build());
+      };
 
-    private RetrievalAugmentationAdvisor advisor(QueryExpander expander) {
-        return RetrievalAugmentationAdvisor.builder()
-                .queryExpander(expander)
-                .documentRetriever(recordingRetriever)
-                .documentPostProcessors((query, documents) -> {
-                    postProcessed.set(query);
-                    return documents;
-                })
-                .queryAugmenter(ContextualQueryAugmenter.builder().allowEmptyContext(true).build())
-                .build();
-    }
+  private RetrievalAugmentationAdvisor advisor(QueryExpander expander) {
+    return RetrievalAugmentationAdvisor.builder()
+        .queryExpander(expander)
+        .documentRetriever(recordingRetriever)
+        .documentPostProcessors(
+            (query, documents) -> {
+              postProcessed.set(query);
+              return documents;
+            })
+        .queryAugmenter(ContextualQueryAugmenter.builder().allowEmptyContext(true).build())
+        .build();
+  }
 
-    private static ChatClientRequest twoTurnRequest() {
-        List<Message> messages = List.of(
-                new UserMessage("Recommend an epic fantasy series with political intrigue."),
-                new AssistantMessage("Try A Game of Thrones by George R.R. Martin."),
-                new UserMessage("Anything cheaper by the same author?"));
-        return ChatClientRequest.builder()
-                .prompt(new Prompt(messages))
-                .context(Map.of(ChatMemory.CONVERSATION_ID, "conversation-1"))
-                .build();
-    }
+  private static ChatClientRequest twoTurnRequest() {
+    List<Message> messages =
+        List.of(
+            new UserMessage("Recommend an epic fantasy series with political intrigue."),
+            new AssistantMessage("Try A Game of Thrones by George R.R. Martin."),
+            new UserMessage("Anything cheaper by the same author?"));
+    return ChatClientRequest.builder()
+        .prompt(new Prompt(messages))
+        .context(Map.of(ChatMemory.CONVERSATION_ID, "conversation-1"))
+        .build();
+  }
 
-    @Test
-    void originalQueryCarriesTheWholePromptAsHistoryAndTheRequestContext() {
-        advisor(handOffExpander).before(twoTurnRequest(), null);
+  @Test
+  void originalQueryCarriesTheWholePromptAsHistoryAndTheRequestContext() {
+    advisor(handOffExpander).before(twoTurnRequest(), null);
 
-        Query original = postProcessed.get();
-        assertThat(original.text()).isEqualTo("Anything cheaper by the same author?");
-        // history = prompt.getInstructions(): earlier turns plus the current user message, last.
-        assertThat(original.history()).extracting(Message::getText).containsExactly(
-                "Recommend an epic fantasy series with political intrigue.",
-                "Try A Game of Thrones by George R.R. Martin.",
-                "Anything cheaper by the same author?");
-        assertThat(original.context()).containsEntry(ChatMemory.CONVERSATION_ID, "conversation-1");
-    }
+    Query original = postProcessed.get();
+    assertThat(original.text()).isEqualTo("Anything cheaper by the same author?");
+    // history = prompt.getInstructions(): earlier turns plus the current user message, last.
+    assertThat(original.history())
+        .extracting(Message::getText)
+        .containsExactly(
+            "Recommend an epic fantasy series with political intrigue.",
+            "Try A Game of Thrones by George R.R. Martin.",
+            "Anything cheaper by the same author?");
+    assertThat(original.context()).containsEntry(ChatMemory.CONVERSATION_ID, "conversation-1");
+  }
 
-    @Test
-    void aTransformerCanHandDataToPostProcessorsThroughTheOriginalQueryContext() {
-        // AiConfig's query rewrite relies on this: the first transformer is given the original query
-        // itself, so its context write reaches the post-processors, which still get the original text.
-        QueryTransformer handOff = query -> {
-            query.context().put(STANDALONE_KEY, STANDALONE_TEXT);
-            return query.mutate().text(STANDALONE_TEXT).build();
+  @Test
+  void aTransformerCanHandDataToPostProcessorsThroughTheOriginalQueryContext() {
+    // AiConfig's query rewrite relies on this: the first transformer is given the original query
+    // itself, so its context write reaches the post-processors, which still get the original text.
+    QueryTransformer handOff =
+        query -> {
+          query.context().put(STANDALONE_KEY, STANDALONE_TEXT);
+          return query.mutate().text(STANDALONE_TEXT).build();
         };
-        RetrievalAugmentationAdvisor.builder()
-                .queryTransformers(handOff)
-                .documentRetriever(recordingRetriever)
-                .documentPostProcessors((query, documents) -> {
-                    postProcessed.set(query);
-                    return documents;
-                })
-                .queryAugmenter(ContextualQueryAugmenter.builder().allowEmptyContext(true).build())
-                .build()
-                .before(twoTurnRequest(), null);
+    RetrievalAugmentationAdvisor.builder()
+        .queryTransformers(handOff)
+        .documentRetriever(recordingRetriever)
+        .documentPostProcessors(
+            (query, documents) -> {
+              postProcessed.set(query);
+              return documents;
+            })
+        .queryAugmenter(ContextualQueryAugmenter.builder().allowEmptyContext(true).build())
+        .build()
+        .before(twoTurnRequest(), null);
 
-        assertThat(retrieved.get().text()).isEqualTo(STANDALONE_TEXT);
-        assertThat(postProcessed.get().text()).isEqualTo("Anything cheaper by the same author?");
-        assertThat(postProcessed.get().context()).containsEntry(STANDALONE_KEY, STANDALONE_TEXT);
-    }
+    assertThat(retrieved.get().text()).isEqualTo(STANDALONE_TEXT);
+    assertThat(postProcessed.get().text()).isEqualTo("Anything cheaper by the same author?");
+    assertThat(postProcessed.get().context()).containsEntry(STANDALONE_KEY, STANDALONE_TEXT);
+  }
 
-    @Test
-    void postProcessorsReceiveTheOriginalQueryNotTheExpandedOne() {
-        advisor(handOffExpander).before(twoTurnRequest(), null);
+  @Test
+  void postProcessorsReceiveTheOriginalQueryNotTheExpandedOne() {
+    advisor(handOffExpander).before(twoTurnRequest(), null);
 
-        assertThat(retrieved.get().text()).isEqualTo(STANDALONE_TEXT);
-        // This is the bug #36 fixes: the reranker judges against the context-free follow-up.
-        assertThat(postProcessed.get().text()).isEqualTo("Anything cheaper by the same author?");
-    }
+    assertThat(retrieved.get().text()).isEqualTo(STANDALONE_TEXT);
+    // This is the bug #36 fixes: the reranker judges against the context-free follow-up.
+    assertThat(postProcessed.get().text()).isEqualTo("Anything cheaper by the same author?");
+  }
 
-    @Test
-    void anExpanderCanHandDataToPostProcessorsThroughTheOriginalQueryContext() {
-        ChatClientRequest augmented = advisor(handOffExpander).before(twoTurnRequest(), null);
+  @Test
+  void anExpanderCanHandDataToPostProcessorsThroughTheOriginalQueryContext() {
+    ChatClientRequest augmented = advisor(handOffExpander).before(twoTurnRequest(), null);
 
-        // The original query's context is the advisor's own mutable map: the expander's write is
-        // visible to post-processors, which run on the caller thread after every retrieval joins.
-        assertThat(postProcessed.get().context())
-                .containsEntry(STANDALONE_KEY, STANDALONE_TEXT);
-        // ...and it is the same map that becomes the response context.
-        assertThat(augmented.context())
-                .containsEntry(STANDALONE_KEY, STANDALONE_TEXT)
-                .containsKey(RetrievalAugmentationAdvisor.DOCUMENT_CONTEXT);
-    }
+    // The original query's context is the advisor's own mutable map: the expander's write is
+    // visible to post-processors, which run on the caller thread after every retrieval joins.
+    assertThat(postProcessed.get().context()).containsEntry(STANDALONE_KEY, STANDALONE_TEXT);
+    // ...and it is the same map that becomes the response context.
+    assertThat(augmented.context())
+        .containsEntry(STANDALONE_KEY, STANDALONE_TEXT)
+        .containsKey(RetrievalAugmentationAdvisor.DOCUMENT_CONTEXT);
+  }
 
-    @Test
-    void retrievalRunsOnTheAdvisorsOwnPoolWhenNoExecutorIsGiven() {
-        advisor(handOffExpander).before(twoTurnRequest(), null);
+  @Test
+  void retrievalRunsOnTheAdvisorsOwnPoolWhenNoExecutorIsGiven() {
+    advisor(handOffExpander).before(twoTurnRequest(), null);
 
-        assertThat(retrieverThreads).isNotEmpty().allMatch(name -> name.startsWith("ai-advisor-"));
-    }
+    assertThat(retrieverThreads).isNotEmpty().allMatch(name -> name.startsWith("ai-advisor-"));
+  }
 
-    @Test
-    void equalExpandedQueriesCrashTheAdvisor() {
-        // Collectors.toMap over Map<Query, ...>: two equal queries are a duplicate key. An expander
-        // must therefore de-duplicate its output, or a model that echoes the original as a
-        // "variant" turns into a 5xx.
-        QueryExpander echoing = query -> List.of(query, query.mutate().build());
+  @Test
+  void equalExpandedQueriesCrashTheAdvisor() {
+    // Collectors.toMap over Map<Query, ...>: two equal queries are a duplicate key. An expander
+    // must therefore de-duplicate its output, or a model that echoes the original as a
+    // "variant" turns into a 5xx.
+    QueryExpander echoing = query -> List.of(query, query.mutate().build());
 
-        assertThatThrownBy(() -> advisor(echoing).before(twoTurnRequest(), null))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("Duplicate key");
-    }
+    assertThatThrownBy(() -> advisor(echoing).before(twoTurnRequest(), null))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("Duplicate key");
+  }
 }

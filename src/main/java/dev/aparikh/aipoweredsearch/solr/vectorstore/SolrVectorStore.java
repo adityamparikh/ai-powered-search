@@ -1,28 +1,9 @@
 package dev.aparikh.aipoweredsearch.solr.vectorstore;
 
+import static java.util.stream.Collectors.toList;
+
 import dev.aparikh.aipoweredsearch.embedding.VectorFormatUtils;
 import dev.aparikh.aipoweredsearch.solr.SolrQueryUtils;
-import org.apache.solr.client.solrj.SolrClient;
-import org.apache.solr.client.solrj.SolrRequest;
-import org.apache.solr.client.solrj.SolrServerException;
-import org.apache.solr.client.solrj.request.SolrQuery;
-import org.apache.solr.client.solrj.response.QueryResponse;
-import org.apache.solr.client.solrj.response.UpdateResponse;
-import org.apache.solr.common.SolrDocument;
-import org.apache.solr.common.SolrInputDocument;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.ai.document.Document;
-import org.springframework.ai.embedding.EmbeddingModel;
-import org.springframework.ai.embedding.EmbeddingResponse;
-import org.springframework.ai.vectorstore.AbstractVectorStoreBuilder;
-import org.springframework.ai.vectorstore.SearchRequest;
-import org.jspecify.annotations.Nullable;
-import org.springframework.ai.vectorstore.filter.Filter;
-import org.springframework.ai.vectorstore.observation.AbstractObservationVectorStore;
-import org.springframework.ai.vectorstore.observation.VectorStoreObservationContext;
-import org.springframework.util.Assert;
-
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -32,28 +13,49 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
-
-import static java.util.stream.Collectors.toList;
+import org.apache.solr.client.solrj.SolrClient;
+import org.apache.solr.client.solrj.SolrRequest;
+import org.apache.solr.client.solrj.SolrServerException;
+import org.apache.solr.client.solrj.request.SolrQuery;
+import org.apache.solr.client.solrj.response.QueryResponse;
+import org.apache.solr.client.solrj.response.UpdateResponse;
+import org.apache.solr.common.SolrDocument;
+import org.apache.solr.common.SolrInputDocument;
+import org.jspecify.annotations.Nullable;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.ai.document.Document;
+import org.springframework.ai.embedding.EmbeddingModel;
+import org.springframework.ai.embedding.EmbeddingResponse;
+import org.springframework.ai.vectorstore.AbstractVectorStoreBuilder;
+import org.springframework.ai.vectorstore.SearchRequest;
+import org.springframework.ai.vectorstore.filter.Filter;
+import org.springframework.ai.vectorstore.observation.AbstractObservationVectorStore;
+import org.springframework.ai.vectorstore.observation.VectorStoreObservationContext;
+import org.springframework.util.Assert;
 
 /**
  * Apache Solr vector store implementation for Spring AI document storage and retrieval.
  *
  * <p>This class provides a full-featured vector store using Apache Solr's dense vector search
- * capabilities (Solr 9.0+). It enables semantic search by storing document embeddings
- * and performing similarity-based retrieval using KNN (K-Nearest Neighbors) algorithms.
+ * capabilities (Solr 9.0+). It enables semantic search by storing document embeddings and
+ * performing similarity-based retrieval using KNN (K-Nearest Neighbors) algorithms.
  *
  * <p>Key features:
+ *
  * <ul>
- *   <li>Automatic embedding generation using OpenAI's text-embedding-3-small model</li>
- *   <li>HNSW (Hierarchical Navigable Small World) algorithm for efficient similarity search</li>
- *   <li>Cosine similarity metric for semantic matching</li>
- *   <li>Metadata filtering with Spring AI filter expressions</li>
- *   <li>Observability support via Micrometer metrics</li>
- *   <li>Batch document processing for improved performance</li>
+ *   <li>Automatic embedding generation using OpenAI's text-embedding-3-small model
+ *   <li>HNSW (Hierarchical Navigable Small World) algorithm for efficient similarity search
+ *   <li>Cosine similarity metric for semantic matching
+ *   <li>Metadata filtering with Spring AI filter expressions
+ *   <li>Observability support via Micrometer metrics
+ *   <li>Batch document processing for improved performance
  * </ul>
  *
  * <h3>Solr Schema Requirements:</h3>
- * <p>The Solr collection must have the following fields defined:</p>
+ *
+ * <p>The Solr collection must have the following fields defined:
+ *
  * <pre>{@code
  * <field name="id" type="string" indexed="true" stored="true" required="true"/>
  * <field name="content" type="text_general" indexed="true" stored="true"/>
@@ -68,6 +70,7 @@ import static java.util.stream.Collectors.toList;
  * <p>Metadata fields are stored with the prefix "metadata_" and support dynamic field types.
  *
  * <h3>Usage Example:</h3>
+ *
  * <pre>{@code
  * SolrVectorStore vectorStore = SolrVectorStore.builder(solrClient, "products", embeddingModel)
  *     .options(SolrVectorStoreOptions.defaults())
@@ -97,433 +100,443 @@ import static java.util.stream.Collectors.toList;
  */
 public class SolrVectorStore extends AbstractObservationVectorStore {
 
-    private static final Logger log = LoggerFactory.getLogger(SolrVectorStore.class);
+  private static final Logger log = LoggerFactory.getLogger(SolrVectorStore.class);
 
-    private final SolrClient solrClient;
-    private final String collection;
-    private final SolrVectorStoreOptions options;
-    private final boolean initializeSchema;
+  private final SolrClient solrClient;
+  private final String collection;
+  private final SolrVectorStoreOptions options;
+  private final boolean initializeSchema;
 
-    /**
-     * Protected constructor - use Builder to create instances.
-     */
-    protected SolrVectorStore(Builder builder) {
-        super(builder);
+  /** Protected constructor - use Builder to create instances. */
+  protected SolrVectorStore(Builder builder) {
+    super(builder);
 
-        Assert.notNull(builder.solrClient, "SolrClient must not be null");
-        Assert.notNull(builder.collection, "Collection name must not be null");
+    Assert.notNull(builder.solrClient, "SolrClient must not be null");
+    Assert.notNull(builder.collection, "Collection name must not be null");
 
-        this.solrClient = builder.solrClient;
-        this.collection = builder.collection;
-        this.options = builder.options != null ? builder.options : SolrVectorStoreOptions.defaults();
-        this.initializeSchema = builder.initializeSchema;
+    this.solrClient = builder.solrClient;
+    this.collection = builder.collection;
+    this.options = builder.options != null ? builder.options : SolrVectorStoreOptions.defaults();
+    this.initializeSchema = builder.initializeSchema;
 
-        if (this.initializeSchema) {
-            initializeSchema();
+    if (this.initializeSchema) {
+      initializeSchema();
+    }
+  }
+
+  /**
+   * Creates a builder for SolrVectorStore.
+   *
+   * @param solrClient the Solr client
+   * @param collection the Solr collection name
+   * @param embeddingModel the embedding model
+   * @return builder instance
+   */
+  public static Builder builder(
+      SolrClient solrClient, String collection, EmbeddingModel embeddingModel) {
+    return new Builder(solrClient, collection, embeddingModel);
+  }
+
+  /**
+   * Adds documents with embeddings to the vector store. Embeddings are generated automatically if
+   * not present in metadata.
+   *
+   * @param documents list of documents to add
+   */
+  @Override
+  public void doAdd(List<Document> documents) {
+    try {
+      // Separate documents into those with and without embeddings
+      List<Document> documentsWithoutEmbeddings =
+          documents.stream()
+              .filter(
+                  doc -> {
+                    Object embedding = doc.getMetadata().get("embedding");
+                    return embedding == null
+                        || !(embedding instanceof float[])
+                        || ((float[]) embedding).length == 0;
+                  })
+              .toList();
+
+      // Generate embeddings in batch for efficiency
+      if (!documentsWithoutEmbeddings.isEmpty()) {
+        List<String> texts = documentsWithoutEmbeddings.stream().map(Document::getText).toList();
+
+        EmbeddingResponse embeddingResponse = this.embeddingModel.embedForResponse(texts);
+
+        if (embeddingResponse.getResults().size() != documentsWithoutEmbeddings.size()) {
+          throw new RuntimeException(
+              "Expected "
+                  + documentsWithoutEmbeddings.size()
+                  + " embeddings but got "
+                  + embeddingResponse.getResults().size());
         }
+
+        // Add embeddings to documents
+        for (int i = 0; i < documentsWithoutEmbeddings.size(); i++) {
+          Document doc = documentsWithoutEmbeddings.get(i);
+          float[] embedding = embeddingResponse.getResults().get(i).getOutput();
+          doc.getMetadata().put("embedding", embedding);
+        }
+      }
+
+      // Convert to Solr documents
+      List<SolrInputDocument> solrDocs =
+          documents.stream().map(this::toSolrDocument).collect(toList());
+
+      // Add to Solr using commitWithin, then perform an explicit soft commit to
+      // make documents immediately searchable for tests/integration scenarios.
+      UpdateResponse response = solrClient.add(collection, solrDocs, 1000);
+      // Ensure the newly added docs are visible to subsequent queries immediately
+      solrClient.commit(collection);
+
+      log.debug(
+          "Added {} documents to Solr collection '{}', status: {}",
+          documents.size(),
+          collection,
+          response.getStatus());
+    } catch (SolrServerException | IOException e) {
+      throw new RuntimeException("Failed to add documents to Solr", e);
     }
+  }
 
-    /**
-     * Creates a builder for SolrVectorStore.
-     *
-     * @param solrClient the Solr client
-     * @param collection the Solr collection name
-     * @param embeddingModel the embedding model
-     * @return builder instance
-     */
-    public static Builder builder(SolrClient solrClient, String collection, EmbeddingModel embeddingModel) {
-        return new Builder(solrClient, collection, embeddingModel);
+  /**
+   * Deletes documents by ID.
+   *
+   * @param idList list of document IDs to delete
+   */
+  @Override
+  public void doDelete(List<String> idList) {
+    try {
+      UpdateResponse response = solrClient.deleteById(collection, idList, 1000);
+
+      log.debug(
+          "Deleted {} documents from Solr collection '{}', status: {}",
+          idList.size(),
+          collection,
+          response.getStatus());
+    } catch (SolrServerException | IOException e) {
+      throw new RuntimeException("Failed to delete documents from Solr", e);
     }
+  }
 
-    /**
-     * Adds documents with embeddings to the vector store.
-     * Embeddings are generated automatically if not present in metadata.
-     *
-     * @param documents list of documents to add
-     */
-    @Override
-    public void doAdd(List<Document> documents) {
-        try {
-            // Separate documents into those with and without embeddings
-            List<Document> documentsWithoutEmbeddings = documents.stream()
-                    .filter(doc -> {
-                        Object embedding = doc.getMetadata().get("embedding");
-                        return embedding == null || !(embedding instanceof float[]) || ((float[]) embedding).length == 0;
-                    })
-                    .toList();
+  /**
+   * Performs similarity search using vector KNN.
+   *
+   * @param request the search request with query, filters, and top-k
+   * @return list of similar documents
+   */
+  @Override
+  public List<Document> doSimilaritySearch(SearchRequest request) {
+    try {
+      // Validate query
+      if (request.getQuery().isEmpty()) {
+        throw new IllegalArgumentException("Search query cannot be null or empty");
+      }
 
-            // Generate embeddings in batch for efficiency
-            if (!documentsWithoutEmbeddings.isEmpty()) {
-                List<String> texts = documentsWithoutEmbeddings.stream()
-                        .map(Document::getText)
-                        .toList();
+      // Generate embedding for query text
+      EmbeddingResponse embeddingResponse =
+          this.embeddingModel.embedForResponse(Collections.singletonList(request.getQuery()));
 
-                EmbeddingResponse embeddingResponse = this.embeddingModel.embedForResponse(texts);
+      if (embeddingResponse.getResults().isEmpty()) {
+        throw new RuntimeException("Failed to generate embedding for query");
+      }
 
-                if (embeddingResponse.getResults().size() != documentsWithoutEmbeddings.size()) {
-                    throw new RuntimeException("Expected " + documentsWithoutEmbeddings.size() +
-                            " embeddings but got " + embeddingResponse.getResults().size());
+      float[] queryEmbedding = embeddingResponse.getResults().getFirst().getOutput();
+
+      // Build KNN query
+      String vectorString = VectorFormatUtils.formatVectorForSolr(queryEmbedding);
+      String knnQuery =
+          SolrQueryUtils.buildKnnQuery(options.vectorFieldName(), request.getTopK(), vectorString);
+
+      SolrQuery query = new SolrQuery(knnQuery);
+      // Ensure Solr returns up to topK results
+      if (request.getTopK() > 0) {
+        query.setRows(request.getTopK());
+      }
+
+      // Apply filter expression if present
+      if (request.getFilterExpression() != null) {
+        String solrFilter = convertFilterToSolrQuery(request.getFilterExpression());
+        if (solrFilter != null && !solrFilter.isEmpty()) {
+          query.addFilterQuery(solrFilter);
+        }
+      }
+
+      // Set fields to return (include score pseudo-field for similarity scoring)
+      query.setFields(
+          options.idFieldName(),
+          options.contentFieldName(),
+          "score",
+          options.metadataPrefix() + "*");
+
+      // Note: Similarity threshold filtering must be done post-query
+      // because "score" is a pseudo-field that doesn't exist until query time
+      // We'll filter results after retrieval based on the threshold
+
+      // Use POST method to avoid URI Too Long errors with large vector embeddings
+      query.setParam("qt", "/select");
+      QueryResponse response = solrClient.query(collection, query, SolrRequest.METHOD.POST);
+      List<SolrDocument> results = response.getResults();
+
+      log.debug(
+          "Similarity search in collection '{}' returned {} results", collection, results.size());
+
+      // Filter results by similarity threshold if specified
+      double threshold = request.getSimilarityThreshold();
+      return results.stream()
+          .map(solrDoc -> toDocument(solrDoc, threshold))
+          .filter(Objects::nonNull)
+          .filter(
+              doc -> {
+                // Filter by threshold if specified
+                if (threshold >= 0) {
+                  Object scoreObj = doc.getMetadata().get("score");
+                  if (scoreObj instanceof Number) {
+                    double score = ((Number) scoreObj).doubleValue();
+                    return score >= threshold;
+                  }
+                  return false;
                 }
+                return true;
+              })
+          .toList();
+    } catch (SolrServerException | IOException e) {
+      throw new RuntimeException("Failed to perform similarity search in Solr", e);
+    }
+  }
 
-                // Add embeddings to documents
-                for (int i = 0; i < documentsWithoutEmbeddings.size(); i++) {
-                    Document doc = documentsWithoutEmbeddings.get(i);
-                    float[] embedding = embeddingResponse.getResults().get(i).getOutput();
-                    doc.getMetadata().put("embedding", embedding);
+  /** Creates observation context builder for metrics. */
+  @Override
+  public VectorStoreObservationContext.Builder createObservationContextBuilder(
+      String operationType) {
+    return VectorStoreObservationContext.builder("solr", operationType)
+        .collectionName(this.collection)
+        .dimensions(this.options.vectorDimension())
+        .namespace(this.collection);
+  }
+
+  /**
+   * Returns the native Solr client.
+   *
+   * @param <T> the type of the native client
+   * @return an Optional containing the SolrClient instance
+   */
+  @Override
+  @SuppressWarnings("unchecked")
+  public <T> Optional<T> getNativeClient() {
+    return (Optional<T>) Optional.of(this.solrClient);
+  }
+
+  private void initializeSchema() {
+    // Schema initialization could be added here if needed
+    // For now, we assume the schema is already configured in Solr
+    log.debug("Schema initialization not implemented - assuming schema exists in Solr");
+  }
+
+  /** Converts Spring AI filter expressions to Solr query syntax. */
+  private @Nullable String convertFilterToSolrQuery(Filter.@Nullable Expression filterExpression) {
+    if (filterExpression == null) {
+      return null;
+    }
+    return convertOperand(filterExpression);
+  }
+
+  private String convertOperand(Filter.@Nullable Operand operand) {
+    if (operand == null) {
+      // Unary operators (for example NOT) carry no right-hand operand.
+      return "";
+    }
+    if (operand instanceof Filter.Expression expression) {
+      return convertExpression(expression);
+    } else if (operand instanceof Filter.Group group) {
+      return "(" + convertOperand(group.content()) + ")";
+    } else if (operand instanceof Filter.Key key) {
+      String fieldName = key.key();
+      if (!fieldName.startsWith(options.metadataPrefix())) {
+        fieldName = options.metadataPrefix() + fieldName;
+      }
+      return fieldName;
+    } else if (operand instanceof Filter.Value value) {
+      Object v = value.value();
+      if (v instanceof String s) {
+        return "\"" + s + "\"";
+      }
+      return String.valueOf(v);
+    }
+    return "";
+  }
+
+  private String convertExpression(Filter.Expression expression) {
+    String left = convertOperand(expression.left());
+    String right = convertOperand(expression.right());
+
+    return switch (expression.type()) {
+      case EQ -> left + ":" + right;
+      case NE -> "-" + left + ":" + right;
+      case GT -> left + ":{" + right + " TO *]";
+      case GTE -> left + ":[" + right + " TO *]";
+      case LT -> left + ":[* TO " + right + "}";
+      case LTE -> left + ":[* TO " + right + "]";
+      case AND -> left + " AND " + right;
+      case OR -> left + " OR " + right;
+      case IN -> left + ":(" + right.replace("\"", "") + ")"; // Simplification for IN
+      default -> {
+        log.warn("Unsupported filter expression type, ignoring: {}", expression.type());
+        yield "";
+      }
+    };
+  }
+
+  private SolrInputDocument toSolrDocument(Document document) {
+    SolrInputDocument solrDoc = new SolrInputDocument();
+
+    // Set ID
+    String id = document.getId() != null ? document.getId() : UUID.randomUUID().toString();
+    solrDoc.addField(options.idFieldName(), id);
+
+    // Set content
+    solrDoc.addField(options.contentFieldName(), document.getText());
+
+    // Set vector embedding from metadata
+    Object embeddingObj = document.getMetadata().get("embedding");
+
+    if (embeddingObj instanceof float[]) {
+      float[] embedding = (float[]) embeddingObj;
+      List<Float> embeddingList = new ArrayList<>();
+      for (float val : embedding) {
+        embeddingList.add(val);
+      }
+      solrDoc.addField(options.vectorFieldName(), embeddingList);
+    }
+
+    // Add metadata fields with prefix (skip embedding as it's stored separately)
+    if (document.getMetadata() != null) {
+      document
+          .getMetadata()
+          .forEach(
+              (key, value) -> {
+                if (!options.idFieldName().equals(key)
+                    && !options.contentFieldName().equals(key)
+                    && !options.vectorFieldName().equals(key)
+                    && !"embedding".equals(key)) {
+                  solrDoc.addField(options.metadataPrefix() + key, value);
                 }
-            }
-
-            // Convert to Solr documents
-            List<SolrInputDocument> solrDocs = documents.stream()
-                    .map(this::toSolrDocument)
-                    .collect(toList());
-
-            // Add to Solr using commitWithin, then perform an explicit soft commit to
-            // make documents immediately searchable for tests/integration scenarios.
-            UpdateResponse response = solrClient.add(collection, solrDocs, 1000);
-            // Ensure the newly added docs are visible to subsequent queries immediately
-            solrClient.commit(collection);
-
-            log.debug("Added {} documents to Solr collection '{}', status: {}",
-                    documents.size(), collection, response.getStatus());
-        } catch (SolrServerException | IOException e) {
-            throw new RuntimeException("Failed to add documents to Solr", e);
-        }
+              });
     }
 
-    /**
-     * Deletes documents by ID.
-     *
-     * @param idList list of document IDs to delete
-     */
-    @Override
-    public void doDelete(List<String> idList) {
-        try {
-            UpdateResponse response = solrClient.deleteById(collection, idList, 1000);
+    return solrDoc;
+  }
 
-            log.debug("Deleted {} documents from Solr collection '{}', status: {}",
-                    idList.size(), collection, response.getStatus());
-        } catch (SolrServerException | IOException e) {
-            throw new RuntimeException("Failed to delete documents from Solr", e);
-        }
+  private @Nullable Document toDocument(SolrDocument solrDoc, double similarityThreshold) {
+    // Handle potential multi-valued fields from Solr
+    Object idObj = solrDoc.getFieldValue(options.idFieldName());
+    @Nullable String id = null;
+    if (idObj instanceof List) {
+      List<?> idList = (List<?>) idObj;
+      if (!idList.isEmpty()) {
+        id = idList.get(0).toString();
+      }
+    } else if (idObj != null) {
+      id = idObj.toString();
     }
 
-    /**
-     * Performs similarity search using vector KNN.
-     *
-     * @param request the search request with query, filters, and top-k
-     * @return list of similar documents
-     */
-    @Override
-    public List<Document> doSimilaritySearch(SearchRequest request) {
-        try {
-            // Validate query
-            if (request.getQuery().isEmpty()) {
-                throw new IllegalArgumentException("Search query cannot be null or empty");
-            }
-
-            // Generate embedding for query text
-            EmbeddingResponse embeddingResponse = this.embeddingModel.embedForResponse(
-                    Collections.singletonList(request.getQuery()));
-
-            if (embeddingResponse.getResults().isEmpty()) {
-                throw new RuntimeException("Failed to generate embedding for query");
-            }
-
-            float[] queryEmbedding = embeddingResponse.getResults().getFirst().getOutput();
-
-            // Build KNN query
-            String vectorString = VectorFormatUtils.formatVectorForSolr(queryEmbedding);
-            String knnQuery = SolrQueryUtils.buildKnnQuery(
-                    options.vectorFieldName(), request.getTopK(), vectorString);
-
-            SolrQuery query = new SolrQuery(knnQuery);
-            // Ensure Solr returns up to topK results
-            if (request.getTopK() > 0) {
-                query.setRows(request.getTopK());
-            }
-
-            // Apply filter expression if present
-            if (request.getFilterExpression() != null) {
-                String solrFilter = convertFilterToSolrQuery(request.getFilterExpression());
-                if (solrFilter != null && !solrFilter.isEmpty()) {
-                    query.addFilterQuery(solrFilter);
-                }
-            }
-
-            // Set fields to return (include score pseudo-field for similarity scoring)
-            query.setFields(options.idFieldName(), options.contentFieldName(),
-                    "score", options.metadataPrefix() + "*");
-
-            // Note: Similarity threshold filtering must be done post-query
-            // because "score" is a pseudo-field that doesn't exist until query time
-            // We'll filter results after retrieval based on the threshold
-
-            // Use POST method to avoid URI Too Long errors with large vector embeddings
-            query.setParam("qt", "/select");
-            QueryResponse response = solrClient.query(collection, query, SolrRequest.METHOD.POST);
-            List<SolrDocument> results = response.getResults();
-
-            log.debug("Similarity search in collection '{}' returned {} results", collection, results.size());
-
-            // Filter results by similarity threshold if specified
-            double threshold = request.getSimilarityThreshold();
-            return results.stream()
-                    .map(solrDoc -> toDocument(solrDoc, threshold))
-                    .filter(Objects::nonNull)
-                    .filter(doc -> {
-                        // Filter by threshold if specified
-                        if (threshold >= 0) {
-                            Object scoreObj = doc.getMetadata().get("score");
-                            if (scoreObj instanceof Number) {
-                                double score = ((Number) scoreObj).doubleValue();
-                                return score >= threshold;
-                            }
-                            return false;
-                        }
-                        return true;
-                    })
-                    .toList();
-        } catch (SolrServerException | IOException e) {
-            throw new RuntimeException("Failed to perform similarity search in Solr", e);
-        }
+    // A document without an id cannot be represented as a Spring AI Document; skip it.
+    if (id == null) {
+      return null;
     }
 
-    /**
-     * Creates observation context builder for metrics.
-     */
-    @Override
-    public VectorStoreObservationContext.Builder createObservationContextBuilder(String operationType) {
-        return VectorStoreObservationContext.builder("solr", operationType)
-                .collectionName(this.collection)
-                .dimensions(this.options.vectorDimension())
-                .namespace(this.collection);
+    Object contentObj = solrDoc.getFieldValue(options.contentFieldName());
+    @Nullable String content = null;
+    if (contentObj instanceof List) {
+      List<?> contentList = (List<?>) contentObj;
+      if (!contentList.isEmpty()) {
+        content = contentList.get(0).toString();
+      }
+    } else if (contentObj != null) {
+      content = contentObj.toString();
     }
 
-    /**
-     * Returns the native Solr client.
-     *
-     * @param <T> the type of the native client
-     * @return an Optional containing the SolrClient instance
-     */
-    @Override
-    @SuppressWarnings("unchecked")
-    public <T> Optional<T> getNativeClient() {
-        return (Optional<T>) Optional.of(this.solrClient);
+    // Extract score and normalize for cosine similarity
+    Number scoreNum = (Number) solrDoc.getFieldValue("score");
+    @Nullable Double score = scoreNum != null ? scoreNum.doubleValue() : null;
+
+    // Apply similarity threshold if score is available
+    if (score != null && similarityThreshold >= 0) {
+      // Solr returns cosine similarity in [0,1] range with 1 being most similar
+      if (score < similarityThreshold) {
+        return null; // Filter out documents below threshold
+      }
     }
 
-    private void initializeSchema() {
-        // Schema initialization could be added here if needed
-        // For now, we assume the schema is already configured in Solr
-        log.debug("Schema initialization not implemented - assuming schema exists in Solr");
-    }
-
-    /**
-     * Converts Spring AI filter expressions to Solr query syntax.
-     */
-    private @Nullable String convertFilterToSolrQuery(Filter.@Nullable Expression filterExpression) {
-        if (filterExpression == null) {
-            return null;
-        }
-        return convertOperand(filterExpression);
-    }
-
-    private String convertOperand(Filter.@Nullable Operand operand) {
-        if (operand == null) {
-            // Unary operators (for example NOT) carry no right-hand operand.
-            return "";
-        }
-        if (operand instanceof Filter.Expression expression) {
-            return convertExpression(expression);
-        } else if (operand instanceof Filter.Group group) {
-            return "(" + convertOperand(group.content()) + ")";
-        } else if (operand instanceof Filter.Key key) {
-            String fieldName = key.key();
-            if (!fieldName.startsWith(options.metadataPrefix())) {
-                fieldName = options.metadataPrefix() + fieldName;
-            }
-            return fieldName;
-        } else if (operand instanceof Filter.Value value) {
-            Object v = value.value();
-            if (v instanceof String s) {
-                return "\"" + s + "\"";
-            }
-            return String.valueOf(v);
-        }
-        return "";
-    }
-
-    private String convertExpression(Filter.Expression expression) {
-        String left = convertOperand(expression.left());
-        String right = convertOperand(expression.right());
-
-        return switch (expression.type()) {
-            case EQ -> left + ":" + right;
-            case NE -> "-" + left + ":" + right;
-            case GT -> left + ":{" + right + " TO *]";
-            case GTE -> left + ":[" + right + " TO *]";
-            case LT -> left + ":[* TO " + right + "}";
-            case LTE -> left + ":[* TO " + right + "]";
-            case AND -> left + " AND " + right;
-            case OR -> left + " OR " + right;
-            case IN -> left + ":(" + right.replace("\"", "") + ")"; // Simplification for IN
-            default -> {
-                log.warn("Unsupported filter expression type, ignoring: {}", expression.type());
-                yield "";
-            }
-        };
-    }
-
-    private SolrInputDocument toSolrDocument(Document document) {
-        SolrInputDocument solrDoc = new SolrInputDocument();
-
-        // Set ID
-        String id = document.getId() != null ? document.getId() : UUID.randomUUID().toString();
-        solrDoc.addField(options.idFieldName(), id);
-
-        // Set content
-        solrDoc.addField(options.contentFieldName(), document.getText());
-
-        // Set vector embedding from metadata
-        Object embeddingObj = document.getMetadata().get("embedding");
-
-        if (embeddingObj instanceof float[]) {
-            float[] embedding = (float[]) embeddingObj;
-            List<Float> embeddingList = new ArrayList<>();
-            for (float val : embedding) {
-                embeddingList.add(val);
-            }
-            solrDoc.addField(options.vectorFieldName(), embeddingList);
-        }
-
-        // Add metadata fields with prefix (skip embedding as it's stored separately)
-        if (document.getMetadata() != null) {
-            document.getMetadata().forEach((key, value) -> {
-                if (!options.idFieldName().equals(key) &&
-                    !options.contentFieldName().equals(key) &&
-                    !options.vectorFieldName().equals(key) &&
-                    !"embedding".equals(key)) {
-                    solrDoc.addField(options.metadataPrefix() + key, value);
-                }
-            });
-        }
-
-        return solrDoc;
-    }
-
-    private @Nullable Document toDocument(SolrDocument solrDoc, double similarityThreshold) {
-        // Handle potential multi-valued fields from Solr
-        Object idObj = solrDoc.getFieldValue(options.idFieldName());
-        @Nullable String id = null;
-        if (idObj instanceof List) {
-            List<?> idList = (List<?>) idObj;
-            if (!idList.isEmpty()) {
-                id = idList.get(0).toString();
-            }
-        } else if (idObj != null) {
-            id = idObj.toString();
-        }
-
-        // A document without an id cannot be represented as a Spring AI Document; skip it.
-        if (id == null) {
-            return null;
-        }
-
-        Object contentObj = solrDoc.getFieldValue(options.contentFieldName());
-        @Nullable String content = null;
-        if (contentObj instanceof List) {
-            List<?> contentList = (List<?>) contentObj;
-            if (!contentList.isEmpty()) {
-                content = contentList.get(0).toString();
-            }
-        } else if (contentObj != null) {
-            content = contentObj.toString();
-        }
-
-        // Extract score and normalize for cosine similarity
-        Number scoreNum = (Number) solrDoc.getFieldValue("score");
-        @Nullable Double score = scoreNum != null ? scoreNum.doubleValue() : null;
-
-        // Apply similarity threshold if score is available
-        if (score != null && similarityThreshold >= 0) {
-            // Solr returns cosine similarity in [0,1] range with 1 being most similar
-            if (score < similarityThreshold) {
-                return null; // Filter out documents below threshold
-            }
-        }
-
-        // Extract metadata (fields with metadata prefix)
-        Map<String, Object> metadata = new HashMap<>();
-        solrDoc.getFieldNames().forEach(fieldName -> {
-            if (fieldName.startsWith(options.metadataPrefix())) {
+    // Extract metadata (fields with metadata prefix)
+    Map<String, Object> metadata = new HashMap<>();
+    solrDoc
+        .getFieldNames()
+        .forEach(
+            fieldName -> {
+              if (fieldName.startsWith(options.metadataPrefix())) {
                 String metadataKey = fieldName.substring(options.metadataPrefix().length());
                 Object metadataValue = solrDoc.getFieldValue(fieldName);
 
                 // Handle multi-valued fields - extract first value if it's a list
                 if (metadataValue instanceof List) {
-                    List<?> valueList = (List<?>) metadataValue;
-                    if (!valueList.isEmpty()) {
-                        Object firstValue = valueList.get(0);
-                        // Convert Long to Integer for year field
-                        if ("year".equals(metadataKey) && firstValue instanceof Long) {
-                            metadata.put(metadataKey, ((Long) firstValue).intValue());
-                        } else {
-                            metadata.put(metadataKey, firstValue);
-                        }
-                    }
-                } else if (metadataValue != null) {
+                  List<?> valueList = (List<?>) metadataValue;
+                  if (!valueList.isEmpty()) {
+                    Object firstValue = valueList.get(0);
                     // Convert Long to Integer for year field
-                    if ("year".equals(metadataKey) && metadataValue instanceof Long) {
-                        metadata.put(metadataKey, ((Long) metadataValue).intValue());
+                    if ("year".equals(metadataKey) && firstValue instanceof Long) {
+                      metadata.put(metadataKey, ((Long) firstValue).intValue());
                     } else {
-                        metadata.put(metadataKey, metadataValue);
+                      metadata.put(metadataKey, firstValue);
                     }
+                  }
+                } else if (metadataValue != null) {
+                  // Convert Long to Integer for year field
+                  if ("year".equals(metadataKey) && metadataValue instanceof Long) {
+                    metadata.put(metadataKey, ((Long) metadataValue).intValue());
+                  } else {
+                    metadata.put(metadataKey, metadataValue);
+                  }
                 }
-            }
-        });
+              }
+            });
 
-        // Add score if present
-        if (score != null) {
-            metadata.put("score", score);
-        }
-
-
-        // Build document
-        return Document.builder()
-                .id(id)
-                .text(content)
-                .metadata(metadata)
-                .build();
+    // Add score if present
+    if (score != null) {
+      metadata.put("score", score);
     }
 
-    /**
-     * Builder for SolrVectorStore.
-     */
-    public static final class Builder extends AbstractVectorStoreBuilder<Builder> {
-        private final SolrClient solrClient;
-        private final String collection;
-        private @Nullable SolrVectorStoreOptions options;
-        private boolean initializeSchema = false;
+    // Build document
+    return Document.builder().id(id).text(content).metadata(metadata).build();
+  }
 
-        private Builder(SolrClient solrClient, String collection, EmbeddingModel embeddingModel) {
-            super(embeddingModel);
-            this.solrClient = solrClient;
-            this.collection = collection;
-        }
+  /** Builder for SolrVectorStore. */
+  public static final class Builder extends AbstractVectorStoreBuilder<Builder> {
+    private final SolrClient solrClient;
+    private final String collection;
+    private @Nullable SolrVectorStoreOptions options;
+    private boolean initializeSchema = false;
 
-        public Builder options(SolrVectorStoreOptions options) {
-            this.options = options;
-            return this;
-        }
-
-        public Builder initializeSchema(boolean initializeSchema) {
-            this.initializeSchema = initializeSchema;
-            return this;
-        }
-
-        @Override
-        public SolrVectorStore build() {
-            return new SolrVectorStore(this);
-        }
+    private Builder(SolrClient solrClient, String collection, EmbeddingModel embeddingModel) {
+      super(embeddingModel);
+      this.solrClient = solrClient;
+      this.collection = collection;
     }
+
+    public Builder options(SolrVectorStoreOptions options) {
+      this.options = options;
+      return this;
+    }
+
+    public Builder initializeSchema(boolean initializeSchema) {
+      this.initializeSchema = initializeSchema;
+      return this;
+    }
+
+    @Override
+    public SolrVectorStore build() {
+      return new SolrVectorStore(this);
+    }
+  }
 }

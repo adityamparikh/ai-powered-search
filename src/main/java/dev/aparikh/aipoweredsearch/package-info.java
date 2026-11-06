@@ -1,6 +1,4 @@
-/**
- * Root package for the AI-powered search application.
- */
+/** Root package for the AI-powered search application. */
 @NullMarked
 package dev.aparikh.aipoweredsearch;
 
