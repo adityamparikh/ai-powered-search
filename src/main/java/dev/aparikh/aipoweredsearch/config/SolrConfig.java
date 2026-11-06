@@ -1,12 +1,11 @@
 package dev.aparikh.aipoweredsearch.config;
 
+import java.util.concurrent.TimeUnit;
 import org.apache.solr.client.solrj.SolrClient;
 import org.apache.solr.client.solrj.impl.HttpJdkSolrClient;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-
-import java.util.concurrent.TimeUnit;
 
 /**
  * Spring Configuration class for Apache Solr client setup and connection management.
@@ -19,11 +18,11 @@ import java.util.concurrent.TimeUnit;
  * <p><strong>Configuration Features:</strong>
  *
  * <ul>
- *   <li><strong>HTTP/2 Protocol</strong>: Uses HttpJdkSolrClient for better performance</li>
- *   <li><strong>Automatic URL Normalization</strong>: Ensures proper Solr URL formatting</li>
- *   <li><strong>Connection Management</strong>: Stable HTTP/2 connection handling</li>
- *   <li><strong>Property Integration</strong>: Uses externalized configuration through properties</li>
- *   <li><strong>Production-Ready</strong>: Configured for reliable production use</li>
+ *   <li><strong>HTTP/2 Protocol</strong>: Uses HttpJdkSolrClient for better performance
+ *   <li><strong>Automatic URL Normalization</strong>: Ensures proper Solr URL formatting
+ *   <li><strong>Connection Management</strong>: Stable HTTP/2 connection handling
+ *   <li><strong>Property Integration</strong>: Uses externalized configuration through properties
+ *   <li><strong>Production-Ready</strong>: Configured for reliable production use
  * </ul>
  *
  * <p><strong>URL Processing:</strong>
@@ -70,85 +69,86 @@ import java.util.concurrent.TimeUnit;
 @EnableConfigurationProperties(SolrConfigurationProperties.class)
 public class SolrConfig {
 
-    private static final int CONNECTION_TIMEOUT_MS = 10000;
-    private static final int IDLE_TIMEOUT_MS = 60000;
-    private static final int REQUEST_TIMEOUT_MS = 60000;
-    private static final String SOLR_PATH = "solr/";
+  private static final int CONNECTION_TIMEOUT_MS = 10000;
+  private static final int IDLE_TIMEOUT_MS = 60000;
+  private static final int REQUEST_TIMEOUT_MS = 60000;
+  private static final String SOLR_PATH = "solr/";
 
-    /**
-     * Creates and configures a SolrClient bean for Apache Solr communication.
-     *
-     * <p>This method serves as the primary factory for creating SolrJ client instances that are
-     * used throughout the application for all Solr operations. It performs automatic URL
-     * normalization and applies production-ready timeout configurations.
-     *
-     * <p><strong>URL Normalization Process:</strong>
-     *
-     * <ol>
-     *   <li><strong>Trailing Slash</strong>: Ensures URL ends with "/"
-     *   <li><strong>Solr Path</strong>: Appends "/solr/" if not already present
-     *   <li><strong>Validation</strong>: Checks for proper Solr endpoint format
-     * </ol>
-     *
-     * <p><strong>Connection Configuration:</strong>
-     *
-     * <ul>
-     *   <li><strong>Connection Timeout</strong>: 10,000ms - Time to establish initial connection
-     *   <li><strong>Idle Timeout</strong>: 60,000ms - Time before an idle connection is closed
-     *   <li><strong>Request Timeout</strong>: 60,000ms - Time to wait for a response from the server
-     * </ul>
-     *
-     * <p><strong>Client Type:</strong>
-     *
-     * <p>Creates an {@code HttpJdkSolrClient} configured for HTTP/2-based communication with
-     * Solr servers. HttpJdkSolrClient wraps the JDK's built-in {@code java.net.http.HttpClient}
-     * and offers modern HTTP/2 features including multiplexing, header compression, and improved
-     * connection management, without pulling in an external HTTP stack.
-     *
-     * <p><strong>Error Handling:</strong>
-     *
-     * <p>URL normalization is defensive and handles various input formats gracefully. Invalid URLs
-     * or connection failures will be caught during application startup or first usage, providing
-     * clear error messages for troubleshooting.
-     *
-     * <p><strong>Production Considerations:</strong>
-     *
-     * <ul>
-     *   <li>HTTP/2 provides improved performance with multiplexing and header compression</li>
-     *   <li>Client is thread-safe and suitable for concurrent operations</li>
-     *   <li>Timeout configurations prevent hanging connections</li>
-     *   <li>Better resource utilization with connection pooling and stream management</li>
-     * </ul>
-     *
-     * @param properties the injected Solr configuration properties containing connection URL
-     * @return configured HttpJdkSolrClient instance ready for use in application services
-     * @see HttpJdkSolrClient.Builder
-     * @see SolrConfigurationProperties#url()
-     */
-    @Bean
-    SolrClient solrClient(SolrConfigurationProperties properties) {
-        String url = properties.url();
+  /**
+   * Creates and configures a SolrClient bean for Apache Solr communication.
+   *
+   * <p>This method serves as the primary factory for creating SolrJ client instances that are used
+   * throughout the application for all Solr operations. It performs automatic URL normalization and
+   * applies production-ready timeout configurations.
+   *
+   * <p><strong>URL Normalization Process:</strong>
+   *
+   * <ol>
+   *   <li><strong>Trailing Slash</strong>: Ensures URL ends with "/"
+   *   <li><strong>Solr Path</strong>: Appends "/solr/" if not already present
+   *   <li><strong>Validation</strong>: Checks for proper Solr endpoint format
+   * </ol>
+   *
+   * <p><strong>Connection Configuration:</strong>
+   *
+   * <ul>
+   *   <li><strong>Connection Timeout</strong>: 10,000ms - Time to establish initial connection
+   *   <li><strong>Idle Timeout</strong>: 60,000ms - Time before an idle connection is closed
+   *   <li><strong>Request Timeout</strong>: 60,000ms - Time to wait for a response from the server
+   * </ul>
+   *
+   * <p><strong>Client Type:</strong>
+   *
+   * <p>Creates an {@code HttpJdkSolrClient} configured for HTTP/2-based communication with Solr
+   * servers. HttpJdkSolrClient wraps the JDK's built-in {@code java.net.http.HttpClient} and offers
+   * modern HTTP/2 features including multiplexing, header compression, and improved connection
+   * management, without pulling in an external HTTP stack.
+   *
+   * <p><strong>Error Handling:</strong>
+   *
+   * <p>URL normalization is defensive and handles various input formats gracefully. Invalid URLs or
+   * connection failures will be caught during application startup or first usage, providing clear
+   * error messages for troubleshooting.
+   *
+   * <p><strong>Production Considerations:</strong>
+   *
+   * <ul>
+   *   <li>HTTP/2 provides improved performance with multiplexing and header compression
+   *   <li>Client is thread-safe and suitable for concurrent operations
+   *   <li>Timeout configurations prevent hanging connections
+   *   <li>Better resource utilization with connection pooling and stream management
+   * </ul>
+   *
+   * @param properties the injected Solr configuration properties containing connection URL
+   * @return configured HttpJdkSolrClient instance ready for use in application services
+   * @see HttpJdkSolrClient.Builder
+   * @see SolrConfigurationProperties#url()
+   */
+  @Bean
+  SolrClient solrClient(SolrConfigurationProperties properties) {
+    String url = properties.url();
 
-        // Ensure URL is properly formatted for Solr
-        // The URL should end with /solr/ for proper path construction
-        if (!url.endsWith("/")) {
-            url = url + "/";
-        }
-
-        // If URL doesn't contain /solr/ path, add it
-        if (!url.endsWith("/" + SOLR_PATH) && !url.contains("/" + SOLR_PATH)) {
-            if (url.endsWith("/")) {
-                url = url + SOLR_PATH;
-            } else {
-                url = url + "/" + SOLR_PATH;
-            }
-        }
-
-        // Use HttpJdkSolrClient (JDK HttpClient, HTTP/2) with configured timeouts
-        HttpJdkSolrClient.Builder builder = new HttpJdkSolrClient.Builder(url)
-                .withConnectionTimeout(CONNECTION_TIMEOUT_MS, TimeUnit.MILLISECONDS)
-                .withIdleTimeout(IDLE_TIMEOUT_MS, TimeUnit.MILLISECONDS)
-                .withRequestTimeout(REQUEST_TIMEOUT_MS, TimeUnit.MILLISECONDS);
-        return builder.build();
+    // Ensure URL is properly formatted for Solr
+    // The URL should end with /solr/ for proper path construction
+    if (!url.endsWith("/")) {
+      url = url + "/";
     }
+
+    // If URL doesn't contain /solr/ path, add it
+    if (!url.endsWith("/" + SOLR_PATH) && !url.contains("/" + SOLR_PATH)) {
+      if (url.endsWith("/")) {
+        url = url + SOLR_PATH;
+      } else {
+        url = url + "/" + SOLR_PATH;
+      }
+    }
+
+    // Use HttpJdkSolrClient (JDK HttpClient, HTTP/2) with configured timeouts
+    HttpJdkSolrClient.Builder builder =
+        new HttpJdkSolrClient.Builder(url)
+            .withConnectionTimeout(CONNECTION_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+            .withIdleTimeout(IDLE_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+            .withRequestTimeout(REQUEST_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+    return builder.build();
+  }
 }

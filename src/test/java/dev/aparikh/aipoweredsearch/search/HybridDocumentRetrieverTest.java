@@ -1,6 +1,16 @@
 package dev.aparikh.aipoweredsearch.search;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
 import dev.aparikh.aipoweredsearch.search.model.SearchResponse;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -10,153 +20,148 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.rag.Query;
 
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyInt;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
-
 /**
- * Unit tests for {@link HybridDocumentRetriever}, the adapter that lets Spring AI's
- * modular RAG pipeline retrieve documents via hybrid (keyword + vector, RRF-fused) search.
+ * Unit tests for {@link HybridDocumentRetriever}, the adapter that lets Spring AI's modular RAG
+ * pipeline retrieve documents via hybrid (keyword + vector, RRF-fused) search.
  */
 @ExtendWith(MockitoExtension.class)
 class HybridDocumentRetrieverTest {
 
-    private static final String COLLECTION = "books";
-    private static final int TOP_K = 5;
+  private static final String COLLECTION = "books";
+  private static final int TOP_K = 5;
 
-    @Mock
-    private SearchRepository searchRepository;
+  @Mock private SearchRepository searchRepository;
 
-    private HybridDocumentRetriever retriever;
+  private HybridDocumentRetriever retriever;
 
-    @BeforeEach
-    void setUp() {
-        retriever = new HybridDocumentRetriever(searchRepository, COLLECTION, TOP_K);
+  @BeforeEach
+  void setUp() {
+    retriever = new HybridDocumentRetriever(searchRepository, COLLECTION, TOP_K);
+  }
+
+  private static Map<String, Object> solrDoc(
+      String id, String content, Map<String, Object> extras) {
+    Map<String, Object> doc = new LinkedHashMap<>();
+    doc.put("id", id);
+    if (content != null) {
+      doc.put("content", content);
     }
+    doc.putAll(extras);
+    return doc;
+  }
 
-    private static Map<String, Object> solrDoc(String id, String content, Map<String, Object> extras) {
-        Map<String, Object> doc = new LinkedHashMap<>();
-        doc.put("id", id);
-        if (content != null) {
-            doc.put("content", content);
-        }
-        doc.putAll(extras);
-        return doc;
-    }
+  private void stubHybridResults(List<Map<String, Object>> documents) {
+    when(searchRepository.executeHybridRerankSearch(any(), any(), anyInt(), any(), any(), any()))
+        .thenReturn(new SearchResponse(documents, Map.of(), Map.of(), null));
+  }
 
-    private void stubHybridResults(List<Map<String, Object>> documents) {
-        when(searchRepository.executeHybridRerankSearch(
-                any(), any(), anyInt(), any(), any(), any()))
-                .thenReturn(new SearchResponse(documents, Map.of(), Map.of(), null));
-    }
+  @Test
+  void convertsHybridResultsToSpringAiDocuments() {
+    stubHybridResults(
+        List.of(
+            solrDoc("doc-1", "Spring Boot binds configuration properties", Map.of()),
+            solrDoc("doc-2", "Validation with jakarta annotations", Map.of())));
 
-    @Test
-    void convertsHybridResultsToSpringAiDocuments() {
-        stubHybridResults(List.of(
-                solrDoc("doc-1", "Spring Boot binds configuration properties", Map.of()),
-                solrDoc("doc-2", "Validation with jakarta annotations", Map.of())));
+    List<Document> documents =
+        retriever.retrieve(Query.builder().text("how do I bind config?").build());
 
-        List<Document> documents = retriever.retrieve(Query.builder().text("how do I bind config?").build());
+    assertThat(documents).hasSize(2);
+    assertThat(documents.get(0).getId()).isEqualTo("doc-1");
+    assertThat(documents.get(0).getText()).isEqualTo("Spring Boot binds configuration properties");
+    assertThat(documents.get(1).getId()).isEqualTo("doc-2");
+  }
 
-        assertThat(documents).hasSize(2);
-        assertThat(documents.get(0).getId()).isEqualTo("doc-1");
-        assertThat(documents.get(0).getText()).isEqualTo("Spring Boot binds configuration properties");
-        assertThat(documents.get(1).getId()).isEqualTo("doc-2");
-    }
+  @Test
+  void stripsMetadataPrefixFromSolrFields() {
+    stubHybridResults(
+        List.of(
+            solrDoc(
+                "doc-1", "content", Map.of("metadata_author", "Craig", "metadata_year", 2026))));
 
-    @Test
-    void stripsMetadataPrefixFromSolrFields() {
-        stubHybridResults(List.of(
-                solrDoc("doc-1", "content", Map.of("metadata_author", "Craig", "metadata_year", 2026))));
+    List<Document> documents = retriever.retrieve(Query.builder().text("q").build());
 
-        List<Document> documents = retriever.retrieve(Query.builder().text("q").build());
+    assertThat(documents.get(0).getMetadata())
+        .containsEntry("author", "Craig")
+        .containsEntry("year", 2026)
+        .doesNotContainKey("metadata_author");
+  }
 
-        assertThat(documents.get(0).getMetadata())
-                .containsEntry("author", "Craig")
-                .containsEntry("year", 2026)
-                .doesNotContainKey("metadata_author");
-    }
+  @Test
+  void keepsOnlyMetadataFieldsInDocumentMetadata() {
+    stubHybridResults(
+        List.of(
+            solrDoc(
+                "doc-1",
+                "content",
+                Map.of("metadata_author", "Craig", "score", 0.91, "_version_", 42L))));
 
-    @Test
-    void keepsOnlyMetadataFieldsInDocumentMetadata() {
-        stubHybridResults(List.of(
-                solrDoc("doc-1", "content", Map.of(
-                        "metadata_author", "Craig",
-                        "score", 0.91,
-                        "_version_", 42L))));
+    List<Document> documents = retriever.retrieve(Query.builder().text("q").build());
 
-        List<Document> documents = retriever.retrieve(Query.builder().text("q").build());
+    // Solr's per-document score in a combined (RRF) query is a raw per-leg score, not the
+    // fused one, so it must not leak into the context as if it meant something.
+    assertThat(documents.get(0).getMetadata()).containsOnlyKeys("author");
+  }
 
-        // Solr's per-document score in a combined (RRF) query is a raw per-leg score, not the
-        // fused one, so it must not leak into the context as if it meant something.
-        assertThat(documents.get(0).getMetadata())
-                .containsOnlyKeys("author");
-    }
+  @Test
+  void preservesRrfRankingOrder() {
+    // The repository returns documents already ordered by fused RRF score.
+    stubHybridResults(
+        List.of(
+            solrDoc("best", "a", Map.of()),
+            solrDoc("middle", "b", Map.of()),
+            solrDoc("worst", "c", Map.of())));
 
-    @Test
-    void preservesRrfRankingOrder() {
-        // The repository returns documents already ordered by fused RRF score.
-        stubHybridResults(List.of(
-                solrDoc("best", "a", Map.of()),
-                solrDoc("middle", "b", Map.of()),
-                solrDoc("worst", "c", Map.of())));
+    List<Document> documents = retriever.retrieve(Query.builder().text("q").build());
 
-        List<Document> documents = retriever.retrieve(Query.builder().text("q").build());
+    assertThat(documents).extracting(Document::getId).containsExactly("best", "middle", "worst");
+  }
 
-        assertThat(documents).extracting(Document::getId)
-                .containsExactly("best", "middle", "worst");
-    }
+  @Test
+  void requestsOnlyProjectableFieldsSoTheVectorIsNotFetched() {
+    stubHybridResults(List.of());
 
-    @Test
-    void requestsOnlyProjectableFieldsSoTheVectorIsNotFetched() {
-        stubHybridResults(List.of());
+    retriever.retrieve(Query.builder().text("q").build());
 
-        retriever.retrieve(Query.builder().text("q").build());
+    ArgumentCaptor<String> fieldsCaptor = ArgumentCaptor.forClass(String.class);
+    verify(searchRepository)
+        .executeHybridRerankSearch(
+            eq(COLLECTION), eq("q"), eq(TOP_K), any(), fieldsCaptor.capture(), any());
 
-        ArgumentCaptor<String> fieldsCaptor = ArgumentCaptor.forClass(String.class);
-        verify(searchRepository).executeHybridRerankSearch(
-                eq(COLLECTION), eq("q"), eq(TOP_K), any(), fieldsCaptor.capture(), any());
+    // A null/"*" field list makes Solr return the 1536-dim vector field on every hit.
+    assertThat(fieldsCaptor.getValue()).isNotNull();
+    assertThat(fieldsCaptor.getValue()).doesNotContain("*,");
+    assertThat(fieldsCaptor.getValue()).contains("id", "content", "metadata_*");
+  }
 
-        // A null/"*" field list makes Solr return the 1536-dim vector field on every hit.
-        assertThat(fieldsCaptor.getValue()).isNotNull();
-        assertThat(fieldsCaptor.getValue()).doesNotContain("*,");
-        assertThat(fieldsCaptor.getValue()).contains("id", "content", "metadata_*");
-    }
+  @Test
+  void passesQueryTextCollectionAndTopKToTheRepository() {
+    stubHybridResults(List.of());
 
-    @Test
-    void passesQueryTextCollectionAndTopKToTheRepository() {
-        stubHybridResults(List.of());
+    retriever.retrieve(Query.builder().text("machine learning frameworks").build());
 
-        retriever.retrieve(Query.builder().text("machine learning frameworks").build());
+    verify(searchRepository)
+        .executeHybridRerankSearch(
+            eq(COLLECTION), eq("machine learning frameworks"), eq(TOP_K), any(), any(), any());
+  }
 
-        verify(searchRepository).executeHybridRerankSearch(
-                eq(COLLECTION), eq("machine learning frameworks"), eq(TOP_K), any(), any(), any());
-    }
+  @Test
+  void returnsEmptyListWhenHybridSearchFindsNothing() {
+    stubHybridResults(List.of());
 
-    @Test
-    void returnsEmptyListWhenHybridSearchFindsNothing() {
-        stubHybridResults(List.of());
+    List<Document> documents = retriever.retrieve(Query.builder().text("no matches").build());
 
-        List<Document> documents = retriever.retrieve(Query.builder().text("no matches").build());
+    assertThat(documents).isEmpty();
+  }
 
-        assertThat(documents).isEmpty();
-    }
+  @Test
+  void skipsResultsWithoutContentSinceTheyCarryNoRagContext() {
+    stubHybridResults(
+        List.of(
+            solrDoc("has-content", "usable context", Map.of()),
+            solrDoc("no-content", null, Map.of())));
 
-    @Test
-    void skipsResultsWithoutContentSinceTheyCarryNoRagContext() {
-        stubHybridResults(List.of(
-                solrDoc("has-content", "usable context", Map.of()),
-                solrDoc("no-content", null, Map.of())));
+    List<Document> documents = retriever.retrieve(Query.builder().text("q").build());
 
-        List<Document> documents = retriever.retrieve(Query.builder().text("q").build());
-
-        assertThat(documents).extracting(Document::getId).containsExactly("has-content");
-    }
+    assertThat(documents).extracting(Document::getId).containsExactly("has-content");
+  }
 }

@@ -1,7 +1,6 @@
 package dev.aparikh.aipoweredsearch.indexing.model;
 
 import io.swagger.v3.oas.annotations.media.Schema;
-
 import java.util.List;
 
 /**
@@ -11,7 +10,5 @@ import java.util.List;
  */
 @Schema(description = "Request to index multiple documents in batch with vector embeddings")
 public record BatchIndexRequest(
-        @Schema(description = "List of documents to index", requiredMode = Schema.RequiredMode.REQUIRED)
-        List<IndexRequest> documents
-) {
-}
+    @Schema(description = "List of documents to index", requiredMode = Schema.RequiredMode.REQUIRED)
+        List<IndexRequest> documents) {}

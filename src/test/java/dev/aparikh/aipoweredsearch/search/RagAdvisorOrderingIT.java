@@ -1,8 +1,15 @@
 package dev.aparikh.aipoweredsearch.search;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.tuple;
+
 import dev.aparikh.aipoweredsearch.config.PostgresTestConfiguration;
 import dev.aparikh.aipoweredsearch.config.SolrTestConfiguration;
 import dev.aparikh.aipoweredsearch.search.model.AskRequest;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.CopyOnWriteArrayList;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
 import org.springframework.ai.chat.memory.ChatMemory;
@@ -22,156 +29,159 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
 
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
-import java.util.concurrent.CopyOnWriteArrayList;
-
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.tuple;
-
 /**
  * W0 finding A1, proven against the real {@code AiConfig.ragChatClient} wiring: on turn 2 of a
  * conversation, the query the retriever receives carries turn 1 in its history.
  *
- * <p>That only holds because {@link MessageChatMemoryAdvisor} (order
- * {@code HIGHEST_PRECEDENCE + 200}) runs before {@link RetrievalAugmentationAdvisor} (order 0)
- * and has already spliced the remembered messages into the prompt. Needs no API keys: the chat
- * model is a stub and the retriever records instead of querying Solr.</p>
+ * <p>That only holds because {@link MessageChatMemoryAdvisor} (order {@code HIGHEST_PRECEDENCE +
+ * 200}) runs before {@link RetrievalAugmentationAdvisor} (order 0) and has already spliced the
+ * remembered messages into the prompt. Needs no API keys: the chat model is a stub and the
+ * retriever records instead of querying Solr.
  */
-@SpringBootTest(properties = {"spring.ai.openai.api-key=test-key", "search.rag.query-rewrite.model=" + RagAdvisorOrderingIT.REWRITE_MODEL})
-@Import({PostgresTestConfiguration.class, SolrTestConfiguration.class, RagAdvisorOrderingIT.StubModels.class})
+@SpringBootTest(
+    properties = {
+      "spring.ai.openai.api-key=test-key",
+      "search.rag.query-rewrite.model=" + RagAdvisorOrderingIT.REWRITE_MODEL
+    })
+@Import({
+  PostgresTestConfiguration.class,
+  SolrTestConfiguration.class,
+  RagAdvisorOrderingIT.StubModels.class
+})
 class RagAdvisorOrderingIT {
 
-    static final String STUB_ANSWER = "Try A Game of Thrones by George R.R. Martin.";
-    static final String FIRST_QUESTION = "Recommend an epic fantasy series with political intrigue.";
-    static final String FOLLOW_UP = "Anything cheaper by the same author?";
-    static final String STANDALONE = "Books by George R.R. Martin cheaper than A Game of Thrones";
-    static final String REWRITE_MODEL = "configured-rewrite-model";
-    static final List<String> REWRITE_MODELS = new CopyOnWriteArrayList<>();
-    static final List<String> REWRITE_PROMPTS = new CopyOnWriteArrayList<>();
-    static final List<String> RANKING_PROMPTS = new CopyOnWriteArrayList<>();
+  static final String STUB_ANSWER = "Try A Game of Thrones by George R.R. Martin.";
+  static final String FIRST_QUESTION = "Recommend an epic fantasy series with political intrigue.";
+  static final String FOLLOW_UP = "Anything cheaper by the same author?";
+  static final String STANDALONE = "Books by George R.R. Martin cheaper than A Game of Thrones";
+  static final String REWRITE_MODEL = "configured-rewrite-model";
+  static final List<String> REWRITE_MODELS = new CopyOnWriteArrayList<>();
+  static final List<String> REWRITE_PROMPTS = new CopyOnWriteArrayList<>();
+  static final List<String> RANKING_PROMPTS = new CopyOnWriteArrayList<>();
 
-    @TestConfiguration(proxyBeanMethods = false)
-    static class StubModels {
+  @TestConfiguration(proxyBeanMethods = false)
+  static class StubModels {
 
-        @Bean
-        @Primary
-        ChatModel stubChatModel() {
-            // Answers the query rewrite with STANDALONE and everything else with STUB_ANSWER.
-            return prompt -> {
-                boolean rewrite = prompt.getContents().contains("standalone query");
-                if (rewrite) {
-                    REWRITE_PROMPTS.add(prompt.getContents());
-                    if (prompt.getOptions() != null) {
-                        REWRITE_MODELS.add(String.valueOf(prompt.getOptions().getModel()));
-                    }
-                } else if (prompt.getContents().startsWith("Rank the following documents")) {
-                    RANKING_PROMPTS.add(prompt.getContents());
-                }
-                return new ChatResponse(List.of(new Generation(new AssistantMessage(rewrite ? STANDALONE : STUB_ANSWER))));
-            };
+    @Bean
+    @Primary
+    ChatModel stubChatModel() {
+      // Answers the query rewrite with STANDALONE and everything else with STUB_ANSWER.
+      return prompt -> {
+        boolean rewrite = prompt.getContents().contains("standalone query");
+        if (rewrite) {
+          REWRITE_PROMPTS.add(prompt.getContents());
+          if (prompt.getOptions() != null) {
+            REWRITE_MODELS.add(String.valueOf(prompt.getOptions().getModel()));
+          }
+        } else if (prompt.getContents().startsWith("Rank the following documents")) {
+          RANKING_PROMPTS.add(prompt.getContents());
         }
-
-        @Bean
-        @Primary
-        RecordingRetriever recordingRetriever(SearchRepository searchRepository) {
-            return new RecordingRetriever(searchRepository);
-        }
+        return new ChatResponse(
+            List.of(new Generation(new AssistantMessage(rewrite ? STANDALONE : STUB_ANSWER))));
+      };
     }
 
-    static class RecordingRetriever extends HybridDocumentRetriever {
+    @Bean
+    @Primary
+    RecordingRetriever recordingRetriever(SearchRepository searchRepository) {
+      return new RecordingRetriever(searchRepository);
+    }
+  }
 
-        final List<Query> queries = new CopyOnWriteArrayList<>();
+  static class RecordingRetriever extends HybridDocumentRetriever {
 
-        RecordingRetriever(SearchRepository searchRepository) {
-            super(searchRepository, "unused", 20);
-        }
+    final List<Query> queries = new CopyOnWriteArrayList<>();
 
-        @Override
-        public List<Document> retrieve(Query query) {
-            queries.add(query);
-            return List.of(new Document("grrm-01", "A Game of Thrones by George R.R. Martin.", Map.of()));
-        }
+    RecordingRetriever(SearchRepository searchRepository) {
+      super(searchRepository, "unused", 20);
     }
 
-    @Autowired
-    private SearchService searchService;
-
-    @Autowired
-    private RecordingRetriever retriever;
-
-    @Autowired
-    private ChatMemory chatMemory;
-
-    @Test
-    void memoryAdvisorRunsBeforeRetrievalSoTurnTwoSeesTurnOne() {
-        // SPRING_AI_CHAT_MEMORY.conversation_id is varchar(36).
-        String conversationId = "ordering-" + UUID.randomUUID().toString().substring(0, 8);
-
-        searchService.ask(new AskRequest(FIRST_QUESTION, conversationId));
-        searchService.ask(new AskRequest(FOLLOW_UP, conversationId));
-
-        Query turnTwo = retriever.queries.getLast();
-        assertThat(turnTwo.history())
-                .filteredOn(message -> message.getMessageType() != MessageType.SYSTEM)
-                .extracting(Message::getMessageType, Message::getText)
-                .containsExactly(
-                        tuple(MessageType.USER, FIRST_QUESTION),
-                        tuple(MessageType.ASSISTANT, STUB_ANSWER),
-                        tuple(MessageType.USER, FOLLOW_UP));
-        assertThat(turnTwo.context()).containsEntry(ChatMemory.CONVERSATION_ID, conversationId);
+    @Override
+    public List<Document> retrieve(Query query) {
+      queries.add(query);
+      return List.of(new Document("grrm-01", "A Game of Thrones by George R.R. Martin.", Map.of()));
     }
+  }
 
-    @Test
-    void aFollowUpIsSearchedAsAStandaloneQuery() {
-        String conversationId = "rewrite-" + UUID.randomUUID().toString().substring(0, 8);
+  @Autowired private SearchService searchService;
 
-        searchService.ask(new AskRequest(FIRST_QUESTION, conversationId));
-        searchService.ask(new AskRequest(FOLLOW_UP, conversationId));
+  @Autowired private RecordingRetriever retriever;
 
-        assertThat(retriever.queries.getLast().text()).isEqualTo(STANDALONE);
-    }
+  @Autowired private ChatMemory chatMemory;
 
-    @Test
-    void aFirstQuestionIsSearchedAsAskedWithoutARewrite() {
-        int rewritesBefore = REWRITE_PROMPTS.size();
+  @Test
+  void memoryAdvisorRunsBeforeRetrievalSoTurnTwoSeesTurnOne() {
+    // SPRING_AI_CHAT_MEMORY.conversation_id is varchar(36).
+    String conversationId = "ordering-" + UUID.randomUUID().toString().substring(0, 8);
 
-        searchService.ask(new AskRequest(FIRST_QUESTION, "first-" + UUID.randomUUID().toString().substring(0, 8)));
+    searchService.ask(new AskRequest(FIRST_QUESTION, conversationId));
+    searchService.ask(new AskRequest(FOLLOW_UP, conversationId));
 
-        assertThat(retriever.queries.getLast().text()).isEqualTo(FIRST_QUESTION);
-        assertThat(REWRITE_PROMPTS).hasSize(rewritesBefore);
-    }
+    Query turnTwo = retriever.queries.getLast();
+    assertThat(turnTwo.history())
+        .filteredOn(message -> message.getMessageType() != MessageType.SYSTEM)
+        .extracting(Message::getMessageType, Message::getText)
+        .containsExactly(
+            tuple(MessageType.USER, FIRST_QUESTION),
+            tuple(MessageType.ASSISTANT, STUB_ANSWER),
+            tuple(MessageType.USER, FOLLOW_UP));
+    assertThat(turnTwo.context()).containsEntry(ChatMemory.CONVERSATION_ID, conversationId);
+  }
 
-    @Test
-    void aFollowUpIsRerankedAgainstTheStandaloneQuery() {
-        // The advisor hands post-processors the original question; without the rewrite the
-        // reranker would judge candidates against "Anything cheaper by the same author?".
-        String conversationId = "rerank-" + UUID.randomUUID().toString().substring(0, 8);
+  @Test
+  void aFollowUpIsSearchedAsAStandaloneQuery() {
+    String conversationId = "rewrite-" + UUID.randomUUID().toString().substring(0, 8);
 
-        searchService.ask(new AskRequest(FIRST_QUESTION, conversationId));
-        int rankingsBefore = RANKING_PROMPTS.size();
-        searchService.ask(new AskRequest(FOLLOW_UP, conversationId));
+    searchService.ask(new AskRequest(FIRST_QUESTION, conversationId));
+    searchService.ask(new AskRequest(FOLLOW_UP, conversationId));
 
-        assertThat(RANKING_PROMPTS.subList(rankingsBefore, RANKING_PROMPTS.size()))
-                .singleElement().asString().contains("Query:\n" + STANDALONE);
-    }
+    assertThat(retriever.queries.getLast().text()).isEqualTo(STANDALONE);
+  }
 
-    @Test
-    void theRewriteRunsOnTheConfiguredModel() {
-        String conversationId = "model-" + UUID.randomUUID().toString().substring(0, 8);
-        searchService.ask(new AskRequest(FIRST_QUESTION, conversationId));
-        int rewritesBefore = REWRITE_MODELS.size();
-        searchService.ask(new AskRequest(FOLLOW_UP, conversationId));
+  @Test
+  void aFirstQuestionIsSearchedAsAskedWithoutARewrite() {
+    int rewritesBefore = REWRITE_PROMPTS.size();
 
-        assertThat(REWRITE_MODELS.subList(rewritesBefore, REWRITE_MODELS.size())).containsExactly(REWRITE_MODEL);
-    }
+    searchService.ask(
+        new AskRequest(FIRST_QUESTION, "first-" + UUID.randomUUID().toString().substring(0, 8)));
 
-    @Test
-    void memoryAdvisorHasHigherPrecedenceThanTheRetrievalAdvisor() {
-        int memoryOrder = MessageChatMemoryAdvisor.builder(chatMemory).build().getOrder();
-        int retrievalOrder = RetrievalAugmentationAdvisor.builder().documentRetriever(retriever).build().getOrder();
+    assertThat(retriever.queries.getLast().text()).isEqualTo(FIRST_QUESTION);
+    assertThat(REWRITE_PROMPTS).hasSize(rewritesBefore);
+  }
 
-        assertThat(memoryOrder).isLessThan(retrievalOrder);
-    }
+  @Test
+  void aFollowUpIsRerankedAgainstTheStandaloneQuery() {
+    // The advisor hands post-processors the original question; without the rewrite the
+    // reranker would judge candidates against "Anything cheaper by the same author?".
+    String conversationId = "rerank-" + UUID.randomUUID().toString().substring(0, 8);
+
+    searchService.ask(new AskRequest(FIRST_QUESTION, conversationId));
+    int rankingsBefore = RANKING_PROMPTS.size();
+    searchService.ask(new AskRequest(FOLLOW_UP, conversationId));
+
+    assertThat(RANKING_PROMPTS.subList(rankingsBefore, RANKING_PROMPTS.size()))
+        .singleElement()
+        .asString()
+        .contains("Query:\n" + STANDALONE);
+  }
+
+  @Test
+  void theRewriteRunsOnTheConfiguredModel() {
+    String conversationId = "model-" + UUID.randomUUID().toString().substring(0, 8);
+    searchService.ask(new AskRequest(FIRST_QUESTION, conversationId));
+    int rewritesBefore = REWRITE_MODELS.size();
+    searchService.ask(new AskRequest(FOLLOW_UP, conversationId));
+
+    assertThat(REWRITE_MODELS.subList(rewritesBefore, REWRITE_MODELS.size()))
+        .containsExactly(REWRITE_MODEL);
+  }
+
+  @Test
+  void memoryAdvisorHasHigherPrecedenceThanTheRetrievalAdvisor() {
+    int memoryOrder = MessageChatMemoryAdvisor.builder(chatMemory).build().getOrder();
+    int retrievalOrder =
+        RetrievalAugmentationAdvisor.builder().documentRetriever(retriever).build().getOrder();
+
+    assertThat(memoryOrder).isLessThan(retrievalOrder);
+  }
 }
