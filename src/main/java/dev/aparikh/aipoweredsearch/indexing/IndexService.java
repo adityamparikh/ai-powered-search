@@ -48,7 +48,8 @@ public class IndexService {
    * @return response with indexing results
    */
   public IndexResponse indexDocument(String collection, IndexRequest indexRequest) {
-    log.debug("Indexing document in collection: {}", sanitize(collection));
+    String safeCollection = sanitize(collection);
+    log.debug("Indexing document in collection: {}", safeCollection);
 
     try {
       // Generate document ID if not provided
@@ -68,13 +69,12 @@ public class IndexService {
       VectorStore vs = vectorStoreFactory.forCollection(collection);
       vs.add(Collections.singletonList(document));
 
-      log.info(
-          "Successfully indexed document '{}' in collection '{}'", docId, sanitize(collection));
+      log.info("Successfully indexed document '{}' in collection '{}'", docId, safeCollection);
 
       return new IndexResponse(
           1, 0, Collections.singletonList(docId), "Successfully indexed document");
     } catch (Exception e) {
-      log.error("Failed to index document in collection '{}'", sanitize(collection), e);
+      log.error("Failed to index document in collection '{}'", safeCollection, e);
       return new IndexResponse(
           0, 1, Collections.emptyList(), "Failed to index document: " + e.getMessage());
     }
@@ -89,10 +89,11 @@ public class IndexService {
    * @return response with indexing results
    */
   public IndexResponse indexDocuments(String collection, BatchIndexRequest batchRequest) {
+    String safeCollection = sanitize(collection);
     log.debug(
         "Batch indexing {} documents in collection: {}",
         batchRequest.documents().size(),
-        sanitize(collection));
+        safeCollection);
 
     List<String> indexedIds = new ArrayList<>();
     int failed = 0;
@@ -128,7 +129,7 @@ public class IndexService {
         log.info(
             "Successfully indexed {} documents in collection '{}'",
             documents.size(),
-            sanitize(collection));
+            safeCollection);
       }
 
       return new IndexResponse(

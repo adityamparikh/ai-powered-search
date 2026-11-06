@@ -151,7 +151,7 @@ public class SolrVectorStore extends AbstractObservationVectorStore {
               .filter(
                   doc -> {
                     Object embedding = doc.getMetadata().get("embedding");
-                    return !(embedding instanceof float[]) || ((float[]) embedding).length == 0;
+                    return !(embedding instanceof float[] vector) || vector.length == 0;
                   })
               .toList();
 
