@@ -259,6 +259,7 @@ The repository includes several helper scripts for common tasks:
 - `ANTHROPIC_PROMPT_CACHING_ENABLED`: Enable Anthropic prompt caching (defaults to 'true')
 - `ANTHROPIC_PROMPT_CACHING_STRATEGY`: Cache strategy (defaults to 'SYSTEM_AND_TOOLS')
 - `OPENAI_API_KEY`: Required for OpenAI embeddings (vector search and indexing)
+- `TYPESAFE_API_KEY`: Optional; the key for the `typesafe` decisions provider (any placeholder for a local Laya or Nimble)
 - `POSTGRES_USER`: PostgreSQL username (defaults to 'postgres')
 - `POSTGRES_PASSWORD`: PostgreSQL password (defaults to 'postgres')
 
@@ -847,6 +848,26 @@ public ChatClient ragChatClient(ChatModel chatModel,
   hands post-processors the original question. The shared `"default"` conversation (requests
   without a `conversationId`) is not rewritten, since its history mixes unrelated callers, and a
   failed rewrite falls back to the question as asked.
+- **Decisions (opt-in, pluggable)**: a decisions provider answers narrow questions about each
+  retrieved passage with calibrated probabilities instead of generated text.
+  `search.rag.decisions.enabled=true` screens candidates before reranking (prompt injection,
+  relevance, answer evidence); `search.rag.rerank.provider=decisions` replaces the Claude reranker,
+  keeping the `search.rag.rerank.top-k` passages most likely to answer and discarding only those below
+  `search.rag.decisions.rerank.minimum-score` (default 0). Both judge a follow-up's standalone rewrite.
+  - **Pluggable**: `search.rag.decisions.provider` (default `typesafe`) selects the provider. A
+    provider is a `@Configuration` contributing beans named `decisionsFilter` and `decisionsReranker`
+    (`AiConfig.DECISIONS_FILTER`, `DECISIONS_RERANKER`); `AiConfig` wires them without knowing the
+    provider. Another provider, such as OpenAI's Decisions API, would be a new configuration.
+  - **`typesafe`** (`TypeSafeDecisionsConfig`): `JevDocumentFilter` and `JevDocumentReranker` on the
+    TypeSafe starter's client: hosted Jev, or a local model with the same API (Laya, Nimble) via
+    `spring.ai.typesafe.base-url` and `spring.ai.typesafe.model`. The key comes from
+    `TYPESAFE_API_KEY` (`spring.ai.typesafe.api-key=${TYPESAFE_API_KEY:false}`); a local model needs
+    only a placeholder. The starter activates when that property is present and not `false`, and an
+    empty key fails startup, so an unset variable resolves to `false` and TypeSafe stays off.
+  - **Off by default**: one call per passage adds latency, and hosted Jev sends passages to TypeSafe.
+    A passage the provider cannot judge is passed through with a WARN, so screening is best-effort.
+    Asking for a decisions stage that no provider supplies (no key, a typo) logs a WARN: passages are
+    not screened, or Claude reranks.
 - **Field projection**: `id,content,metadata_*` — excludes the 1536-dim `vector` field, which
   Solr would otherwise return on every hit under the default `fl=*`
 
