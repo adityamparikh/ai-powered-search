@@ -1,6 +1,6 @@
 # AI-Powered Search
 
-Apache Solr search with AI-driven query generation and semantic vector search. Built with Spring Boot 4.1.1, Spring AI 2.0.1, and Java 25.
+Apache Solr search with AI-driven query generation and semantic vector search. Built with Spring Boot 4.1.1, Spring AI 2.0.2, and Java 25.
 
 ## 🚀 Features
 
@@ -17,64 +17,75 @@ Apache Solr search with AI-driven query generation and semantic vector search. B
 
 ### System Overview
 
+```mermaid
+flowchart TB
+    client([Client])
+
+    subgraph app["Spring Boot application"]
+        direction TB
+        IC[IndexController]
+        SC[SearchController]
+        IS[IndexService]
+        SS[SearchService]
+        SR[SearchRepository]
+        VS["SolrVectorStore<br/>(Spring AI VectorStore)"]
+        RAG["ragChatClient<br/>RetrievalAugmentationAdvisor"]
+        HDR[HybridDocumentRetriever]
+        RR["RerankingDocumentPostProcessor<br/>(optional)"]
+        EMB[EmbeddingService]
+    end
+
+    subgraph solr["Apache Solr 10.1+ / 9.11+ (SolrCloud)"]
+        direction TB
+        SEL["/select<br/>keyword, kNN"]
+        HYB["/hybrid<br/>CombinedQuerySearchHandler<br/>(server-side RRF)"]
+        UPD["/update"]
+    end
+
+    openai[["OpenAI<br/>text-embedding-3-small"]]
+    claude[["Anthropic Claude"]]
+    pg[("PostgreSQL<br/>chat memory")]
+
+    client -->|"POST /api/v1/index/{c}[/batch]"| IC --> IS --> VS
+    client -->|"GET /api/v1/search/{c}, /semantic, /hybrid<br/>POST /api/v1/search/ask"| SC --> SS
+
+    SS -->|keyword| SR
+    SS -->|semantic| VS
+    SS -->|hybrid| SR
+    SS -->|ask| RAG
+    SS -->|"query generation<br/>(keyword, hybrid)"| claude
+
+    RAG --> HDR --> SR
+    RAG --> RR --> claude
+    RAG -->|answer| claude
+    RAG <-->|"history (per conversationId)"| pg
+
+    SR -->|keyword search| SEL
+    SR -->|"hybrid: one combined query"| HYB
+    SR -.->|fallback| SEL
+    SR --> EMB --> openai
+    VS --> openai
+    VS -->|kNN| SEL
+    VS -->|add| UPD
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                        Client Application                        │
-└───────────────┬─────────────────────────┬──────────────────────┘
-                │                         │
-        Indexing API              Search API
-                │                         │
-    ┌───────────▼──────────┐   ┌─────────▼────────────┐
-    │  IndexController     │   │  SearchController    │
-    │  - Single document   │   │  - Semantic search   │
-    │  - Batch indexing    │   │  - Keyword search    │
-    └───────────┬──────────┘   └─────────┬────────────┘
-                │                        │
-    ┌───────────▼──────────┐   ┌─────────▼────────────┐
-    │   IndexService       │   │   SearchService      │
-    │  - Auto embeddings   │   │  - Query generation  │
-    └───────────┬──────────┘   └─────────┬────────────┘
-                │                        │
-                │              ┌─────────▼────────────┐
-                │              │  SearchRepository    │
-                │              │  - Schema retrieval  │
-                │              └─────────┬────────────┘
-                │                        │
-    ┌───────────▼────────────────────────▼────────────┐
-    │           SolrVectorStore (Spring AI)           │
-    │  - Embedding integration                        │
-    │  - Vector similarity search                     │
-    │  - Document persistence                         │
-    └───────────┬─────────────────────────────────────┘
-                │
-    ┌───────────▼──────────┐   ┌──────────────────────┐
-    │  OpenAI Embeddings   │   │  Anthropic Claude    │
-    │  text-embedding-3-   │   │  claude-sonnet-4-5   │
-    │  small (1536-dim)    │   │  Query generation    │
-    └──────────────────────┘   └──────────────────────┘
-                │
-    ┌───────────▼──────────────────────────────────────┐
-    │         Apache Solr 9.9.0 + ZooKeeper            │
-    │  - DenseVectorField (HNSW, cosine)              │
-    │  - KNN search                                    │
-    │  - Typed schema fields                           │
-    │  - PostgreSQL (chat memory)                      │
-    └──────────────────────────────────────────────────┘
-```
+
+Sequence diagrams for hybrid search, RAG (`/ask`) and indexing are in
+[docs/architecture.md](docs/architecture.md).
 
 ### Key Components
 
-- **SolrVectorStore**: Custom Spring AI vector store implementation for Solr
+- **SolrVectorStore**: Custom Spring AI vector store implementation for Solr (indexing and semantic search)
 - **IndexService**: Handles document indexing with automatic embedding generation
-- **SearchService**: Orchestrates both semantic and keyword search
-- **SearchRepository**: Solr query execution and schema introspection
-- **Chat Memory**: PostgreSQL-backed conversation history (conversation ID: "007")
+- **SearchService**: Orchestrates keyword, semantic and hybrid search, and RAG (`/ask`)
+- **SearchRepository**: Solr query execution, hybrid search via Solr's `/hybrid` combined query (RRF), and schema introspection
+- **HybridDocumentRetriever** and **RerankingDocumentPostProcessor**: retrieval and optional reranking for `/ask`
+- **Chat Memory**: PostgreSQL-backed conversation history for `/ask`, keyed by the request's `conversationId` (`"default"` when none is given). Search query generation is stateless.
 
 ## 📋 Prerequisites
 
 - **Java 25** or higher
 - **Docker** and **Docker Desktop** (for Solr, ZooKeeper, and PostgreSQL)
-- **Apache Solr 9.9.0** (provided via Docker)
+- **Apache Solr 10.1.0** (provided via Docker; built-in RRF hybrid search needs Solr 10.1+ or 9.11+)
 - **ZooKeeper 3.9** (provided via Docker)
 - **PostgreSQL 16** (provided via Docker)
 - **Anthropic API Key** (for Claude AI)
@@ -256,7 +267,7 @@ curl "http://localhost:8080/api/v1/search/books/hybrid?query=machine%20learning%
 
 **How it works:**
 
-- Uses Solr's native `{!rrf}` query parser (Solr 9.8+)
+- Uses Solr's built-in RRF combined query (Solr 10.1+ or 9.11+, `/hybrid` handler): one request, fused server-side
 - Combines edismax keyword search on `_text_` field with KNN vector search
 - RRF formula: `score = sum(1 / (k + rank))` balances both signals
 - Schema-agnostic: works with any Solr collection
@@ -585,7 +596,7 @@ spring.ai.vectorstore.solr.host=http://localhost:8983/solr
 
 # Anthropic Claude Configuration
 spring.ai.anthropic.api-key=${ANTHROPIC_API_KEY}
-spring.ai.anthropic.chat.options.model=claude-sonnet-4-5
+spring.ai.anthropic.chat.model=claude-sonnet-5-5
 # Anthropic Prompt Caching (90% cost reduction on cache hits)
 spring.ai.anthropic.prompt-caching.enabled=${ANTHROPIC_PROMPT_CACHING_ENABLED:true}
 spring.ai.anthropic.prompt-caching.strategy=${ANTHROPIC_PROMPT_CACHING_STRATEGY:SYSTEM_AND_TOOLS}

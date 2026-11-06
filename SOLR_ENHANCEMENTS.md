@@ -7,7 +7,7 @@ application.
 
 The following enhancements have been implemented to leverage native Solr capabilities:
 
-1. **Native RRF (Reciprocal Rank Fusion)** - Better hybrid search fusion
+1. **Native RRF (Reciprocal Rank Fusion)** - Hybrid search fused inside Solr (Solr 10.1+ or 9.11+)
 2. **Highlighting** - Show users why results matched their query
 3. **Faceting for Semantic/Hybrid Search** - Filter results by categories
 4. **Spell Checking** - Suggest corrections for misspelled queries
@@ -16,91 +16,70 @@ The following enhancements have been implemented to leverage native Solr capabil
 
 ---
 
-## 1. Client-Side RRF (Reciprocal Rank Fusion) ⚡
+## 1. Solr-Native RRF (Reciprocal Rank Fusion) ⚡
 
 ### What Changed
 
-- **Before**: Attempted to use Solr's native `{!rrf}` query parser (didn't work correctly)
-- **After**: Uses client-side RRF implementation with separate keyword and vector searches
+- **Before**: Two separate Solr queries (keyword and vector) merged in the application by a
+  client-side `RrfMerger`
+- **After**: One request to Solr's combined query handler (10.1+, backported to 9.11) (`solr.CombinedQuerySearchHandler`,
+  SOLR-17319), which runs both legs and fuses them with RRF server-side
 
 ### Benefits
 
-- **Full Control**: Complete control over the fusion algorithm and scoring
-- **Solr Version Independent**: Works with any Solr version (not dependent on Solr 9.8+)
-- **Better Debugging**: Can inspect both result sets independently
-- **More Flexible**: Easy to tune k parameter and add custom scoring factors
-- **Rank-Based**: Focuses on rank positions rather than raw scores, which is more robust
+- **One round-trip** instead of two, and no fusion code in the application
+- **Global ranks across shards**: Solr fuses after merging shard results
+- **Shared filters**: the request's `filter` applies to both legs
+- **Pluggable**: other fusion algorithms can be configured as Solr combiner plugins
 
 ### How It Works
 
-1. **Execute Keyword Search**: Run edismax query against `_text_` field
-2. **Execute Vector Search**: Run KNN query against vector field
-3. **Merge with RRF**: Combine results using formula: `score = sum(1 / (k + rank))`
-4. **Re-rank**: Sort merged results by RRF score
+1. **Keyword leg**: edismax over the `_text_` field
+2. **Vector leg**: `{!knn}` over the `vector` field (or `{!vectorSimilarity}` when `minScore` is set)
+3. **Fusion (in Solr)**: `score = sum(1 / (k + rank))`, k = `combiner.rrf.k` (default 60)
 
-### RRF Formula
+### Configuration (`solr-config/conf/solrconfig.xml`)
 
-For each document:
+```xml
+<requestHandler name="/hybrid" class="solr.CombinedQuerySearchHandler">
+  <lst name="defaults"><str name="df">_text_</str></lst>
+</requestHandler>
 
-```
-rrf_score = 0
-if doc appears in keyword results:
-    rrf_score += 1 / (k + keyword_rank)
-if doc appears in vector results:
-    rrf_score += 1 / (k + vector_rank)
-
-Final results sorted by rrf_score (descending)
+<searchComponent name="combined_query" class="solr.CombinedQueryComponent">
+  <int name="maxCombinerQueries">2</int>
+</searchComponent>
 ```
 
-Where k = 60 (default), higher k values give more weight to lower-ranked documents.
+### Request
 
-### Implementation
-
-```java
-// Step 1: Execute keyword search
-List<Map<String, Object>> keywordResults = executeKeywordSearch(
-                collection, query, topK * 2, filterExpression, fieldsCsv);
-
-// Step 2: Execute vector search
-List<Map<String, Object>> vectorResults = executeVectorSearch(
-        collection, query, topK * 2, filterExpression, fieldsCsv);
-
-// Step 3: Merge using RRF algorithm
-RrfMerger rrfMerger = new RrfMerger(); // Uses default k=60
-List<Map<String, Object>> mergedResults = rrfMerger.merge(keywordResults, vectorResults);
-
-// Step 4: Apply filters and limit
-return mergedResults.
-
-stream()
-    .
-
-filter(doc ->
-
-scoreAboveThreshold(doc, minScore))
-        .
-
-limit(topK)
-    .
-
-collect(Collectors.toList());
+```json
+POST /solr/books/hybrid
+{
+  "queries": {
+    "keyword": { "edismax": { "query": "spring boot", "qf": "_text_" } },
+    "vector":  { "knn": { "f": "vector", "topK": 20, "query": "[0.12, ...]" } }
+  },
+  "limit": 10,
+  "params": {
+    "combiner": true,
+    "combiner.query": ["keyword", "vector"],
+    "combiner.algorithm": "rrf",
+    "shards.rows": 20
+  }
+}
 ```
 
 ### Location
 
-- `SearchRepository.executeHybridRerankSearch()` - Orchestrates hybrid search
-- `SearchRepository.executeKeywordSearch()` - Executes keyword component
-- `SearchRepository.executeVectorSearch()` - Executes vector component
-- `RrfMerger.merge()` - Client-side RRF algorithm implementation
+- `SearchRepository.executeHybridRerankSearch()` - sends the combined query, falls back on failure
+- `SearchRepository.buildHybridRequest()` - builds the JSON request
+- `SearchRepository.executeKeywordSearch()` / `executeVectorSearch()` - fallback legs only
 
 ### Response Fields
 
-Merged documents include:
-
-- `score`: Final RRF score
-- `rrf_score`: Same as score (for transparency)
-- `keyword_score`: Original keyword search score (if document appeared in keyword results)
-- `vector_score`: Original vector similarity score (if document appeared in vector results)
+Results are in fused RRF order. They carry no `score`: Solr 10.1 returns a raw per-leg score
+(BM25 or cosine) on each document rather than the fused one. Add `debug=results` to get
+`combinerExplanations` with each document's RRF score and per-leg ranks.
 
 ---
 
@@ -698,7 +677,7 @@ Note: Some tests may need updates to handle the new response fields (`highlighti
 
 ### RRF Query Failing
 
-- Ensure you're using Solr 9.8 or later
+- Ensure you're using Solr 10.1+ or 9.11+ and that the collection has the `/hybrid` handler
 - Verify the vector field exists in the schema
 - Check that both subqueries are valid independently
 

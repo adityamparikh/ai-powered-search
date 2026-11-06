@@ -626,6 +626,30 @@
     </lst>
   </requestHandler>
 
+  <!-- Hybrid search: server-side Reciprocal Rank Fusion (Solr 10.1+, SOLR-17319).
+
+       A JSON request with a "queries" map and params combiner=true / combiner.query=[...]
+       runs every named query (e.g. an edismax keyword query and a {!knn} vector query)
+       and fuses their rankings with RRF: score = sum(1 / (k + rank)), k = combiner.rrf.k
+       (default 60). Without combiner=true this handler behaves like a plain /select.
+
+       The handler always executes as a distributed search, so the per-query candidate
+       depth is max(start + rows, shards.rows). The application sets shards.rows to
+       over-fetch candidates for fusion.
+
+       Grouping and cursorMark are not supported in combined mode. -->
+  <requestHandler name="/hybrid" class="solr.CombinedQuerySearchHandler">
+    <lst name="defaults">
+      <str name="echoParams">explicit</str>
+      <str name="df">_text_</str>
+    </lst>
+  </requestHandler>
+
+  <searchComponent name="combined_query" class="solr.CombinedQueryComponent">
+    <!-- keyword + vector -->
+    <int name="maxCombinerQueries">2</int>
+  </searchComponent>
+
   <!-- Shared parameters for multiple Request Handlers -->
   <initParams path="/update/**,/query,/select,/spell">
     <lst name="defaults">

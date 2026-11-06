@@ -18,12 +18,12 @@
 
 ### 3. Search Model
 - **Provider:** Anthropic
-- **Model:** claude-sonnet-4-5
+- **Model:** claude-sonnet-5-5
 - **Purpose:** Query generation and filter extraction
 - **Configured in:** `config/SpringAiConfig.java`
 
 ### 4. Search Engine
-- **Technology:** Apache Solr 9.9.0
+- **Technology:** Apache Solr 10.1.0
 - **Field Type:** DenseVectorField
 - **Algorithm:** HNSW (Hierarchical Navigable Small World)
 - **Similarity:** Cosine (0-1 scale, 1 = identical)
@@ -195,7 +195,7 @@ spring.ai.openai.api-key=${OPENAI_API_KEY}
 spring.ai.openai.embedding.options.model=text-embedding-3-small
 spring.ai.openai.embedding.options.dimensions=1536
 spring.ai.anthropic.api-key=${ANTHROPIC_API_KEY}
-spring.ai.anthropic.chat.options.model=claude-sonnet-4-5
+spring.ai.anthropic.chat.model=claude-sonnet-5-5
 spring.datasource.url=jdbc:postgresql://localhost:5432/chatmemory
 ```
 
@@ -226,10 +226,9 @@ metadata_category:AI
 ```
 
 ### Conversation Memory
-- **ID:** "007" (hardcoded, constant across all searches)
+- **Scope:** `/ask` only, keyed by the request's `conversationId` ("default" when absent)
 - **Storage:** PostgreSQL JDBC repository
-- **Purpose:** Maintains context across multiple search requests
-- **Advisors:** MessageChatMemoryAdvisor + SimpleLoggerAdvisor
+- **Search query generation:** stateless (no memory advisor); it previously shared a hardcoded "007" conversation across all callers
 
 ### Similarity Threshold Filtering
 - Applied AFTER query (post-query filtering)
@@ -334,7 +333,7 @@ metadata_category:AI
 - **Speed:** Fast, suitable for real-time embedding
 
 ### Chat Model
-- **Name:** claude-sonnet-4-5
+- **Name:** claude-sonnet-5-5
 - **Context:** 200k tokens
 - **Capabilities:** JSON output, tool use, vision
 - **Purpose:** Query parsing and filter generation

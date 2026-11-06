@@ -14,7 +14,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
 
 /**
  * Retrieves RAG context using hybrid search — keyword (BM25/edismax) and vector (KNN)
@@ -30,13 +29,13 @@ import java.util.Set;
  * {@link DocumentRetriever} SPI so it can be plugged into a
  * {@code RetrievalAugmentationAdvisor}.</p>
  *
- * <p><strong>Ordering is significant.</strong> The returned list is ranked by fused RRF
- * score. Any downstream {@code DocumentJoiner} must preserve that order — the default
+ * <p><strong>Ordering is significant.</strong> The returned list is in Solr's fused RRF
+ * order (fusion happens server-side in Solr's combined query handler). Any downstream
+ * {@code DocumentJoiner} must preserve that order — the default
  * {@code ConcatenationDocumentJoiner} re-sorts by each document's own score and would
  * silently discard the fusion.</p>
  *
  * @see SearchRepository#executeHybridRerankSearch
- * @see RrfMerger
  */
 @Component
 public class HybridDocumentRetriever implements DocumentRetriever {
@@ -51,10 +50,6 @@ public class HybridDocumentRetriever implements DocumentRetriever {
     private static final String METADATA_PREFIX = "metadata_";
     private static final String ID_FIELD = "id";
     private static final String CONTENT_FIELD = "content";
-
-    /** Fusion bookkeeping from {@link RrfMerger}, carried through for observability. */
-    private static final Set<String> RRF_PROVENANCE_FIELDS = Set.of(
-            "rrf_score", "keyword_rank", "vector_rank", "keyword_score", "vector_score");
 
     private static final Logger log = LoggerFactory.getLogger(HybridDocumentRetriever.class);
 
@@ -115,11 +110,6 @@ public class HybridDocumentRetriever implements DocumentRetriever {
         row.forEach((field, value) -> {
             if (field.startsWith(METADATA_PREFIX)) {
                 metadata.put(field.substring(METADATA_PREFIX.length()), value);
-            } else if (RRF_PROVENANCE_FIELDS.contains(field)) {
-                // RRF discards raw scores by construction. Carrying the ranks and per-leg
-                // scores through makes it possible to answer "why was this chunk in the
-                // prompt, and which leg surfaced it?" after the fact.
-                metadata.put(field, value);
             }
         });
 

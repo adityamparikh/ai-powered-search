@@ -1,5 +1,11 @@
 # Vector Store, Indexing, and Semantic Search Implementation Analysis
 
+> **Note:** hybrid search no longer fuses results in the application. Since the upgrade to
+> Solr 10.1, `SearchRepository.executeHybridRerankSearch()` sends a single combined query to
+> Solr's `/hybrid` handler and Solr performs the RRF fusion. `RrfMerger` has been removed;
+> references to it below are historical. See `SOLR_ENHANCEMENTS.md` §1.
+
+
 ## Executive Summary
 
 This AI-powered search application is built on Spring Boot 3.5.4 with Java 21, integrating Apache Solr 9.9.0 for vector-based semantic search. The architecture combines:
@@ -799,7 +805,7 @@ solr.url=http://localhost:8983/solr
 
 # Spring AI - Anthropic (Chat)
 spring.ai.anthropic.api-key=${ANTHROPIC_API_KEY}
-spring.ai.anthropic.chat.options.model=claude-sonnet-4-5
+spring.ai.anthropic.chat.model=claude-sonnet-5-5
 
 # Spring AI - OpenAI (Embeddings)
 spring.ai.openai.api-key=${OPENAI_API_KEY}
@@ -983,7 +989,7 @@ SearchService.semanticSearch()
     │   └─ Returns: FieldInfo[] (name, type, indexed, stored, etc.)
     ├─ Build user message: query + field information
     ├─ Call ChatClient with semanticSystemResource prompt
-    │   └─ Anthropic Claude (claude-sonnet-4-5)
+    │   └─ Anthropic Claude (claude-sonnet-5-5)
     │       └─ Generates: filters (fq), fields (fl), facets, sort
     ├─ Create SolrVectorStore(solrClient, collection, embeddingModel)
     ├─ Build SearchRequest:
@@ -1110,7 +1116,7 @@ Similarity threshold filtering occurs AFTER query execution because:
 |-----------|-----------|-------------|
 | **Vector Store** | Custom SolrVectorStore | Spring AI compatible, KNN search, batch embedding |
 | **Embeddings** | OpenAI text-embedding-3-small | 1536 dimensions, cosine similarity |
-| **Chat/Query Generation** | Anthropic Claude | claude-sonnet-4-5, chat memory with conversation ID "007" |
+| **Chat/Query Generation** | Anthropic Claude | claude-sonnet-5-5, chat memory with conversation ID "007" |
 | **Search Engine** | Apache Solr | 9.9.0, DenseVectorField, KNN queries |
 | **Chat Memory** | PostgreSQL | JDBC repository, auto-schema initialization |
 | **HTTP Client** | HttpSolrClient | HTTP/1.1, 10s connect timeout, 60s socket timeout |

@@ -56,8 +56,6 @@ import java.util.stream.Collectors;
 @Service
 public class SearchService {
 
-    private static final String DEFAULT_CONVERSATION_ID = "007";
-
     private final Logger log = LoggerFactory.getLogger(SearchService.class);
 
     private final Resource systemResource;
@@ -360,7 +358,6 @@ public class SearchService {
         QueryGenerationResponse response = chatClient.prompt()
                 .system(systemPrompt)
                 .user(userMessage)
-                .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, DEFAULT_CONVERSATION_ID))
                 .call()
                 .entity(QueryGenerationResponse.class);
 

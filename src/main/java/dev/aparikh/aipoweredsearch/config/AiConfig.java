@@ -13,6 +13,7 @@ import org.springframework.ai.chat.client.advisor.SimpleLoggerAdvisor;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.MessageType;
+import org.springframework.ai.model.anthropic.autoconfigure.AnthropicChatProperties;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.openai.OpenAiEmbeddingModel;
@@ -70,14 +71,6 @@ public class AiConfig {
     static final String STANDALONE_QUERY = "rag.standalone";
 
     /**
-     * Anthropic chat model id used for query generation and RAG.
-     *
-     * <p>Spring AI 2.x removed the {@code AnthropicApi.ChatModel} enum when it moved to the
-     * official Anthropic Java SDK, so the model is now identified by its string id.</p>
-     */
-    private static final String ANTHROPIC_CHAT_MODEL = "claude-sonnet-4-5";
-
-    /**
      * Creates default AnthropicChatOptions with prompt caching enabled.
      *
      * <p>Prompt caching reduces costs by up to 90% and improves response times by up to 85%
@@ -104,20 +97,21 @@ public class AiConfig {
      * options instance, so this bean exposes the builder. Deferring the build lets Spring AI merge
      * per-request options over these defaults instead of replacing them wholesale.</p>
      *
-     * @param cachingEnabled whether prompt caching is enabled
+     * @param chatProperties Spring AI's bound {@code spring.ai.anthropic.chat.*} properties. These
+     *        options are the chat clients' defaults, so they start from every configured chat
+     *        property (model, max tokens, temperature, ...) rather than a fixed model.
      * @param cacheStrategyStr the cache strategy to use
      * @return configured AnthropicChatOptions builder
      */
     @Bean
     @ConditionalOnProperty(name = "spring.ai.anthropic.prompt-caching.enabled", havingValue = "true", matchIfMissing = true)
     public AnthropicChatOptions.Builder anthropicChatOptionsWithCaching(
-            @Value("${spring.ai.anthropic.prompt-caching.enabled:true}") boolean cachingEnabled,
+            AnthropicChatProperties chatProperties,
             @Value("${spring.ai.anthropic.prompt-caching.strategy:SYSTEM_AND_TOOLS}") String cacheStrategyStr) {
 
         AnthropicCacheStrategy cacheStrategy = AnthropicCacheStrategy.valueOf(cacheStrategyStr);
 
-        AnthropicChatOptions.Builder builder = AnthropicChatOptions.builder();
-        builder.model(ANTHROPIC_CHAT_MODEL);
+        AnthropicChatOptions.Builder builder = chatProperties.toOptions().mutate();
         builder.cacheOptions(AnthropicCacheOptions.builder()
                 .strategy(cacheStrategy)
                 .messageTypeTtl(MessageType.SYSTEM, AnthropicCacheTtl.ONE_HOUR)
@@ -161,27 +155,31 @@ public class AiConfig {
     /**
      * Creates a ChatClient bean for query generation (without RAG).
      *
-     * <p>This bean is used by the SearchService for query generation and conversational search.
-     * It must be explicitly defined because Spring AI cannot auto-configure when multiple
-     * LLM providers are present.</p>
+     * <p>This bean is used by the SearchService to turn a free-text query into Solr query
+     * parameters. It must be explicitly defined because Spring AI cannot auto-configure when
+     * multiple LLM providers are present.</p>
+     *
+     * <p><strong>Stateless by design: no chat memory.</strong> Each search is independent. A
+     * memory advisor here would need a conversation ID, and the search endpoints have none to
+     * give it: it used to be a hardcoded {@code "007"} shared by every caller, so one user's
+     * queries (and Claude's earlier JSON answers) leaked into everyone else's query generation,
+     * and the growing history defeated prompt caching. Conversational context belongs to
+     * {@code /ask}, whose {@code ragChatClient} keys memory by the request's conversation ID.</p>
      *
      * <p>The ChatClient is configured with default advisors:
      * <ul>
-     *   <li>MessageChatMemoryAdvisor - Maintains conversational context across requests</li>
      *   <li>SimpleLoggerAdvisor - Logs chat interactions for debugging</li>
      *   <li>PromptCacheMetricsAdvisor - Logs cache metrics when prompt caching is enabled</li>
      * </ul>
      * </p>
      *
      * @param chatModel the ChatModel (Anthropic) auto-configured by Spring AI
-     * @param chatMemory the ChatMemory for maintaining conversation history
      * @param cachingEnabled whether prompt caching is enabled
      * @param chatOptions the chat options with caching configured (optional, may be null if caching disabled)
      * @return configured ChatClient instance
      */
     @Bean
     public ChatClient searchChatClient(ChatModel chatModel,
-                                 ChatMemory chatMemory,
                                  @Value("${spring.ai.anthropic.prompt-caching.enabled:true}") boolean cachingEnabled,
                                  @Autowired(required = false) @Qualifier("anthropicChatOptionsWithCaching") AnthropicChatOptions.@Nullable Builder chatOptions) {
         ChatClient.Builder builder = ChatClient.builder(chatModel);
@@ -192,7 +190,6 @@ public class AiConfig {
         }
 
         return builder.defaultAdvisors(
-                        MessageChatMemoryAdvisor.builder(chatMemory).build(),
                         SimpleLoggerAdvisor.builder().build(),
                         PromptCacheMetricsAdvisor.builder()
                                 .cachingEnabled(cachingEnabled)
@@ -269,8 +266,9 @@ public class AiConfig {
                                         .build())
                                 // Pass-through joiner. The default ConcatenationDocumentJoiner
                                 // re-sorts documents by their individual score, which would undo
-                                // the RRF ranking the retriever just computed — our score IS the
-                                // fused RRF value and is not comparable across retrieval strategies.
+                                // the RRF order Solr returned. Hybrid documents carry no score
+                                // (Solr's per-document score in combined mode is a raw per-leg
+                                // score, not the fused one), so list order is the only ranking.
                                 .documentJoiner(documentsForQuery -> documentsForQuery.values().stream()
                                         .flatMap(List::stream)
                                         .flatMap(List::stream)

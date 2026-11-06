@@ -151,7 +151,7 @@ public abstract class EvaluationTestBase {
         try {
             // Create collection
             solr.execInContainer(
-                    "/opt/solr/bin/solr", "create_collection",
+                    "/opt/solr/bin/solr", "create",
                     "-c", BOOKS_COLLECTION,
                     "-d", "_default"
             );

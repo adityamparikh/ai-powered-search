@@ -47,7 +47,7 @@ export POSTGRES_PASSWORD="postgres"
 spring.ai.vectorstore.solr.host=http://localhost:8983/solr
 
 # AI Models
-spring.ai.anthropic.chat.options.model=claude-sonnet-4-5
+spring.ai.anthropic.chat.model=claude-sonnet-5-5
 spring.ai.openai.embedding.options.model=text-embedding-3-small
 
 # Database
@@ -350,7 +350,7 @@ docker-compose logs solr | grep "QTime"
 - **topK**: 10 results
 - **Similarity Threshold**: 0.7
 - **Collection**: "books" (default)
-- **Conversation ID**: "007" (for chat memory)
+- **Conversation ID**: `/ask` uses the request's `conversationId` ("default" when absent); query generation keeps no memory
 
 ### Solr
 
