@@ -59,10 +59,10 @@ public class AiConfig {
 
   private static final Logger log = LoggerFactory.getLogger(AiConfig.class);
 
-  /** Bean name of a decisions provider's passage filter, see {@link TypeSafeDecisionsConfig}. */
+  /** Bean name of the decision-model passage filter, see {@link DecisionsAutoConfiguration}. */
   public static final String DECISIONS_FILTER = "decisionsFilter";
 
-  /** Bean name of a decisions provider's reranker, see {@link TypeSafeDecisionsConfig}. */
+  /** Bean name of the decision-model reranker, see {@link DecisionsAutoConfiguration}. */
   public static final String DECISIONS_RERANKER = "decisionsReranker";
 
   /** Query-context key under which a follow-up's standalone rewrite reaches the post-processors. */

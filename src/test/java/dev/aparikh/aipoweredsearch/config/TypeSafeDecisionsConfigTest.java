@@ -2,36 +2,74 @@ package dev.aparikh.aipoweredsearch.config;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import dev.aparikh.aipoweredsearch.search.decision.DecisionDocumentFilter;
+import dev.aparikh.aipoweredsearch.search.decision.DecisionDocumentReranker;
 import org.junit.jupiter.api.Test;
 import org.springaicommunity.typesafe.TypeSafeClient;
 import org.springaicommunity.typesafe.autoconfigure.TypeSafeAutoConfiguration;
-import org.springaicommunity.typesafe.rag.JevDocumentFilter;
-import org.springaicommunity.typesafe.rag.JevDocumentReranker;
+import org.springframework.ai.decision.DecisionModel;
+import org.springframework.ai.systemone.SystemOneDecisionModel;
+import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
+import org.springframework.boot.context.annotation.ImportCandidates;
 import org.springframework.boot.test.context.ConfigDataApplicationContextInitializer;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
 /**
- * The TypeSafe decisions provider contributes the {@value AiConfig#DECISIONS_FILTER} and {@value
- * AiConfig#DECISIONS_RERANKER} beans only when they are switched on, TypeSafe is the selected
- * provider (the default), and a TypeSafe API key is configured.
+ * The TypeSafe decisions provider contributes a {@link SystemOneDecisionModel} (Jev) when TypeSafe
+ * is the selected provider (the default) and a TypeSafe API key is configured. {@link
+ * DecisionsAutoConfiguration} builds the {@value AiConfig#DECISIONS_FILTER} and {@value
+ * AiConfig#DECISIONS_RERANKER} beans on it only when they are switched on.
  */
 class TypeSafeDecisionsConfigTest {
 
   private final ApplicationContextRunner runner =
       new ApplicationContextRunner()
-          .withConfiguration(AutoConfigurations.of(TypeSafeAutoConfiguration.class))
+          .withConfiguration(
+              AutoConfigurations.of(
+                  TypeSafeAutoConfiguration.class, DecisionsAutoConfiguration.class))
           .withUserConfiguration(TypeSafeDecisionsConfig.class);
 
   @Test
-  void decisionsEnabledWithAKeyCreatesTheJevFilter() {
+  void decisionsEnabledWithAKeyCreatesTheDecisionFilterOnJev() {
     runner
         .withPropertyValues(
             "search.rag.decisions.enabled=true", "spring.ai.typesafe.api-key=test-key")
         .run(
-            context ->
-                assertThat(context.getBean(AiConfig.DECISIONS_FILTER))
-                    .isInstanceOf(JevDocumentFilter.class));
+            context -> {
+              assertThat(context.getBean(DecisionModel.class))
+                  .isInstanceOf(SystemOneDecisionModel.class);
+              assertThat(context.getBean(AiConfig.DECISIONS_FILTER))
+                  .isInstanceOf(DecisionDocumentFilter.class);
+            });
+  }
+
+  @Test
+  void theDecisionStagesAreRegisteredAsAnAutoConfiguration() {
+    assertThat(ImportCandidates.load(AutoConfiguration.class, getClass().getClassLoader()))
+        .contains(DecisionsAutoConfiguration.class.getName());
+  }
+
+  @Test
+  void anyDecisionModelFeedsTheDecisionStages() {
+    // Provider-agnostic: the stages need a DecisionModel, not TypeSafe.
+    new ApplicationContextRunner()
+        .withConfiguration(AutoConfigurations.of(DecisionsAutoConfiguration.class))
+        .withBean(
+            DecisionModel.class,
+            () ->
+                prompt -> {
+                  throw new UnsupportedOperationException();
+                })
+        .withPropertyValues(
+            "search.rag.decisions.enabled=true", "search.rag.rerank.provider=decisions")
+        .run(
+            context -> {
+              assertThat(context.getBean(AiConfig.DECISIONS_FILTER))
+                  .isInstanceOf(DecisionDocumentFilter.class);
+              assertThat(context.getBean(AiConfig.DECISIONS_RERANKER))
+                  .isInstanceOf(DecisionDocumentReranker.class);
+            });
   }
 
   @Test
@@ -40,6 +78,7 @@ class TypeSafeDecisionsConfigTest {
         .withPropertyValues("spring.ai.typesafe.api-key=test-key")
         .run(
             context -> {
+              assertThat(context).hasSingleBean(DecisionModel.class);
               assertThat(context).doesNotHaveBean(AiConfig.DECISIONS_FILTER);
               assertThat(context).doesNotHaveBean(AiConfig.DECISIONS_RERANKER);
             });
@@ -54,6 +93,7 @@ class TypeSafeDecisionsConfigTest {
               assertThat(context).hasNotFailed();
               // The starter only activates with a key, so there is no client either.
               assertThat(context).doesNotHaveBean(TypeSafeClient.class);
+              assertThat(context).doesNotHaveBean(DecisionModel.class);
               assertThat(context).doesNotHaveBean(AiConfig.DECISIONS_FILTER);
             });
   }
@@ -81,7 +121,7 @@ class TypeSafeDecisionsConfigTest {
         .run(
             context ->
                 assertThat(context.getBean(AiConfig.DECISIONS_RERANKER))
-                    .isInstanceOf(JevDocumentReranker.class));
+                    .isInstanceOf(DecisionDocumentReranker.class));
   }
 
   @Test
@@ -122,6 +162,7 @@ class TypeSafeDecisionsConfigTest {
             context -> {
               assertThat(context).hasNotFailed();
               assertThat(context).doesNotHaveBean(TypeSafeClient.class);
+              assertThat(context).doesNotHaveBean(DecisionModel.class);
               assertThat(context).doesNotHaveBean(AiConfig.DECISIONS_FILTER);
             });
   }

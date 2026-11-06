@@ -26,10 +26,10 @@ import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
 
 /**
- * Decision-model screening switched on with the TypeSafe provider (Jev), against a TypeSafe API
- * that cannot be reached: the filter runs, cannot screen, and passes every candidate through, so
- * {@code /ask} still answers with the full context. Needs no API keys: the chat model is a stub and
- * the retriever returns fixed documents.
+ * Decision-model screening switched on with the TypeSafe provider (Jev, through Spring AI's {@code
+ * DecisionModel}), against a TypeSafe API that cannot be reached: the filter runs, cannot screen,
+ * and passes every candidate through, so {@code /ask} still answers with the full context. Needs no
+ * API keys: the chat model is a stub and the retriever returns fixed documents.
  */
 @SpringBootTest(
     properties = {
@@ -77,7 +77,7 @@ class TypeSafeDecisionsScreeningIT {
   void anUnreachableTypeSafeApiPassesEveryCandidateThrough(CapturedOutput output) {
     AskResponse response = searchService.ask(new AskRequest("A Clash of Kings", "jev-unreachable"));
 
-    assertThat(output).contains("Jev could not screen 3 of 3 passages");
+    assertThat(output).contains("Decision model could not screen 3 of 3 passages");
     assertThat(response.answer()).isEqualTo("stub answer");
     // The stub's reply is not a ranking, so the reranker keeps the order it was given.
     assertThat(response.sources()).containsExactlyElementsOf(RETRIEVED);

@@ -47,7 +47,7 @@ The application follows a **package-by-feature** structure organized around main
 
 ### Key Dependencies
 
-- **Spring Boot 4.1.1** with Spring AI 2.0.2
+- **Spring Boot 4.1.1** with Spring AI 2.1.0-RC2 (2.1 adds the `DecisionModel` API)
 - **Anthropic Claude AI** (claude-sonnet-5-5) for query generation and chat
 - **OpenAI** (text-embedding-3-small) for vector embeddings (1536 dimensions)
 - **SolrJ 10.1.0** client against **Apache Solr 10.1.0** server, with dense vector support and
@@ -338,7 +338,7 @@ Controllers declare the version segment as a URI variable and the version as a m
 
 The `SolrVectorStore` is a custom implementation that:
 
-- Extends `AbstractObservationVectorStore` from Spring AI 2.0.2
+- Extends `AbstractObservationVectorStore` from Spring AI 2.1
 - Implements the `VectorStore` interface for document storage and similarity search
 - Uses Solr's `DenseVectorField` type for KNN (K-Nearest Neighbors) search with HNSW algorithm
 - Supports cosine similarity metric for vector comparison
@@ -854,16 +854,25 @@ public ChatClient ragChatClient(ChatModel chatModel,
   relevance, answer evidence); `search.rag.rerank.provider=decisions` replaces the Claude reranker,
   keeping the `search.rag.rerank.top-k` passages most likely to answer and discarding only those below
   `search.rag.decisions.rerank.minimum-score` (default 0). Both judge a follow-up's standalone rewrite.
+  - **Spring AI `DecisionModel`**: the stages are `DecisionDocumentFilter` and
+    `DecisionDocumentReranker` (`search.decision` package), written against Spring AI 2.1's
+    `org.springframework.ai.decision.DecisionModel` abstraction. Each passage is one call, with
+    `FieldsInput` fields `query` and `passage` and `YesNoQuestion`s; the yes-probability is the score.
+    Calls run concurrently on virtual threads, at most `search.rag.decisions.max-concurrency`
+    (default 8) at once. `DecisionsAutoConfiguration` (registered in
+    `META-INF/spring/...AutoConfiguration.imports`, so `@ConditionalOnBean` sees every other bean)
+    builds them, as beans named `decisionsFilter` and `decisionsReranker`
+    (`AiConfig.DECISIONS_FILTER`, `DECISIONS_RERANKER`), on whichever `DecisionModel` is present.
   - **Pluggable**: `search.rag.decisions.provider` (default `typesafe`) selects the provider. A
-    provider is a `@Configuration` contributing beans named `decisionsFilter` and `decisionsReranker`
-    (`AiConfig.DECISIONS_FILTER`, `DECISIONS_RERANKER`); `AiConfig` wires them without knowing the
-    provider. Another provider, such as OpenAI's Decisions API, would be a new configuration.
-  - **`typesafe`** (`TypeSafeDecisionsConfig`): `JevDocumentFilter` and `JevDocumentReranker` on the
-    TypeSafe starter's client: hosted Jev, or a local model with the same API (Laya, Nimble) via
-    `spring.ai.typesafe.base-url` and `spring.ai.typesafe.model`. The key comes from
-    `TYPESAFE_API_KEY` (`spring.ai.typesafe.api-key=${TYPESAFE_API_KEY:false}`); a local model needs
-    only a placeholder. The starter activates when that property is present and not `false`, and an
-    empty key fails startup, so an unset variable resolves to `false` and TypeSafe stays off.
+    provider is a `@Configuration` contributing one `DecisionModel` bean; it knows nothing about RAG.
+    Another provider, such as OpenAI's Decisions API, would be a new configuration.
+  - **`typesafe`** (`TypeSafeDecisionsConfig`): Spring AI's `SystemOneDecisionModel`
+    (`spring-ai-systemone`) on the TypeSafe starter's client: hosted Jev, or a local model with the
+    same API (Laya, Nimble) via `spring.ai.typesafe.base-url` and `spring.ai.typesafe.model`. The key
+    comes from `TYPESAFE_API_KEY` (`spring.ai.typesafe.api-key=${TYPESAFE_API_KEY:false}`); a local
+    model needs only a placeholder. The starter activates when that property is present and not
+    `false`, and an empty key fails startup, so an unset variable resolves to `false` and TypeSafe
+    stays off.
   - **Off by default**: one call per passage adds latency, and hosted Jev sends passages to TypeSafe.
     A passage the provider cannot judge is passed through with a WARN, so screening is best-effort.
     Asking for a decisions stage that no provider supplies (no key, a typo) logs a WARN: passages are

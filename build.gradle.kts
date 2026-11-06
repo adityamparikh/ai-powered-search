@@ -2,7 +2,7 @@ import net.ltgt.gradle.errorprone.errorprone
 
 val errorProneVersion = "2.50.0"
 val nullawayVersion = "0.14.2"
-val typesafeVersion = "0.3.0"
+val typesafeVersion = "0.4.0"
 
 plugins {
     java
@@ -27,7 +27,7 @@ repositories {
     mavenCentral()
 }
 
-extra["springAiVersion"] = "2.0.2"
+extra["springAiVersion"] = "2.1.0-RC2"
 
 dependencies {
     implementation("org.springframework.boot:spring-boot-starter-actuator")
@@ -41,11 +41,11 @@ dependencies {
     implementation("org.springframework.ai:spring-ai-vector-store-advisor")
     // Modular RAG: RetrievalAugmentationAdvisor, DocumentRetriever, DocumentJoiner
     implementation("org.springframework.ai:spring-ai-rag")
-    // TypeSafe: the 'typesafe' decisions provider for RAG (search.rag.decisions.*). Pre-1.0 community
-    // releases. The starter auto-configures TypeSafeClient only when spring.ai.typesafe.api-key is set;
-    // JevDocumentFilter and JevDocumentReranker are in typesafe-spring-ai.
+    // Decision models (search.rag.decisions.*): Spring AI's DecisionModel API, with TypeSafe's Jev
+    // behind it via SystemOneDecisionModel (spring-ai-systemone). The TypeSafe starter (pre-1.0
+    // community release) auto-configures the TypeSafeClient only when spring.ai.typesafe.api-key is set.
+    implementation("org.springframework.ai:spring-ai-systemone")
     implementation("org.springaicommunity:spring-ai-starter-typesafe:$typesafeVersion")
-    implementation("org.springaicommunity:typesafe-spring-ai:$typesafeVersion")
     implementation("org.postgresql:postgresql")
     // Apache Solr client. SolrJ 10 dropped Jetty in favour of the JDK HttpClient
     // (HttpJdkSolrClient), so no Jetty artifacts or version pinning are needed.

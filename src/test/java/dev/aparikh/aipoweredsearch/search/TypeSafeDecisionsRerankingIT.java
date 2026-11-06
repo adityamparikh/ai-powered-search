@@ -27,10 +27,10 @@ import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
 
 /**
- * {@code search.rag.rerank.provider=decisions} with the TypeSafe provider (Jev) against a TypeSafe
- * API that cannot be reached: Jev reranks instead of Claude, cannot score, keeps the candidates in
- * retrieval order, and {@code /ask} still answers. Needs no API keys: the chat model is a stub and
- * the retriever returns fixed documents.
+ * {@code search.rag.rerank.provider=decisions} with the TypeSafe provider (Jev, through Spring AI's
+ * {@code DecisionModel}) against a TypeSafe API that cannot be reached: Jev reranks instead of
+ * Claude, cannot score, keeps the candidates in retrieval order, and {@code /ask} still answers.
+ * Needs no API keys: the chat model is a stub and the retriever returns fixed documents.
  */
 @SpringBootTest(
     properties = {
@@ -81,7 +81,7 @@ class TypeSafeDecisionsRerankingIT {
   void jevRerankingReplacesClaudeAndFallsBackToRetrievalOrder(CapturedOutput output) {
     AskResponse response = searchService.ask(new AskRequest("A Clash of Kings", "jev-rerank"));
 
-    assertThat(output).contains("Jev could not score 3 of 3 passages");
+    assertThat(output).contains("Decision model could not score 3 of 3 passages");
     assertThat(PROMPTS).noneMatch(prompt -> prompt.startsWith("Rank the following documents"));
     assertThat(response.answer()).isEqualTo("stub answer");
     assertThat(response.sources()).containsExactlyElementsOf(RETRIEVED);

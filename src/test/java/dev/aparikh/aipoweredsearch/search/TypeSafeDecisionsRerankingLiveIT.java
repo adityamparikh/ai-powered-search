@@ -98,7 +98,7 @@ class TypeSafeDecisionsRerankingLiveIT {
     AskResponse response =
         searchService.ask(new AskRequest("Who wrote A Clash of Kings?", "jev-rerank-live"));
 
-    assertThat(output).doesNotContain("Jev could not score");
+    assertThat(output).doesNotContain("Decision model could not score");
     assertThat(response.sources()).hasSize(2).first().isEqualTo(ANSWER);
   }
 }
