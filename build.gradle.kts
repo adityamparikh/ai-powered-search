@@ -25,7 +25,7 @@ repositories {
     mavenCentral()
 }
 
-extra["springAiVersion"] = "2.0.1"
+extra["springAiVersion"] = "2.0.2"
 
 dependencies {
     implementation("org.springframework.boot:spring-boot-starter-actuator")
