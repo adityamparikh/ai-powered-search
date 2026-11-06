@@ -860,7 +860,8 @@ public ChatClient ragChatClient(ChatModel chatModel,
     `FieldsInput` fields `query` and `passage` and `YesNoQuestion`s; the yes-probability is the score.
     Calls run concurrently on virtual threads, at most `search.rag.decisions.max-concurrency`
     (default 8) at once. `DecisionsAutoConfiguration` (registered in
-    `META-INF/spring/...AutoConfiguration.imports`, so `@ConditionalOnBean` sees every other bean)
+    `META-INF/spring/...AutoConfiguration.imports`, so `@ConditionalOnBean` sees every application bean;
+    a `DecisionModel` from another auto-configuration must be ordered before it)
     builds them, as beans named `decisionsFilter` and `decisionsReranker`
     (`AiConfig.DECISIONS_FILTER`, `DECISIONS_RERANKER`), on whichever `DecisionModel` is present.
   - **Pluggable**: `search.rag.decisions.provider` (default `typesafe`) selects the provider. A

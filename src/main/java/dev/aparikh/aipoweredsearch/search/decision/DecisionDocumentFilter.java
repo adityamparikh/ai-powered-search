@@ -223,7 +223,7 @@ public class DecisionDocumentFilter implements DocumentPostProcessor {
 
     private final DecisionModel decisionModel;
     private Policy policy = Policy.defaults();
-    private int maxConcurrency = DecisionDocumentReranker.DEFAULT_MAX_CONCURRENCY;
+    private int maxConcurrency = PassageDecisions.DEFAULT_MAX_CONCURRENCY;
 
     private Builder(DecisionModel decisionModel) {
       Assert.notNull(decisionModel, "decisionModel must not be null");
@@ -241,7 +241,7 @@ public class DecisionDocumentFilter implements DocumentPostProcessor {
      * @return this builder
      */
     public Builder maxConcurrency(int maxConcurrency) {
-      this.maxConcurrency = maxConcurrency;
+      this.maxConcurrency = PassageDecisions.checkMaxConcurrency(maxConcurrency);
       return this;
     }
 

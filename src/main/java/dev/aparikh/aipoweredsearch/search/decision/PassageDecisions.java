@@ -4,7 +4,6 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -33,6 +32,9 @@ final class PassageDecisions {
   /** The query field of the decision input. */
   static final String QUERY_FIELD = "query";
 
+  /** How many passages are judged at once unless configured otherwise. */
+  static final int DEFAULT_MAX_CONCURRENCY = 8;
+
   /** The passage field of the decision input. */
   static final String PASSAGE_FIELD = "passage";
 
@@ -49,7 +51,7 @@ final class PassageDecisions {
       int maxConcurrency) {
     Assert.notNull(decisionModel, "decisionModel must not be null");
     Assert.notEmpty(questions, "questions must not be empty");
-    Assert.isTrue(maxConcurrency >= 1, "maxConcurrency must be at least 1");
+    checkMaxConcurrency(maxConcurrency);
     this.decisionModel = decisionModel;
     // Kept in the order given: a provider may answer them in that order.
     this.questions = new LinkedHashMap<>(questions);
@@ -81,29 +83,42 @@ final class PassageDecisions {
                 }));
       }
     }
-    // The executor is closed, so every future is done.
+    // The executor is closed, so every future is done: resultNow() and exceptionNow() never block.
     List<@Nullable DecisionResponse> responses = new ArrayList<>(futures.size());
     RuntimeException firstFailure = null;
     for (Future<DecisionResponse> future : futures) {
       DecisionResponse response = null;
-      try {
-        response = future.get();
-      } catch (ExecutionException ex) {
-        if (firstFailure == null) {
-          firstFailure =
-              ex.getCause() instanceof RuntimeException cause
-                  ? cause
-                  : new IllegalStateException(ex.getCause());
+      switch (future.state()) {
+        case SUCCESS -> response = future.resultNow();
+        case FAILED -> {
+          if (firstFailure == null) {
+            Throwable cause = future.exceptionNow();
+            firstFailure =
+                cause instanceof RuntimeException runtime
+                    ? runtime
+                    : new IllegalStateException(cause);
+          }
         }
-      } catch (InterruptedException ex) {
-        Thread.currentThread().interrupt();
-        if (firstFailure == null) {
-          firstFailure = new IllegalStateException("interrupted while waiting for decisions", ex);
+        // Cancelled or interrupted: the passage was not judged, like a failed call.
+        case CANCELLED, RUNNING -> {
+          if (firstFailure == null) {
+            firstFailure = new IllegalStateException("decision call did not complete");
+          }
         }
       }
       responses.add(response);
     }
     return new Outcome(responses, firstFailure);
+  }
+
+  /** Fails fast, at configuration time, on a concurrency that could never run a call. */
+  static int checkMaxConcurrency(int maxConcurrency) {
+    Assert.isTrue(
+        maxConcurrency >= 1,
+        () ->
+            "maxConcurrency (search.rag.decisions.max-concurrency) must be at least 1, but was "
+                + maxConcurrency);
+    return maxConcurrency;
   }
 
   private DecisionPrompt prompt(String query, Document document) {

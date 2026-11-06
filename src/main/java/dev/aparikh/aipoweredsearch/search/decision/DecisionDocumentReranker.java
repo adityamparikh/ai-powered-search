@@ -36,9 +36,6 @@ public class DecisionDocumentReranker implements DocumentPostProcessor {
 
   private static final Logger log = LoggerFactory.getLogger(DecisionDocumentReranker.class);
 
-  /** How many passages are judged at once unless configured otherwise. */
-  public static final int DEFAULT_MAX_CONCURRENCY = 8;
-
   /** Metadata key holding the score this reranker gave a document. */
   public static final String SCORE_METADATA_KEY = "decision.rerank.score";
 
@@ -146,7 +143,7 @@ public class DecisionDocumentReranker implements DocumentPostProcessor {
     private YesNoQuestion question = DEFAULT_QUESTION;
     private @Nullable Integer topK;
     private double minimumScore;
-    private int maxConcurrency = DEFAULT_MAX_CONCURRENCY;
+    private int maxConcurrency = PassageDecisions.DEFAULT_MAX_CONCURRENCY;
 
     private Builder(DecisionModel decisionModel) {
       Assert.notNull(decisionModel, "decisionModel must not be null");
@@ -194,7 +191,7 @@ public class DecisionDocumentReranker implements DocumentPostProcessor {
      * @return this builder
      */
     public Builder maxConcurrency(int maxConcurrency) {
-      this.maxConcurrency = maxConcurrency;
+      this.maxConcurrency = PassageDecisions.checkMaxConcurrency(maxConcurrency);
       return this;
     }
 

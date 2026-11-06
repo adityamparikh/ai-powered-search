@@ -26,8 +26,10 @@ import org.springframework.context.annotation.Bean;
  * </ul>
  *
  * <p>An auto-configuration rather than a plain {@code @Configuration}, so that {@link
- * ConditionalOnBean} is evaluated after every application configuration, and any other
- * auto-configuration that contributes a {@code DecisionModel}, has registered its beans.
+ * ConditionalOnBean} is evaluated after every application configuration has registered its beans. A
+ * {@code DecisionModel} contributed by another auto-configuration is only seen if that
+ * auto-configuration is ordered before this one ({@code @AutoConfiguration(before =
+ * DecisionsAutoConfiguration.class)}).
  */
 @AutoConfiguration
 @ConditionalOnBean(DecisionModel.class)
