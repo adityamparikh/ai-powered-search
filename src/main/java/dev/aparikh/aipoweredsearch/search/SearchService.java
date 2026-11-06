@@ -15,6 +15,7 @@ import java.util.stream.Collectors;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.ai.chat.client.AdvisorParams;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.ChatClientResponse;
 import org.springframework.ai.chat.memory.ChatMemory;
@@ -384,6 +385,10 @@ public class SearchService {
             .prompt()
             .system(systemPrompt)
             .user(userMessage)
+            // Constrain the reply to the response schema. Without this the model sometimes
+            // answers, then "corrects" itself in the same text ("Wait, I must produce only
+            // valid JSON..."), and parsing that prose-laden text fails with a 500.
+            .advisors(AdvisorParams.ENABLE_NATIVE_STRUCTURED_OUTPUT)
             .call()
             .entity(QueryGenerationResponse.class);
 
