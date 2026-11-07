@@ -47,7 +47,7 @@ The application follows a **package-by-feature** structure organized around main
 
 ### Key Dependencies
 
-- **Spring Boot 4.1.1** with Spring AI 2.0.2
+- **Spring Boot 4.1.1** with Spring AI 2.1.0-SNAPSHOT (for the decision-model API)
 - **Anthropic Claude AI** (claude-sonnet-5-5) for query generation and chat
 - **OpenAI** (text-embedding-3-small) for vector embeddings (1536 dimensions)
 - **SolrJ 10.1.0** client against **Apache Solr 10.1.0** server, with dense vector support and
@@ -259,7 +259,7 @@ The repository includes several helper scripts for common tasks:
 - `ANTHROPIC_PROMPT_CACHING_ENABLED`: Enable Anthropic prompt caching (defaults to 'true')
 - `ANTHROPIC_PROMPT_CACHING_STRATEGY`: Cache strategy (defaults to 'SYSTEM_AND_TOOLS')
 - `OPENAI_API_KEY`: Required for OpenAI embeddings (vector search and indexing)
-- `TYPESAFE_API_KEY`: Optional; the key for the `typesafe` decisions provider (any placeholder for a local Laya or Nimble)
+- `TYPESAFE_API_KEY`: Optional; the key for the System One decision model (any placeholder for a local Laya, llmman or Ollama)
 - `POSTGRES_USER`: PostgreSQL username (defaults to 'postgres')
 - `POSTGRES_PASSWORD`: PostgreSQL password (defaults to 'postgres')
 
@@ -338,7 +338,7 @@ Controllers declare the version segment as a URI variable and the version as a m
 
 The `SolrVectorStore` is a custom implementation that:
 
-- Extends `AbstractObservationVectorStore` from Spring AI 2.0.2
+- Extends `AbstractObservationVectorStore` from Spring AI 2.1.0-SNAPSHOT
 - Implements the `VectorStore` interface for document storage and similarity search
 - Uses Solr's `DenseVectorField` type for KNN (K-Nearest Neighbors) search with HNSW algorithm
 - Supports cosine similarity metric for vector comparison
@@ -848,26 +848,31 @@ public ChatClient ragChatClient(ChatModel chatModel,
   hands post-processors the original question. The shared `"default"` conversation (requests
   without a `conversationId`) is not rewritten, since its history mixes unrelated callers, and a
   failed rewrite falls back to the question as asked.
-- **Decisions (opt-in, pluggable)**: a decisions provider answers narrow questions about each
-  retrieved passage with calibrated probabilities instead of generated text.
-  `search.rag.decisions.enabled=true` screens candidates before reranking (prompt injection,
-  relevance, answer evidence); `search.rag.rerank.provider=decisions` replaces the Claude reranker,
-  keeping the `search.rag.rerank.top-k` passages most likely to answer and discarding only those below
-  `search.rag.decisions.rerank.minimum-score` (default 0). Both judge a follow-up's standalone rewrite.
-  - **Pluggable**: `search.rag.decisions.provider` (default `typesafe`) selects the provider. A
-    provider is a `@Configuration` contributing beans named `decisionsFilter` and `decisionsReranker`
-    (`AiConfig.DECISIONS_FILTER`, `DECISIONS_RERANKER`); `AiConfig` wires them without knowing the
-    provider. Another provider, such as OpenAI's Decisions API, would be a new configuration.
-  - **`typesafe`** (`TypeSafeDecisionsConfig`): `JevDocumentFilter` and `JevDocumentReranker` on the
-    TypeSafe starter's client: hosted Jev, or a local model with the same API (Laya, Nimble) via
-    `spring.ai.typesafe.base-url` and `spring.ai.typesafe.model`. The key comes from
-    `TYPESAFE_API_KEY` (`spring.ai.typesafe.api-key=${TYPESAFE_API_KEY:false}`); a local model needs
-    only a placeholder. The starter activates when that property is present and not `false`, and an
-    empty key fails startup, so an unset variable resolves to `false` and TypeSafe stays off.
+- **Decisions (opt-in)**: Spring AI's decision-model API (`DecisionModel`, new in 2.1) answers narrow
+  questions about each retrieved passage with calibrated probabilities instead of generated text.
+  `search.rag.decisions.enabled=true` screens candidates with `DecisionDocumentFilter` before reranking
+  (prompt injection, relevance, answer evidence); `search.rag.rerank.provider=decisions` replaces the
+  Claude reranker with `DecisionDocumentReranker`, keeping the `search.rag.rerank.top-k` passages most
+  likely to answer and discarding only those below `search.rag.decisions.rerank.minimum-score`
+  (default 0). Both judge a follow-up's standalone rewrite. `search.rag.decisions.concurrency`
+  (default 4) is how many passages are judged at once.
+  - **Provider-neutral**: `AiConfig` builds both stages from whichever `DecisionModel` bean exists, so
+    any provider works (System One, Ollama, OpenAI). `spring.ai.model.decision` selects the provider,
+    as for Spring AI's other model types, and `none` turns the System One model off.
+  - **System One** (`SystemOneDecisionConfig`, artifact `spring-ai-systemone`): hosted TypeSafe Jev, or
+    a local model with the same API (Laya, llmman, Ollama) via `search.rag.decisions.systemone.base-url`
+    and `.model`. Spring AI has no System One starter, so the config builds `SystemOneDecisionModel` from
+    a `TypeSafeClient`. The key comes from `TYPESAFE_API_KEY`
+    (`search.rag.decisions.systemone.api-key=${TYPESAFE_API_KEY:false}`); a local model needs only a
+    placeholder. `false`, what an unset variable resolves to, leaves the model out instead of failing
+    startup.
+  - **Needs Spring AI 2.1.0-SNAPSHOT**: the decision API is not in a release yet, so the build adds the
+    `repo.spring.io/snapshot` repository, scoped to `org.springframework.ai`.
   - **Off by default**: one call per passage adds latency, and hosted Jev sends passages to TypeSafe.
-    A passage the provider cannot judge is passed through with a WARN, so screening is best-effort.
-    Asking for a decisions stage that no provider supplies (no key, a typo) logs a WARN: passages are
-    not screened, or Claude reranks.
+    Both stages fail open, as the core classes do: a passage the model cannot judge is kept (unscored,
+    after the scored ones for reranking) and logged as a WARN, so screening is best-effort and not a
+    security boundary. Asking for a decisions stage that no `DecisionModel` supplies (no key,
+    `spring.ai.model.decision=none`, a typo) logs a WARN: passages are not screened, or Claude reranks.
 - **Field projection**: `id,content,metadata_*` — excludes the 1536-dim `vector` field, which
   Solr would otherwise return on every hit under the default `fl=*`
 

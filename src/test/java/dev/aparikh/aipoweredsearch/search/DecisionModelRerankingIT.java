@@ -36,17 +36,17 @@ import org.springframework.context.annotation.Primary;
     properties = {
       "spring.ai.openai.api-key=test-key",
       "search.rag.rerank.provider=decisions",
-      "spring.ai.typesafe.api-key=test-key",
-      "spring.ai.typesafe.base-url=http://127.0.0.1:9",
-      "spring.ai.typesafe.timeout=1s"
+      "search.rag.decisions.systemone.api-key=test-key",
+      "search.rag.decisions.systemone.base-url=http://127.0.0.1:9",
+      "search.rag.decisions.systemone.timeout=1s"
     })
 @Import({
   PostgresTestConfiguration.class,
   SolrTestConfiguration.class,
-  TypeSafeDecisionsRerankingIT.StubModels.class
+  DecisionModelRerankingIT.StubModels.class
 })
 @ExtendWith(OutputCaptureExtension.class)
-class TypeSafeDecisionsRerankingIT {
+class DecisionModelRerankingIT {
 
   static final List<String> RETRIEVED = List.of("grrm-01", "grrm-02", "grrm-03");
   static final List<String> PROMPTS = new CopyOnWriteArrayList<>();
@@ -81,7 +81,7 @@ class TypeSafeDecisionsRerankingIT {
   void jevRerankingReplacesClaudeAndFallsBackToRetrievalOrder(CapturedOutput output) {
     AskResponse response = searchService.ask(new AskRequest("A Clash of Kings", "jev-rerank"));
 
-    assertThat(output).contains("Jev could not score 3 of 3 passages");
+    assertThat(output).contains("Could not score 3 of 3 documents");
     assertThat(PROMPTS).noneMatch(prompt -> prompt.startsWith("Rank the following documents"));
     assertThat(response.answer()).isEqualTo("stub answer");
     assertThat(response.sources()).containsExactlyElementsOf(RETRIEVED);
