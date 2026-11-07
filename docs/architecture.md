@@ -4,8 +4,8 @@ How a request moves through the application, endpoint by endpoint. The diagrams 
 [Mermaid](https://mermaid.js.org/) and render on GitHub.
 
 Query generation for keyword and hybrid search is stateless (no chat memory); only `/ask` keeps
-conversation history. Not yet drawn: conversation-aware query rewriting (#50) and Jev screening
-and reranking (#51), which are open PRs.
+conversation history. Not yet drawn: conversation-aware query rewriting (#50) and the opt-in
+decision-model screening and reranking (#51, on Spring AI's decision-model API).
 
 ## Components
 
