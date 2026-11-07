@@ -47,7 +47,7 @@ The application follows a **package-by-feature** structure organized around main
 
 ### Key Dependencies
 
-- **Spring Boot 4.1.1** with Spring AI 2.1.0-SNAPSHOT (for the decision-model API)
+- **Spring Boot 4.1.1** with Spring AI 2.1.0-RC2 (for the decision-model API)
 - **Anthropic Claude AI** (claude-sonnet-5-5) for query generation and chat
 - **OpenAI** (text-embedding-3-small) for vector embeddings (1536 dimensions)
 - **SolrJ 10.1.0** client against **Apache Solr 10.1.0** server, with dense vector support and
@@ -338,7 +338,7 @@ Controllers declare the version segment as a URI variable and the version as a m
 
 The `SolrVectorStore` is a custom implementation that:
 
-- Extends `AbstractObservationVectorStore` from Spring AI 2.1.0-SNAPSHOT
+- Extends `AbstractObservationVectorStore` from Spring AI 2.1.0-RC2
 - Implements the `VectorStore` interface for document storage and similarity search
 - Uses Solr's `DenseVectorField` type for KNN (K-Nearest Neighbors) search with HNSW algorithm
 - Supports cosine similarity metric for vector comparison
@@ -866,8 +866,8 @@ public ChatClient ragChatClient(ChatModel chatModel,
     (`search.rag.decisions.systemone.api-key=${TYPESAFE_API_KEY:false}`); a local model needs only a
     placeholder. `false`, what an unset variable resolves to, leaves the model out instead of failing
     startup.
-  - **Needs Spring AI 2.1.0-SNAPSHOT**: the decision API is not in a release yet, so the build adds the
-    `repo.spring.io/snapshot` repository, scoped to `org.springframework.ai`.
+  - **Needs Spring AI 2.1**: the decision API is new in 2.1. The build uses 2.1.0-RC2, a pre-release
+    on Maven Central, so no extra repository is needed.
   - **Off by default**: one call per passage adds latency, and hosted Jev sends passages to TypeSafe.
     Both stages fail open, as the core classes do: a passage the model cannot judge is kept (unscored,
     after the scored ones for reranking) and logged as a WARN, so screening is best-effort and not a

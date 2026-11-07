@@ -1,6 +1,6 @@
 # AI-Powered Search
 
-Apache Solr search with AI-driven query generation and semantic vector search. Built with Spring Boot 4.1.1, Spring AI 2.1.0-SNAPSHOT, and Java 25.
+Apache Solr search with AI-driven query generation and semantic vector search. Built with Spring Boot 4.1.1, Spring AI 2.1.0-RC2, and Java 25.
 
 ## 🚀 Features
 

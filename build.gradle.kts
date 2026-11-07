@@ -24,15 +24,9 @@ java {
 
 repositories {
     mavenCentral()
-    // The decision-model API (DecisionModel, DecisionDocumentFilter/Reranker, spring-ai-systemone) is
-    // in Spring AI 2.1, which has no release yet. Scoped to Spring AI snapshots only.
-    maven("https://repo.spring.io/snapshot") {
-        mavenContent { snapshotsOnly() }
-        content { includeGroup("org.springframework.ai") }
-    }
 }
 
-extra["springAiVersion"] = "2.1.0-SNAPSHOT"
+extra["springAiVersion"] = "2.1.0-RC2"
 
 dependencies {
     implementation("org.springframework.boot:spring-boot-starter-actuator")
