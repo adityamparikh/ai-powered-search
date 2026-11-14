@@ -18,6 +18,7 @@ import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.MessageType;
 import org.springframework.ai.chat.model.ChatModel;
+import org.springframework.ai.decision.DecisionModel;
 import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.model.anthropic.autoconfigure.AnthropicChatProperties;
 import org.springframework.ai.openai.OpenAiEmbeddingModel;
@@ -25,6 +26,8 @@ import org.springframework.ai.openai.OpenAiEmbeddingOptions;
 import org.springframework.ai.rag.Query;
 import org.springframework.ai.rag.advisor.RetrievalAugmentationAdvisor;
 import org.springframework.ai.rag.generation.augmentation.ContextualQueryAugmenter;
+import org.springframework.ai.rag.postretrieval.document.DecisionDocumentFilter;
+import org.springframework.ai.rag.postretrieval.document.DecisionDocumentReranker;
 import org.springframework.ai.rag.postretrieval.document.DocumentPostProcessor;
 import org.springframework.ai.rag.preretrieval.query.transformation.CompressionQueryTransformer;
 import org.springframework.ai.rag.preretrieval.query.transformation.QueryTransformer;
@@ -58,12 +61,6 @@ import org.springframework.context.annotation.Configuration;
 public class AiConfig {
 
   private static final Logger log = LoggerFactory.getLogger(AiConfig.class);
-
-  /** Bean name of a decisions provider's passage filter, see {@link TypeSafeDecisionsConfig}. */
-  public static final String DECISIONS_FILTER = "decisionsFilter";
-
-  /** Bean name of a decisions provider's reranker, see {@link TypeSafeDecisionsConfig}. */
-  public static final String DECISIONS_RERANKER = "decisionsReranker";
 
   /** Query-context key under which a follow-up's standalone rewrite reaches the post-processors. */
   static final String STANDALONE_QUERY = "rag.standalone";
@@ -236,13 +233,15 @@ public class AiConfig {
    * @param reranker the reranking post-processor, absent when {@code
    *     search.rag.rerank.enabled=false}
    * @param queryTransformer rewrites each question into a standalone query using the conversation
-   * @param decisionsFilter a decisions provider's passage filter, present with {@code
-   *     search.rag.decisions.enabled=true}
-   * @param decisionsReranker a decisions provider's reranker, used instead of {@code reranker} when
-   *     present
-   * @param decisionsEnabled {@code search.rag.decisions.enabled}
+   * @param decisionModel the {@link DecisionModel} behind the decisions stages, absent when none is
+   *     configured (no System One key, or {@code spring.ai.model.decision=none})
+   * @param decisionsEnabled {@code search.rag.decisions.enabled}: screen passages with the decision
+   *     model before reranking
    * @param rerankProvider {@code search.rag.rerank.provider}: {@code claude} (default) or {@code
    *     decisions}
+   * @param rerankTopK {@code search.rag.rerank.top-k}
+   * @param minimumScore {@code search.rag.decisions.rerank.minimum-score}
+   * @param concurrency {@code search.rag.decisions.concurrency}: passages judged at once
    * @return configured ChatClient instance with RAG capabilities
    */
   @Bean
@@ -255,12 +254,12 @@ public class AiConfig {
           AnthropicChatOptions.@Nullable Builder chatOptions,
       @Autowired(required = false) @Nullable RerankingDocumentPostProcessor reranker,
       QueryTransformer queryTransformer,
-      @Autowired(required = false) @Qualifier(DECISIONS_FILTER)
-          @Nullable DocumentPostProcessor decisionsFilter,
-      @Autowired(required = false) @Qualifier(DECISIONS_RERANKER)
-          @Nullable DocumentPostProcessor decisionsReranker,
+      @Autowired(required = false) @Nullable DecisionModel decisionModel,
       @Value("${search.rag.decisions.enabled:false}") boolean decisionsEnabled,
-      @Value("${search.rag.rerank.provider:claude}") String rerankProvider) {
+      @Value("${search.rag.rerank.provider:claude}") String rerankProvider,
+      @Value("${search.rag.rerank.top-k:5}") int rerankTopK,
+      @Value("${search.rag.decisions.rerank.minimum-score:0.0}") double minimumScore,
+      @Value("${search.rag.decisions.concurrency:4}") int concurrency) {
     ChatClient.Builder builder = ChatClient.builder(chatModel);
 
     // Set default options if caching is enabled
@@ -296,22 +295,46 @@ public class AiConfig {
     // Each stage judges a follow-up's standalone rewrite rather than the raw follow-up.
     // Reranking is absent when search.rag.rerank.enabled=false.
     List<DocumentPostProcessor> postProcessors = new ArrayList<>(2);
-    if (decisionsFilter != null) {
-      postProcessors.add(judgedAgainstTheRewrite(decisionsFilter));
-    } else if (decisionsEnabled) {
-      // Screening was asked for; serving unscreened passages must not go unnoticed.
-      log.warn(
-          "search.rag.decisions.enabled=true but no decisions provider is configured, so retrieved "
-              + "passages are NOT screened. The 'typesafe' provider needs spring.ai.typesafe.api-key "
-              + "(TYPESAFE_API_KEY; any placeholder for a local model such as Laya)");
+    DocumentPostProcessor decisionsFilter = null;
+    if (decisionsEnabled) {
+      if (decisionModel != null) {
+        decisionsFilter =
+            DecisionDocumentFilter.builder(decisionModel)
+                .concurrency(concurrency)
+                .virtualThreads(true)
+                .build();
+        postProcessors.add(judgedAgainstTheRewrite(decisionsFilter));
+      } else {
+        // Screening was asked for; serving unscreened passages must not go unnoticed.
+        log.warn(
+            "search.rag.decisions.enabled=true but no DecisionModel is configured, so retrieved "
+                + "passages are NOT screened. Set search.rag.decisions.systemone.api-key "
+                + "(TYPESAFE_API_KEY; any placeholder for a local model such as Laya), or add a "
+                + "DecisionModel from another provider. spring.ai.model.decision=none turns the "
+                + "System One model off");
+      }
     }
-    // Reranking is Claude's unless search.rag.rerank.provider=decisions selected a decisions
-    // reranker.
-    DocumentPostProcessor rerank = decisionsReranker != null ? decisionsReranker : reranker;
-    if (decisionsReranker == null && !"claude".equalsIgnoreCase(rerankProvider.strip())) {
+    // Reranking is Claude's unless search.rag.rerank.provider=decisions selected the decision
+    // model. Claude's reranker bean is absent when search.rag.rerank.enabled=false.
+    DocumentPostProcessor rerank = reranker;
+    if (reranker != null && "decisions".equalsIgnoreCase(rerankProvider.strip())) {
+      if (decisionModel != null) {
+        rerank =
+            DecisionDocumentReranker.builder(decisionModel)
+                .topK(rerankTopK)
+                .minimumScore(minimumScore)
+                .concurrency(concurrency)
+                .virtualThreads(true)
+                .build();
+      } else {
+        log.warn(
+            "search.rag.rerank.provider=decisions but no DecisionModel is configured; reranking "
+                + "with Claude");
+      }
+    } else if (!"claude".equalsIgnoreCase(rerankProvider.strip())
+        && !"decisions".equalsIgnoreCase(rerankProvider.strip())) {
       log.warn(
-          "search.rag.rerank.provider={} has no decisions reranker (use 'decisions' with a configured "
-              + "decisions provider); reranking with Claude",
+          "search.rag.rerank.provider={} is neither 'claude' nor 'decisions'; reranking with Claude",
           rerankProvider);
     }
     if (rerank != null) {
