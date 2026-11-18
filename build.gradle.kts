@@ -1,3 +1,7 @@
+import com.github.jk1.license.filter.LicenseBundleNormalizer
+import com.github.jk1.license.render.InventoryHtmlReportRenderer
+import com.github.jk1.license.render.JsonReportRenderer
+import com.github.jk1.license.render.ReportRenderer
 import net.ltgt.gradle.errorprone.errorprone
 
 val errorProneVersion = "2.50.0"
@@ -12,6 +16,7 @@ plugins {
     jacoco
     id("net.ltgt.errorprone") version "5.1.1"
     id("com.diffplug.spotless") version "8.0.0"
+    id("com.github.jk1.dependency-license-report") version "3.1.4"
 }
 
 group = "dev.aparikh"
@@ -154,3 +159,32 @@ spotless {
         googleJavaFormat()
     }
 }
+
+// Licence inventory of everything the app ships with (runtimeClasspath).
+// `./gradlew generateLicenseReport` writes build/reports/dependency-license/index.html and
+// licenses.json; `./gradlew checkLicense` fails if a dependency has no licence allowed by
+// config/allowed-licenses.json. LicenseBundleNormalizer maps the many spellings of each licence
+// ("Apache 2", "The Apache Software License, Version 2.0", ...) to one name.
+//
+// licenses.json lists every licence of a module (false = not only the first). One licence per
+// module is misleading: dual-licensed jars (Jakarta APIs, logback) would show only their GPL/LGPL
+// option, and Solr jars show a licence from their NOTICE file instead of Apache 2.0.
+//
+// checkLicense is deliberately not wired into `check`: the plugin's tasks are not
+// configuration-cache compatible, so every `./gradlew build` would discard the cache entry.
+licenseReport {
+    configurations = arrayOf("runtimeClasspath")
+    filters = arrayOf(LicenseBundleNormalizer())
+    renderers =
+        arrayOf<ReportRenderer>(
+            InventoryHtmlReportRenderer("index.html"),
+            JsonReportRenderer("licenses.json", false),
+        )
+    allowedLicensesFile = file("config/allowed-licenses.json")
+}
+
+// Never restore these from the build cache. checkLicensePreparation swaps in its own renderers,
+// so the cache key does not capture how the report was produced, and a stale cached pass could
+// hide a violation. They take about a second to run.
+tasks.matching { it.name in setOf("generateLicenseReport", "checkLicensePreparation", "checkLicense") }
+    .configureEach { outputs.cacheIf { false } }

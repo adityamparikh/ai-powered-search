@@ -213,6 +213,10 @@ open build/reports/jacoco/test/html/index.html
   -Dsonar.host.url=http://localhost:9000 \
   -Dsonar.token=your-token
 
+# Dependency licences (Apache 2.0 project; allowed licences in config/allowed-licenses.json)
+./gradlew checkLicense
+./gradlew generateLicenseReport   # build/reports/dependency-license/index.html
+
 # Generate Javadoc
 ./gradlew javadoc
 open build/docs/javadoc/index.html

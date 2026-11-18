@@ -689,7 +689,19 @@ See [TECHNICAL_DETAILS.md](TECHNICAL_DETAILS.md) for implementation details.
 
 ## 📄 License
 
-[Add your license information here]
+Licensed under the [Apache License, Version 2.0](LICENSE). See [NOTICE](NOTICE) for attribution.
+
+Every runtime dependency is under a licence compatible with Apache 2.0. To check this yourself:
+
+```bash
+./gradlew checkLicense            # fails if a dependency has no allowed licence
+./gradlew generateLicenseReport   # build/reports/dependency-license/index.html
+```
+
+The allowed licences are listed in [`config/allowed-licenses.json`](config/allowed-licenses.json): Apache 2.0, MIT, BSD and
+EPL 2.0. A dependency passes if *any* of its licences is allowed, so dual-licensed libraries pass under their permissive
+option: the Jakarta APIs (EPL 2.0 or GPL 2.0 with the Classpath Exception) and logback (EPL or LGPL 2.1). To add a
+dependency under a licence that is not listed, review the licence first, then add it to that file.
 
 ## 🆘 Support
 
