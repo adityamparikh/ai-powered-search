@@ -944,16 +944,22 @@ The application uses two different approaches for filter handling depending on t
 
 **Model output is untrusted** (issue #64): a crafted query can steer Claude into emitting, say, a
 `{!join fromIndex=other_collection ...}` filter, and whether results come back then reveals what the
-other collection holds. `SolrParamGuard` drops, with a WARN, any generated `fq`, `sort`,
-`facet.query` or `facet.field` clause that reaches another query parser:
+other collection holds. `SolrParamGuard` drops, with a WARN, any generated `fq` or `facet.query`
+clause that reaches another query parser:
 
 - local params (`{!...}`) anywhere in the clause, checked after undoing backslash and `\uXXXX`
   escapes (Solr unescapes `\{!join` inside a quoted `_query_` value and runs it);
 - the magic fields `_query_` and `_val_`;
-- parameter dereferences (`$q`): `sort=query($q,0) desc` re-parses `q` with the standard parser.
+- any `$`, which covers parameter references (`$q`) and Solr macros (`${...}`).
 
-It also keeps at most 10 `fq` clauses of at most 512 characters each. `q` is not screened: edismax
-ignores local params in `q` (SOLR-11501) and, with no explicit `uf`, does not honour `_query_`.
+A generated `sort` must be a plain field sort (`field asc|desc`, comma-separated, `score`
+included); function sorts are dropped. `facet.field` must be a plain field name. At most 10 `fq`
+clauses of at most 512 characters each are kept; regex and leading-wildcard `fq` are still allowed
+within that cap.
+
+`SearchRepository` also sends `expandMacros=false` on every request (keyword, both fallbacks and
+the hybrid JSON request) and pins edismax `uf=* -_query_`. `q` itself is not screened: edismax
+ignores local params in `q` (SOLR-11501) and the pinned `uf` keeps embedded `_query_` off.
 
 Field lists, whether generated (`fl`) or from the `fields` request parameter, are reduced to plain
 field names and globs: `*`, `vector` (and globs matching it), aliases, functions and transformers
