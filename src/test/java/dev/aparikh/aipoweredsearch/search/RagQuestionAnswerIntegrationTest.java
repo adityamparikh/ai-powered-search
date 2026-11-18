@@ -3,6 +3,7 @@ package dev.aparikh.aipoweredsearch.search;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -16,6 +17,7 @@ import dev.aparikh.aipoweredsearch.search.model.AskResponse;
 import java.io.InputStream;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import org.apache.solr.client.solrj.SolrClient;
 import org.apache.solr.client.solrj.request.CollectionAdminRequest;
@@ -36,6 +38,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -192,7 +195,7 @@ class RagQuestionAnswerIntegrationTest {
   }
 
   @Test
-  void testRagQuestionAnsweringWithDefaultConversationId() {
+  void testRagQuestionAnsweringStartsANewConversation() {
     // Given: A question about Spring Boot
     AskRequest request = new AskRequest("What are the main benefits of Spring Boot?");
 
@@ -208,7 +211,10 @@ class RagQuestionAnswerIntegrationTest {
     AskResponse askResponse = response.getBody();
     assertNotNull(askResponse.answer());
     assertFalse(askResponse.answer().isBlank(), "Answer should not be blank");
-    assertEquals("default", askResponse.conversationId());
+    // No conversationId was sent, so the server issued one.
+    assertNotNull(askResponse.conversationId());
+    assertEquals(
+        askResponse.conversationId(), UUID.fromString(askResponse.conversationId()).toString());
     assertNotNull(askResponse.sources());
 
     log.info("RAG Answer: {}", askResponse.answer());
@@ -221,33 +227,32 @@ class RagQuestionAnswerIntegrationTest {
   }
 
   @Test
-  void testRagQuestionAnsweringWithCustomConversationId() {
-    // Given: A question with custom conversation ID
-    String conversationId = "test-session-123";
+  void testRagQuestionAnsweringRejectsAConversationIdTheServerDidNotIssue() {
+    // Given: A question with a conversation ID the client made up
     AskRequest request =
-        new AskRequest("How does dependency injection work in Spring?", conversationId);
+        new AskRequest("How does dependency injection work in Spring?", "test-session-123");
 
     // When: Asking the question
     String url = String.format("http://localhost:%d/api/v1/search/ask", port);
-    ResponseEntity<AskResponse> response =
-        restTemplate.postForEntity(url, request, AskResponse.class);
+    ResponseEntity<String> response = restTemplate.postForEntity(url, request, String.class);
 
-    // Then: Should return answer with correct conversation ID
-    assertEquals(HttpStatus.OK, response.getStatusCode());
-    assertNotNull(response.getBody());
+    // Then: The server did not issue that ID, so there is no such conversation
+    assertEquals(HttpStatus.NOT_FOUND, response.getStatusCode());
+    assertThat(response.getHeaders().getContentType())
+        .hasToString(MediaType.APPLICATION_PROBLEM_JSON_VALUE);
+  }
 
-    AskResponse askResponse = response.getBody();
-    assertNotNull(askResponse.answer());
-    assertFalse(askResponse.answer().isBlank());
-    assertEquals(conversationId, askResponse.conversationId());
+  @Test
+  void testRequestsWithoutAConversationIdStartDifferentConversations() {
+    String url = String.format("http://localhost:%d/api/v1/search/ask", port);
+    AskRequest request = new AskRequest("How does dependency injection work in Spring?");
 
-    log.info("RAG Answer (session {}): {}", conversationId, askResponse.answer());
+    AskResponse first = restTemplate.postForEntity(url, request, AskResponse.class).getBody();
+    AskResponse second = restTemplate.postForEntity(url, request, AskResponse.class).getBody();
 
-    // Verify answer mentions dependency injection concepts
-    String answer = askResponse.answer().toLowerCase();
-    assertTrue(
-        answer.contains("dependency") || answer.contains("injection") || answer.contains("di"),
-        "Answer should reference dependency injection");
+    assertNotNull(first);
+    assertNotNull(second);
+    assertNotEquals(first.conversationId(), second.conversationId());
   }
 
   @Test
@@ -307,10 +312,9 @@ class RagQuestionAnswerIntegrationTest {
   @Test
   void testRagConversationalMemory() {
     // Given: Multiple questions in the same conversation
-    String conversationId = "memory-test-456";
 
-    // When: First question
-    AskRequest request1 = new AskRequest("What is Spring Framework?", conversationId);
+    // When: First question, which starts a new conversation
+    AskRequest request1 = new AskRequest("What is Spring Framework?");
     String url = String.format("http://localhost:%d/api/v1/search/ask", port);
     ResponseEntity<AskResponse> response1 =
         restTemplate.postForEntity(url, request1, AskResponse.class);
@@ -319,8 +323,9 @@ class RagQuestionAnswerIntegrationTest {
     assertEquals(HttpStatus.OK, response1.getStatusCode());
     assertNotNull(response1.getBody());
     log.info("First answer: {}", response1.getBody().answer());
+    String conversationId = response1.getBody().conversationId();
 
-    // When: Follow-up question (tests conversation memory)
+    // When: Follow-up question with the server-issued ID (tests conversation memory)
     AskRequest request2 = new AskRequest("What are its main features?", conversationId);
     ResponseEntity<AskResponse> response2 =
         restTemplate.postForEntity(url, request2, AskResponse.class);

@@ -380,11 +380,8 @@ public class AiConfig {
                     .defaultOptions(AnthropicChatOptions.builder().model(model)))
             .build();
     return query -> {
-      // A first question has no conversation to fold in, so it is searched as asked. Neither is
-      // the shared "default" conversation (requests without a conversationId), whose history
-      // mixes unrelated callers.
-      if (!hasEarlierTurns(query.history())
-          || "default".equals(query.context().get(ChatMemory.CONVERSATION_ID))) {
+      // A first question has no conversation to fold in, so it is searched as asked.
+      if (!hasEarlierTurns(query.history())) {
         return query;
       }
       Query rewritten;

@@ -75,7 +75,7 @@ class TypeSafeDecisionsScreeningIT {
 
   @Test
   void anUnreachableTypeSafeApiPassesEveryCandidateThrough(CapturedOutput output) {
-    AskResponse response = searchService.ask(new AskRequest("A Clash of Kings", "jev-unreachable"));
+    AskResponse response = searchService.ask(new AskRequest("A Clash of Kings"));
 
     assertThat(output).contains("Jev could not screen 3 of 3 passages");
     assertThat(response.answer()).isEqualTo("stub answer");

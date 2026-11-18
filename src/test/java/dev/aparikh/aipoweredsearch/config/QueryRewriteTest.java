@@ -76,12 +76,21 @@ class QueryRewriteTest {
   }
 
   @Test
-  void theSharedDefaultConversationIsNotRewritten() {
-    // Requests without a conversationId share "default", so its history mixes unrelated callers.
-    Query original = followUp("default");
+  void aFirstQuestionIsNotRewritten() {
+    // A request without a conversationId starts a new conversation, so its history is the
+    // question alone (after the system prompt): there is nothing to fold in.
+    Map<String, Object> context = new HashMap<>();
+    context.put(ChatMemory.CONVERSATION_ID, "new-conversation");
+    Query original =
+        Query.builder()
+            .text(FOLLOW_UP)
+            .history(List.of(new SystemMessage("You are a librarian."), new UserMessage(FOLLOW_UP)))
+            .context(context)
+            .build();
 
     assertThat(transformer(answering(STANDALONE)).transform(original)).isSameAs(original);
     assertThat(modelCalls).hasValue(0);
+    assertThat(original.context()).doesNotContainKey(AiConfig.STANDALONE_QUERY);
   }
 
   @Test

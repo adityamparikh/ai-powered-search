@@ -20,7 +20,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -160,11 +159,9 @@ class RagEvaluationIT extends EvaluationTestBase {
     Map<String, RagEvalData.Book> books =
         fixture.books().stream()
             .collect(Collectors.toMap(RagEvalData.Book::id, Function.identity()));
-    String runId = UUID.randomUUID().toString().substring(0, 8);
-
     List<RagEvalReport.CaseResult> results = new ArrayList<>();
     for (RagEvalData.EvalCase evalCase : selectedCases()) {
-      RagEvalReport.CaseResult result = runCase(evalCase, runId, usage, books);
+      RagEvalReport.CaseResult result = runCase(evalCase, usage, books);
       log.info(
           "[rag-eval] {} recall@20={} recallAfterRerank={} parity={} precision={} injections={} {}ms",
           result.id(),
@@ -210,15 +207,16 @@ class RagEvaluationIT extends EvaluationTestBase {
 
   private RagEvalReport.CaseResult runCase(
       RagEvalData.EvalCase evalCase,
-      String runId,
       UsageRecordingChatModel usage,
       Map<String, RagEvalData.Book> books) {
-    String conversationId = "eval-" + evalCase.id() + "-" + runId;
     Set<String> relevant = new HashSet<>(evalCase.relevantIds());
     try {
-      // Earlier turns build up chat memory; metrics are taken on the final turn only.
+      // Earlier turns build up chat memory; metrics are taken on the final turn only. The server
+      // issues conversation IDs: the first turn sends none and every later turn sends back the ID
+      // the previous answer returned.
+      @Nullable String conversationId = null;
       for (String turn : evalCase.turns().subList(0, evalCase.turns().size() - 1)) {
-        searchService.ask(new AskRequest(turn, conversationId));
+        conversationId = searchService.ask(new AskRequest(turn, conversationId)).conversationId();
       }
 
       usage.reset();
@@ -227,7 +225,7 @@ class RagEvaluationIT extends EvaluationTestBase {
       double latencyMs = (System.nanoTime() - start) / 1_000_000.0;
       UsageRecordingChatModel.Totals tokens = usage.snapshot();
 
-      List<String> candidates = candidateRecorder.lastCandidates(conversationId);
+      List<String> candidates = candidateRecorder.lastCandidates(response.conversationId());
       List<String> context = response.sources();
       if (candidates.isEmpty() && !context.isEmpty()) {
         // Recall and parity would silently read as 0 / n/a rather than "not measured".
@@ -238,8 +236,9 @@ class RagEvaluationIT extends EvaluationTestBase {
 
       double parity = Double.NaN;
       if (evalCase.isFollowUp() && evalCase.standalone() != null) {
-        String standaloneConversation = conversationId + "-standalone";
-        searchService.ask(new AskRequest(evalCase.standalone(), standaloneConversation));
+        // The standalone rewrite is asked as a first question, in a conversation of its own.
+        String standaloneConversation =
+            searchService.ask(new AskRequest(evalCase.standalone())).conversationId();
         parity =
             RagMetrics.parity(candidates, candidateRecorder.lastCandidates(standaloneConversation));
       }

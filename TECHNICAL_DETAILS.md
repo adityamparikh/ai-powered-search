@@ -86,7 +86,7 @@ This document contains in-depth technical information about the AI-Powered Searc
 
 - **Chat Memory**: Conversation state management for `/ask`
   - PostgreSQL-backed persistence
-  - Keyed by the request's `conversationId` ("default" when absent)
+  - Keyed by a server-issued `conversationId` (a request without one starts a new conversation; an unknown ID gets 404)
   - Search query generation is stateless: no memory, so concurrent users never share context
 
 ## Search Approach Details
@@ -217,7 +217,7 @@ lines 157-227
 **Implementation:** `SearchService.ask()` at lines 198-223
 
 **How it works:**
-1. Client sends conversational question with optional conversation ID
+1. Client sends conversational question, with the server-issued conversation ID for a follow-up (none starts a new conversation; an ID the server did not issue gets 404)
 2. QuestionAnswerAdvisor automatically searches VectorStore for relevant context
 3. Retrieved documents added to prompt as context
 4. Claude AI generates natural language answer based on context

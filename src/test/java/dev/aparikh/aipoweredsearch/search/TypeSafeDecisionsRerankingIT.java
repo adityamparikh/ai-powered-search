@@ -79,7 +79,7 @@ class TypeSafeDecisionsRerankingIT {
 
   @Test
   void jevRerankingReplacesClaudeAndFallsBackToRetrievalOrder(CapturedOutput output) {
-    AskResponse response = searchService.ask(new AskRequest("A Clash of Kings", "jev-rerank"));
+    AskResponse response = searchService.ask(new AskRequest("A Clash of Kings"));
 
     assertThat(output).contains("Jev could not score 3 of 3 passages");
     assertThat(PROMPTS).noneMatch(prompt -> prompt.startsWith("Rank the following documents"));

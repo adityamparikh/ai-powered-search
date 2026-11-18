@@ -31,16 +31,19 @@ class SearchControllerAskTest {
 
   @MockitoBean private SearchService searchService;
 
+  /** A server-issued conversation ID, as {@link SearchService#ask} returns one. */
+  private static final String CONVERSATION_ID = "3f2b8c1e-7a4d-4e9b-9c6a-1d2e3f4a5b6c";
+
   @Test
   void shouldAskQuestionSuccessfully() throws Exception {
     // Given
-    AskRequest request = new AskRequest("What is Spring Boot?", "test-conversation-1");
+    AskRequest request = new AskRequest("What is Spring Boot?");
 
     AskResponse expectedResponse =
         new AskResponse(
             "Spring Boot is a framework that simplifies the development of Java applications. "
                 + "It provides auto-configuration, embedded servers, and production-ready features.",
-            "test-conversation-1",
+            CONVERSATION_ID,
             List.of("doc-1", "doc-2"));
 
     when(searchService.ask(any(AskRequest.class))).thenReturn(expectedResponse);
@@ -54,13 +57,13 @@ class SearchControllerAskTest {
         .andExpect(status().isOk())
         .andExpect(content().contentType(MediaType.APPLICATION_JSON))
         .andExpect(jsonPath("$.answer").value(expectedResponse.answer()))
-        .andExpect(jsonPath("$.conversationId").value("test-conversation-1"))
+        .andExpect(jsonPath("$.conversationId").value(CONVERSATION_ID))
         .andExpect(jsonPath("$.sources").isArray())
         .andExpect(jsonPath("$.sources.length()").value(2));
   }
 
   @Test
-  void shouldAskQuestionWithDefaultConversationId() throws Exception {
+  void shouldReturnTheServerIssuedConversationId() throws Exception {
     // Given
     AskRequest request = new AskRequest("What are microservices?");
 
@@ -68,7 +71,7 @@ class SearchControllerAskTest {
         new AskResponse(
             "Microservices are an architectural style that structures an application as a collection of small, "
                 + "loosely coupled services.",
-            "default",
+            CONVERSATION_ID,
             List.of());
 
     when(searchService.ask(any(AskRequest.class))).thenReturn(expectedResponse);
@@ -82,7 +85,7 @@ class SearchControllerAskTest {
         .andExpect(status().isOk())
         .andExpect(content().contentType(MediaType.APPLICATION_JSON))
         .andExpect(jsonPath("$.answer").exists())
-        .andExpect(jsonPath("$.conversationId").value("default"))
+        .andExpect(jsonPath("$.conversationId").value(CONVERSATION_ID))
         .andExpect(jsonPath("$.sources").isArray());
   }
 
@@ -94,13 +97,13 @@ class SearchControllerAskTest {
             + "including the role of @SpringBootApplication annotation, component scanning, "
             + "and how it differs from traditional Spring configuration?";
 
-    AskRequest request = new AskRequest(longQuestion, "detailed-conv");
+    AskRequest request = new AskRequest(longQuestion);
 
     AskResponse expectedResponse =
         new AskResponse(
             "Spring Boot's auto-configuration is a powerful feature that automatically configures your application "
                 + "based on the dependencies present on the classpath...",
-            "detailed-conv",
+            CONVERSATION_ID,
             List.of("doc-spring-boot-1", "doc-spring-boot-2", "doc-spring-boot-3"));
 
     when(searchService.ask(any(AskRequest.class))).thenReturn(expectedResponse);
@@ -113,7 +116,7 @@ class SearchControllerAskTest {
                 .content(objectMapper.writeValueAsString(request)))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.answer").isNotEmpty())
-        .andExpect(jsonPath("$.conversationId").value("detailed-conv"))
+        .andExpect(jsonPath("$.conversationId").value(CONVERSATION_ID))
         .andExpect(jsonPath("$.sources.length()").value(3));
   }
 
@@ -121,13 +124,13 @@ class SearchControllerAskTest {
   void shouldHandleFollowUpQuestions() throws Exception {
     // Given - simulating a follow-up question in a conversation
     AskRequest followUpRequest =
-        new AskRequest("Can you explain more about that?", "conversation-123");
+        new AskRequest("Can you explain more about that?", CONVERSATION_ID);
 
     AskResponse expectedResponse =
         new AskResponse(
             "Certainly! Based on our previous discussion about Spring Boot, "
                 + "the auto-configuration feature works by...",
-            "conversation-123",
+            CONVERSATION_ID,
             List.of("doc-1"));
 
     when(searchService.ask(any(AskRequest.class))).thenReturn(expectedResponse);
@@ -140,20 +143,19 @@ class SearchControllerAskTest {
                 .content(objectMapper.writeValueAsString(followUpRequest)))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.answer").exists())
-        .andExpect(jsonPath("$.conversationId").value("conversation-123"));
+        .andExpect(jsonPath("$.conversationId").value(CONVERSATION_ID));
   }
 
   @Test
   void shouldHandleQuestionAboutNonExistentTopic() throws Exception {
     // Given
     AskRequest request =
-        new AskRequest(
-            "Tell me about quantum computing in underwater basket weaving", "random-conv");
+        new AskRequest("Tell me about quantum computing in underwater basket weaving");
 
     AskResponse expectedResponse =
         new AskResponse(
             "I don't have any information in the indexed documents about that topic.",
-            "random-conv",
+            CONVERSATION_ID,
             List.of());
 
     when(searchService.ask(any(AskRequest.class))).thenReturn(expectedResponse);
@@ -172,12 +174,12 @@ class SearchControllerAskTest {
   @Test
   void shouldHandleEmptySources() throws Exception {
     // Given
-    AskRequest request = new AskRequest("What is Docker?", "docker-conv");
+    AskRequest request = new AskRequest("What is Docker?");
 
     AskResponse expectedResponse =
         new AskResponse(
             "Docker is a platform for developing, shipping, and running applications in containers.",
-            "docker-conv",
+            CONVERSATION_ID,
             List.of());
 
     when(searchService.ask(any(AskRequest.class))).thenReturn(expectedResponse);
@@ -198,14 +200,12 @@ class SearchControllerAskTest {
   void shouldHandleSpecialCharactersInQuestion() throws Exception {
     // Given
     AskRequest request =
-        new AskRequest(
-            "What's the difference between @Component & @Service? Is it important?",
-            "annotations-conv");
+        new AskRequest("What's the difference between @Component & @Service? Is it important?");
 
     AskResponse expectedResponse =
         new AskResponse(
             "@Component and @Service are both Spring stereotypes, but @Service is more semantically specific...",
-            "annotations-conv",
+            CONVERSATION_ID,
             List.of("doc-spring-annotations"));
 
     when(searchService.ask(any(AskRequest.class))).thenReturn(expectedResponse);
@@ -223,12 +223,12 @@ class SearchControllerAskTest {
   @Test
   void shouldHandleMultipleSourceDocuments() throws Exception {
     // Given
-    AskRequest request = new AskRequest("Summarize everything about REST APIs", "rest-conv");
+    AskRequest request = new AskRequest("Summarize everything about REST APIs");
 
     AskResponse expectedResponse =
         new AskResponse(
             "REST APIs are architectural styles for designing networked applications. Key concepts include...",
-            "rest-conv",
+            CONVERSATION_ID,
             List.of("doc-rest-1", "doc-rest-2", "doc-rest-3", "doc-rest-4", "doc-rest-5"));
 
     when(searchService.ask(any(AskRequest.class))).thenReturn(expectedResponse);
@@ -242,5 +242,23 @@ class SearchControllerAskTest {
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.answer").exists())
         .andExpect(jsonPath("$.sources.length()").value(5));
+  }
+
+  @Test
+  void shouldReturn404ProblemDetailForAConversationIdTheServerDidNotIssue() throws Exception {
+    when(searchService.ask(any(AskRequest.class))).thenThrow(new ConversationNotFoundException());
+
+    mockMvc
+        .perform(
+            post("/api/v1/search/ask")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    objectMapper.writeValueAsString(new AskRequest("Tell me more", "made-up-id"))))
+        .andExpect(status().isNotFound())
+        .andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON))
+        .andExpect(jsonPath("$.status").value(404))
+        .andExpect(jsonPath("$.title").value("Conversation not found"))
+        .andExpect(jsonPath("$.detail").exists())
+        .andExpect(jsonPath("$.instance").value("/api/v1/search/ask"));
   }
 }

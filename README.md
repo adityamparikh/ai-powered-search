@@ -79,7 +79,7 @@ Sequence diagrams for hybrid search, RAG (`/ask`) and indexing are in
 - **SearchService**: Orchestrates keyword, semantic and hybrid search, and RAG (`/ask`)
 - **SearchRepository**: Solr query execution, hybrid search via Solr's `/hybrid` combined query (RRF), and schema introspection
 - **HybridDocumentRetriever** and **RerankingDocumentPostProcessor**: retrieval and optional reranking for `/ask`
-- **Chat Memory**: PostgreSQL-backed conversation history for `/ask`, keyed by the request's `conversationId` (`"default"` when none is given). Search query generation is stateless.
+- **Chat Memory**: PostgreSQL-backed conversation history for `/ask`, keyed by a server-issued `conversationId` (a request without one starts a new conversation). Search query generation is stateless.
 
 ## 📋 Prerequisites
 
@@ -329,8 +329,7 @@ Performs conversational question-answering using RAG (Retrieval-Augmented Genera
 curl -X POST "http://localhost:8080/api/v1/search/ask" \
   -H "Content-Type: application/json" \
   -d '{
-    "question": "What are the benefits of using Spring Boot for microservices?",
-    "conversationId": "user-123"
+    "question": "What are the benefits of using Spring Boot for microservices?"
   }'
 ```
 
@@ -338,7 +337,7 @@ curl -X POST "http://localhost:8080/api/v1/search/ask" \
 ```json
 {
   "question": "Your question here",
-  "conversationId": "optional-conversation-id"
+  "conversationId": "conversation ID from an earlier answer (omit to start a new conversation)"
 }
 ```
 
@@ -346,10 +345,14 @@ curl -X POST "http://localhost:8080/api/v1/search/ask" \
 ```json
 {
   "answer": "Spring Boot offers several benefits for microservices development...",
-  "conversationId": "user-123",
+  "conversationId": "3f2b8c1e-7a4d-4e9b-9c6a-1d2e3f4a5b6c",
   "sources": []
 }
 ```
+
+The server issues conversation IDs. Omit `conversationId` to start a new conversation, and send the
+returned ID back to ask a follow-up. An ID the server did not issue gets `404` with a
+problem-details body.
 
 ## 🔍 Usage Examples
 
