@@ -11,6 +11,8 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.jspecify.annotations.Nullable;
+import org.springframework.http.ProblemDetail;
+import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -277,31 +279,36 @@ class SearchController {
   /**
    * Performs conversational question-answering using RAG (Retrieval-Augmented Generation).
    *
-   * <p>This method leverages the QuestionAnswerAdvisor to automatically retrieve relevant documents
-   * from the VectorStore based on the question, then uses Claude AI to generate a contextual
-   * answer. Conversation history is maintained using the provided conversationId, allowing for
-   * follow-up questions with context.
+   * <p>A RetrievalAugmentationAdvisor retrieves relevant documents with hybrid search (keyword and
+   * vector, fused with RRF), then Claude AI generates a contextual answer from them. A request
+   * without a conversationId starts a new conversation; the response carries its server-issued ID,
+   * which follow-up questions pass back to keep their context. An ID the server did not issue is
+   * rejected with 404.
    *
    * <p>The RAG process:
    *
    * <ol>
-   *   <li>Question is converted to embeddings using OpenAI
-   *   <li>Vector similarity search retrieves relevant documents from Solr
-   *   <li>Retrieved documents are added to the prompt context
+   *   <li>A follow-up is rewritten, with the conversation so far, into a standalone query
+   *   <li>Hybrid search (keyword and vector, RRF-fused in Solr) retrieves candidate documents
+   *   <li>The candidates are reranked (on by default), and the best are added to the prompt context
    *   <li>Claude AI generates an answer based on the retrieved context
    * </ol>
    *
    * @param askRequest the request containing the question and optional conversation ID
    * @return an {@link AskResponse} with the generated answer and conversation metadata
    * @throws IllegalArgumentException if the question is null or empty
+   * @throws ConversationNotFoundException if the conversation ID was not issued by the server
    */
   @Operation(
       summary = "Ask a question with RAG (Retrieval-Augmented Generation)",
       description =
           "Performs conversational question-answering using RAG. "
-              + "The QuestionAnswerAdvisor automatically retrieves relevant documents from the VectorStore, "
-              + "and Claude AI generates a natural language answer based on the retrieved context. "
-              + "Maintains conversation history for follow-up questions using the conversationId.")
+              + "A RetrievalAugmentationAdvisor retrieves relevant documents with hybrid search "
+              + "(keyword and vector, fused with RRF), and Claude AI generates a natural language "
+              + "answer based on the retrieved context. "
+              + "Omit conversationId to start a new conversation: the response returns a "
+              + "server-issued conversationId, which follow-up questions send back to keep their "
+              + "history. A conversationId the server did not issue gets 404.")
   @ApiResponses(
       value = {
         @ApiResponse(
@@ -312,13 +319,35 @@ class SearchController {
                     mediaType = "application/json",
                     schema = @Schema(implementation = AskResponse.class))),
         @ApiResponse(responseCode = "400", description = "Invalid request"),
+        @ApiResponse(
+            responseCode = "404",
+            description = "conversationId was not issued by the server",
+            content =
+                @Content(
+                    mediaType = "application/problem+json",
+                    schema = @Schema(implementation = ProblemDetail.class))),
         @ApiResponse(responseCode = "500", description = "Internal server error")
       })
   @PostMapping("/ask")
   public AskResponse ask(
-      @Parameter(description = "Question request with optional conversation ID", required = true)
+      @Parameter(
+              description =
+                  "Question, plus the conversationId returned by an earlier answer when asking a"
+                      + " follow-up",
+              required = true)
           @RequestBody
           AskRequest askRequest) {
     return searchService.ask(askRequest);
+  }
+
+  /**
+   * Renders an unknown conversation ID as a 404 problem detail rather than a generic error.
+   *
+   * @param e the exception carrying the problem detail
+   * @return the 404 problem detail
+   */
+  @ExceptionHandler
+  ProblemDetail conversationNotFound(ConversationNotFoundException e) {
+    return e.getBody();
   }
 }

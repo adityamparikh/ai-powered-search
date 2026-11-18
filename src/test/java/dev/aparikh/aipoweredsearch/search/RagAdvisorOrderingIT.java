@@ -1,6 +1,7 @@
 package dev.aparikh.aipoweredsearch.search;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.tuple;
 
 import dev.aparikh.aipoweredsearch.config.PostgresTestConfiguration;
@@ -111,10 +112,7 @@ class RagAdvisorOrderingIT {
 
   @Test
   void memoryAdvisorRunsBeforeRetrievalSoTurnTwoSeesTurnOne() {
-    // SPRING_AI_CHAT_MEMORY.conversation_id is varchar(36).
-    String conversationId = "ordering-" + UUID.randomUUID().toString().substring(0, 8);
-
-    searchService.ask(new AskRequest(FIRST_QUESTION, conversationId));
+    String conversationId = searchService.ask(new AskRequest(FIRST_QUESTION)).conversationId();
     searchService.ask(new AskRequest(FOLLOW_UP, conversationId));
 
     Query turnTwo = retriever.queries.getLast();
@@ -130,9 +128,7 @@ class RagAdvisorOrderingIT {
 
   @Test
   void aFollowUpIsSearchedAsAStandaloneQuery() {
-    String conversationId = "rewrite-" + UUID.randomUUID().toString().substring(0, 8);
-
-    searchService.ask(new AskRequest(FIRST_QUESTION, conversationId));
+    String conversationId = searchService.ask(new AskRequest(FIRST_QUESTION)).conversationId();
     searchService.ask(new AskRequest(FOLLOW_UP, conversationId));
 
     assertThat(retriever.queries.getLast().text()).isEqualTo(STANDALONE);
@@ -142,8 +138,8 @@ class RagAdvisorOrderingIT {
   void aFirstQuestionIsSearchedAsAskedWithoutARewrite() {
     int rewritesBefore = REWRITE_PROMPTS.size();
 
-    searchService.ask(
-        new AskRequest(FIRST_QUESTION, "first-" + UUID.randomUUID().toString().substring(0, 8)));
+    // A request without a conversationId starts a new conversation.
+    searchService.ask(new AskRequest(FIRST_QUESTION));
 
     assertThat(retriever.queries.getLast().text()).isEqualTo(FIRST_QUESTION);
     assertThat(REWRITE_PROMPTS).hasSize(rewritesBefore);
@@ -153,9 +149,7 @@ class RagAdvisorOrderingIT {
   void aFollowUpIsRerankedAgainstTheStandaloneQuery() {
     // The advisor hands post-processors the original question; without the rewrite the
     // reranker would judge candidates against "Anything cheaper by the same author?".
-    String conversationId = "rerank-" + UUID.randomUUID().toString().substring(0, 8);
-
-    searchService.ask(new AskRequest(FIRST_QUESTION, conversationId));
+    String conversationId = searchService.ask(new AskRequest(FIRST_QUESTION)).conversationId();
     int rankingsBefore = RANKING_PROMPTS.size();
     searchService.ask(new AskRequest(FOLLOW_UP, conversationId));
 
@@ -167,13 +161,53 @@ class RagAdvisorOrderingIT {
 
   @Test
   void theRewriteRunsOnTheConfiguredModel() {
-    String conversationId = "model-" + UUID.randomUUID().toString().substring(0, 8);
-    searchService.ask(new AskRequest(FIRST_QUESTION, conversationId));
+    String conversationId = searchService.ask(new AskRequest(FIRST_QUESTION)).conversationId();
     int rewritesBefore = REWRITE_MODELS.size();
     searchService.ask(new AskRequest(FOLLOW_UP, conversationId));
 
     assertThat(REWRITE_MODELS.subList(rewritesBefore, REWRITE_MODELS.size()))
         .containsExactly(REWRITE_MODEL);
+  }
+
+  @Test
+  void requestsWithoutAnIdStartDifferentConversations() {
+    String first = searchService.ask(new AskRequest(FIRST_QUESTION)).conversationId();
+    String second = searchService.ask(new AskRequest(FIRST_QUESTION)).conversationId();
+
+    assertThat(first).isNotEqualTo(second);
+    assertThat(UUID.fromString(first)).hasToString(first);
+    // Each holds only its own turn.
+    assertThat(chatMemory.get(first)).hasSize(2);
+    assertThat(chatMemory.get(second)).hasSize(2);
+  }
+
+  @Test
+  void anIdTheServerNeverIssuedIsRejected() {
+    String madeUp = UUID.randomUUID().toString();
+    int retrievalsBefore = retriever.queries.size();
+
+    assertThatThrownBy(() -> searchService.ask(new AskRequest(FOLLOW_UP, madeUp)))
+        .isInstanceOf(ConversationNotFoundException.class);
+    assertThat(retriever.queries).hasSize(retrievalsBefore);
+    // Rejected before the memory advisor runs, so the made-up ID is not adopted either.
+    assertThat(chatMemory.get(madeUp)).isEmpty();
+  }
+
+  @Test
+  void aFollowUpWithTheIssuedIdKeepsTheConversation() {
+    String conversationId = searchService.ask(new AskRequest(FIRST_QUESTION)).conversationId();
+
+    String followUpId =
+        searchService.ask(new AskRequest(FOLLOW_UP, conversationId)).conversationId();
+
+    assertThat(followUpId).isEqualTo(conversationId);
+    assertThat(chatMemory.get(conversationId))
+        .extracting(Message::getMessageType, Message::getText)
+        .containsExactly(
+            tuple(MessageType.USER, FIRST_QUESTION),
+            tuple(MessageType.ASSISTANT, STUB_ANSWER),
+            tuple(MessageType.USER, FOLLOW_UP),
+            tuple(MessageType.ASSISTANT, STUB_ANSWER));
   }
 
   @Test

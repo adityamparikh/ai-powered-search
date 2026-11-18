@@ -350,7 +350,7 @@ docker-compose logs solr | grep "QTime"
 - **topK**: 10 results
 - **Similarity Threshold**: 0.7
 - **Collection**: "books" (default)
-- **Conversation ID**: `/ask` uses the request's `conversationId` ("default" when absent); query generation keeps no memory
+- **Conversation ID**: `/ask` issues a new `conversationId` when the request has none and returns it; follow-ups send it back (an ID the server did not issue gets 404); query generation keeps no memory
 
 ### Solr
 

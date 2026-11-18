@@ -127,7 +127,13 @@ sequenceDiagram
     participant RR as Reranker (optional)
     participant C as Claude
 
-    U->>SS: POST /ask {question, conversationId}
+    U->>SS: POST /ask {question, conversationId?}
+    alt no conversationId
+        Note over SS: new conversation: issue a random UUID
+    else conversationId sent
+        SS->>PG: any history for this ID?
+        PG-->>SS: none: 404 problem detail, no model call
+    end
     SS->>M: prompt(question, conversationId)
     M->>PG: load history
     PG-->>M: earlier turns

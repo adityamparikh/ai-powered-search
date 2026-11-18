@@ -226,7 +226,7 @@ metadata_category:AI
 ```
 
 ### Conversation Memory
-- **Scope:** `/ask` only, keyed by the request's `conversationId` ("default" when absent)
+- **Scope:** `/ask` only, keyed by a server-issued `conversationId` (none starts a new conversation; an unknown ID gets 404)
 - **Storage:** PostgreSQL JDBC repository
 - **Search query generation:** stateless (no memory advisor); it previously shared a hardcoded "007" conversation across all callers
 

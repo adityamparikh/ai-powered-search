@@ -41,8 +41,8 @@ The application follows a **package-by-feature** structure organized around main
     - `AiConfig`: Multi-LLM configuration for Anthropic (chat) and OpenAI (embeddings)
   - `SolrConfig`: Solr client configuration with HttpJdkSolrClient
     - `PromptCacheMetricsAdvisor`: Logs Anthropic prompt caching metrics
-  - Chat Memory: PostgreSQL-backed conversational context for `/ask`, keyed by the request's `conversationId`
-    ("default" when absent). `searchChatClient` (query generation for keyword and hybrid search) is stateless:
+  - Chat Memory: PostgreSQL-backed conversational context for `/ask`, keyed by a server-issued `conversationId`
+    (a request without one starts a new conversation). `searchChatClient` (query generation for keyword and hybrid search) is stateless:
     it has no memory advisor, so searches never share or leak context
 
 ### Key Dependencies
@@ -452,7 +452,7 @@ Request body:
 ```json
 {
   "question": "What are the benefits of Spring Boot?",
-  "conversationId": "optional-session-id"
+  "conversationId": "3f2b8c1e-7a4d-4e9b-9c6a-1d2e3f4a5b6c"
 }
 ```
 
@@ -461,7 +461,7 @@ Response:
 ```json
 {
   "answer": "Generated answer based on retrieved context",
-  "conversationId": "session-id",
+  "conversationId": "3f2b8c1e-7a4d-4e9b-9c6a-1d2e3f4a5b6c",
   "sources": ["doc-1", "doc-2"]
 }
 ```
@@ -470,6 +470,10 @@ Response:
   via hybrid search (keyword + vector, RRF-fused)
 - Claude generates conversational answers based on retrieved context
 - Maintains conversation history for follow-up questions
+- **Server-issued conversation IDs**: omit `conversationId` to start a new conversation; the response
+  returns its ID (a random UUID), which follow-ups send back. An ID the server did not issue (not a
+  canonical UUID, or no history in chat memory) gets 404 with a problem-details body
+  (`ConversationNotFoundException`); see Chat Memory below
 - Reduces hallucinations by grounding answers in indexed documents
 - Example: "How does dependency injection work in Spring?"
 
@@ -845,9 +849,9 @@ public ChatClient ragChatClient(ChatModel chatModel,
   Conversation-Aware* recipe. Two additions to the recipe: a first question, which has no
   conversation to fold in, is searched as asked; and the reranker judges candidates against the
   rewrite (left in the query context under `rag.standalone`), because `RetrievalAugmentationAdvisor`
-  hands post-processors the original question. The shared `"default"` conversation (requests
-  without a `conversationId`) is not rewritten, since its history mixes unrelated callers, and a
-  failed rewrite falls back to the question as asked.
+  hands post-processors the original question. A request without a `conversationId` starts a new
+  conversation, so it is a first question and is not rewritten. A failed rewrite falls back to the
+  question as asked.
 - **Decisions (opt-in, pluggable)**: a decisions provider answers narrow questions about each
   retrieved passage with calibrated probabilities instead of generated text.
   `search.rag.decisions.enabled=true` screens candidates before reranking (prompt injection,
@@ -878,7 +882,30 @@ context, read from `RetrievalAugmentationAdvisor.DOCUMENT_CONTEXT` in the respon
 
 ### Chat Memory
 
-- Conversation ID defaults to "default" if not provided in AskRequest
+- The server issues conversation IDs (random UUIDs). A request without a `conversationId` starts a
+  new conversation and the response returns its ID; follow-ups send that ID back
+- `SearchService.ask()` treats an ID as server-issued only if it passes two checks, and rejects anything
+  else with `ConversationNotFoundException` (404 problem detail) before any model call:
+  1. It has the canonical lowercase UUID form `UUID.randomUUID().toString()` produces (36 characters).
+     This runs before any memory read, so rows written before the server issued IDs, such as the old
+     shared `"default"` conversation or client-chosen IDs like `user-123`, are unreachable even though
+     they still have history. It also keeps input the database cannot store, such as a NUL byte, from
+     becoming a 500.
+  2. It has history in chat memory: one `ChatMemory.get(id)` per follow-up, the same read the memory
+     advisor makes next.
+- A client that chose its own UUID-shaped IDs before this change passes both checks and can still
+  continue those conversations. Binding a conversation to its owner is #67
+- Rows from before server-issued IDs are not deleted automatically. Once rejected they are unreachable;
+  to remove them, run (Postgres; `ConversationIdIT` checks this statement):
+
+  ```sql
+  DELETE FROM SPRING_AI_CHAT_MEMORY
+  WHERE conversation_id !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$';
+  ```
+- The memory advisor stores the user message before the model call, so a conversation exists from its
+  first turn even if that turn fails. Its ID is only returned with an answer, though: a client whose
+  first turn failed has no ID and starts again
+- Conversations are not yet bound to a caller: anyone holding an issued ID can continue it (#67)
 - PostgreSQL-backed for persistence across restarts
 - Schema auto-initialization enabled via `spring.ai.chat.memory.repository.jdbc.initialize-schema=always`
 - Allows multi-turn conversations where context is maintained

@@ -11,6 +11,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.UUID;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
@@ -57,6 +59,10 @@ import org.springframework.stereotype.Service;
 @Service
 public class SearchService {
 
+  /** The form of a server-issued conversation ID: what {@link UUID#toString()} produces. */
+  private static final Pattern ISSUED_ID =
+      Pattern.compile("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}");
+
   private final Logger log = LoggerFactory.getLogger(SearchService.class);
 
   private final Resource systemResource;
@@ -64,6 +70,7 @@ public class SearchService {
   private final ChatClient chatClient;
   private final ChatClient ragChatClient;
   private final VectorStoreFactory vectorStoreFactory;
+  private final ChatMemory chatMemory;
 
   /**
    * Constructs a new SearchService with required dependencies.
@@ -71,20 +78,23 @@ public class SearchService {
    * @param systemResource the system prompt template for traditional search query generation
    * @param searchRepository the repository for low-level Solr operations
    * @param chatClient the ChatClient configured for search query generation
-   * @param ragChatClient the ChatClient configured with QuestionAnswerAdvisor for RAG
+   * @param ragChatClient the ChatClient configured with RetrievalAugmentationAdvisor for RAG
    * @param vectorStoreFactory the factory to obtain per-collection VectorStore instances
+   * @param chatMemory the chat memory {@code /ask} conversations are kept in
    */
   public SearchService(
       @Value("classpath:/prompts/system-message.st") Resource systemResource,
       SearchRepository searchRepository,
       @Qualifier("searchChatClient") ChatClient chatClient,
       @Qualifier("ragChatClient") ChatClient ragChatClient,
-      VectorStoreFactory vectorStoreFactory) {
+      VectorStoreFactory vectorStoreFactory,
+      ChatMemory chatMemory) {
     this.systemResource = systemResource;
     this.searchRepository = searchRepository;
     this.chatClient = chatClient;
     this.ragChatClient = ragChatClient;
     this.vectorStoreFactory = vectorStoreFactory;
+    this.chatMemory = chatMemory;
   }
 
   /**
@@ -258,23 +268,27 @@ public class SearchService {
    * <p>This method:
    *
    * <ol>
-   *   <li>Uses QuestionAnswerAdvisor to automatically retrieve relevant context from VectorStore
+   *   <li>Uses RetrievalAugmentationAdvisor to retrieve relevant context with hybrid search
    *   <li>Passes the question and retrieved context to Claude AI
    *   <li>Returns a natural language answer based on the indexed documents
    *   <li>Maintains conversation history for follow-up questions
    * </ol>
+   *
+   * <p>A request without a conversation ID starts a new conversation, whose server-issued ID is
+   * returned in the response. Follow-ups pass that ID back.
    *
    * <p>Unlike semantic search which returns document matches, this method returns a conversational
    * answer synthesized from the retrieved documents.
    *
    * @param askRequest the question and conversation context
    * @return conversational answer with source document IDs
+   * @throws ConversationNotFoundException if the request names a conversation the server did not
+   *     issue
    */
   public AskResponse ask(AskRequest askRequest) {
     log.debug("RAG question answering for: {}", askRequest.question());
 
-    String conversationId =
-        askRequest.conversationId() != null ? askRequest.conversationId() : "default";
+    String conversationId = resolveConversationId(askRequest.conversationId());
 
     // The RetrievalAugmentationAdvisor automatically:
     // 1. Retrieves relevant documents via HybridDocumentRetriever (keyword + vector, RRF-fused)
@@ -298,6 +312,44 @@ public class SearchService {
     log.debug("RAG answer generated from {} retrieved document(s)", sources.size());
 
     return new AskResponse(answer, conversationId, sources);
+  }
+
+  /**
+   * Returns the conversation this request continues, or a new one when it names none.
+   *
+   * <p>The server issues conversation IDs as random UUIDs, so they cannot be guessed. An ID it
+   * never handed out is rejected rather than adopted: otherwise clients would choose their own,
+   * often guessable, IDs, and two callers who picked the same one would share a history. Two checks
+   * decide whether the server issued an ID:
+   *
+   * <ol>
+   *   <li>It has the canonical form {@link UUID#toString()} produces. This runs before any memory
+   *       read, so it rejects rows written before the server issued IDs (the old shared {@code
+   *       "default"} conversation, client-chosen IDs such as {@code user-123}) and input the
+   *       database cannot store, such as a NUL byte.
+   *   <li>It has history in chat memory. This costs one memory read per follow-up, the same read
+   *       the memory advisor makes straight after.
+   * </ol>
+   *
+   * <p>A client that chose its own UUID-shaped IDs before this check existed passes both, and can
+   * still continue those conversations. Neither check binds a conversation to its caller: anyone
+   * holding an issued ID can continue it.
+   *
+   * <p>The memory advisor stores the user message before the model is called, so a conversation
+   * exists from its first turn onwards even if that turn then fails. Its ID is only returned with a
+   * successful answer, though: a client whose first turn failed has no ID and starts again.
+   *
+   * @throws ConversationNotFoundException if the ID is not a canonical UUID or has no history in
+   *     chat memory
+   */
+  private String resolveConversationId(@Nullable String requested) {
+    if (requested == null || requested.isBlank()) {
+      return UUID.randomUUID().toString();
+    }
+    if (!ISSUED_ID.matcher(requested).matches() || chatMemory.get(requested).isEmpty()) {
+      throw new ConversationNotFoundException();
+    }
+    return requested;
   }
 
   /**

@@ -1,13 +1,17 @@
 package dev.aparikh.aipoweredsearch.search;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import dev.aparikh.aipoweredsearch.search.model.AskRequest;
@@ -20,14 +24,19 @@ import dev.aparikh.aipoweredsearch.solr.vectorstore.VectorStoreFactory;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.ChatClientResponse;
+import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.document.Document;
@@ -46,6 +55,8 @@ class SearchServiceTest {
   @Mock private ChatClient ragChatClient;
 
   @Mock private VectorStoreFactory vectorStoreFactory;
+
+  @Mock private ChatMemory chatMemory;
 
   private SearchService searchService;
 
@@ -77,7 +88,7 @@ class SearchServiceTest {
 
     searchService =
         new SearchService(
-            systemRes, searchRepository, chatClient, ragChatClient, vectorStoreFactory);
+            systemRes, searchRepository, chatClient, ragChatClient, vectorStoreFactory, chatMemory);
   }
 
   @Test
@@ -423,79 +434,92 @@ class SearchServiceTest {
   }
 
   @Test
-  void shouldPerformRagQuestionAnsweringWithDefaultConversationId() {
+  void shouldStartANewConversationWhenNoIdIsGiven() {
     // Given
     String question = "What are the benefits of Spring Boot?";
     String expectedAnswer =
         "Spring Boot provides several benefits including auto-configuration, "
-            + "embedded servers, production-ready features, and simplified dependency management. "
-            + "It reduces boilerplate code and allows rapid application development.";
-
-    AskRequest request = new AskRequest(question);
-
-    // Mock RAG ChatClient to return answer with no retrieved documents
+            + "embedded servers, production-ready features, and simplified dependency management.";
     stubRagResponse(expectedAnswer, List.of());
 
     // When
-    AskResponse response = searchService.ask(request);
+    AskResponse response = searchService.ask(new AskRequest(question));
 
     // Then
     assertNotNull(response);
     assertEquals(expectedAnswer, response.answer());
-    assertEquals("default", response.conversationId());
-    assertNotNull(response.sources());
-    assertEquals(0, response.sources().size()); // Sources not tracked in current implementation
-  }
-
-  @Test
-  void shouldPerformRagQuestionAnsweringWithCustomConversationId() {
-    // Given
-    String question = "How does Spring Security work?";
-    String conversationId = "user-session-123";
-    String expectedAnswer =
-        "Spring Security is a powerful authentication and authorization framework. "
-            + "It works by intercepting requests through a chain of filters, validating credentials, "
-            + "and managing security contexts. It supports various authentication mechanisms including "
-            + "form-based login, OAuth2, JWT, and more.";
-
-    AskRequest request = new AskRequest(question, conversationId);
-
-    // Mock RAG ChatClient to return answer with no retrieved documents
-    stubRagResponse(expectedAnswer, List.of());
-
-    // When
-    AskResponse response = searchService.ask(request);
-
-    // Then
-    assertNotNull(response);
-    assertEquals(expectedAnswer, response.answer());
-    assertEquals(conversationId, response.conversationId());
+    assertEquals(response.conversationId(), UUID.fromString(response.conversationId()).toString());
     assertNotNull(response.sources());
     assertEquals(0, response.sources().size());
+    // A new conversation has no history to check.
+    verifyNoInteractions(chatMemory);
   }
 
   @Test
-  void shouldHandleRagRequestWithNullConversationId() {
+  void shouldStartADifferentConversationForEachRequestWithoutAnId() {
+    stubRagResponse("answer", List.of());
+
+    AskResponse first = searchService.ask(new AskRequest("q", null));
+    AskResponse second = searchService.ask(new AskRequest("q", null));
+
+    assertNotEquals(first.conversationId(), second.conversationId());
+  }
+
+  @Test
+  void shouldTreatABlankIdAsNoId() {
+    stubRagResponse("answer", List.of());
+
+    AskResponse response = searchService.ask(new AskRequest("q", " "));
+
+    assertEquals(response.conversationId(), UUID.fromString(response.conversationId()).toString());
+    verifyNoInteractions(chatMemory);
+  }
+
+  @Test
+  void shouldContinueAConversationTheServerIssued() {
     // Given
-    String question = "What is dependency injection?";
-    String expectedAnswer =
-        "Dependency injection is a design pattern where objects receive their dependencies "
-            + "from external sources rather than creating them internally. Spring Framework implements DI "
-            + "through constructor injection, setter injection, and field injection.";
-
-    AskRequest request = new AskRequest(question, null);
-
-    // Mock RAG ChatClient to return answer with no retrieved documents
+    String conversationId = UUID.randomUUID().toString();
+    when(chatMemory.get(conversationId))
+        .thenReturn(List.of(new UserMessage("How does Spring Security work?")));
+    String expectedAnswer = "It intercepts requests through a chain of filters.";
     stubRagResponse(expectedAnswer, List.of());
 
     // When
-    AskResponse response = searchService.ask(request);
+    AskResponse response = searchService.ask(new AskRequest("Tell me more", conversationId));
 
     // Then
-    assertNotNull(response);
     assertEquals(expectedAnswer, response.answer());
-    assertEquals("default", response.conversationId()); // Should default to "default"
-    assertNotNull(response.sources());
+    assertEquals(conversationId, response.conversationId());
+  }
+
+  @Test
+  void shouldRejectAUuidTheServerDidNotIssue() {
+    String unknown = UUID.randomUUID().toString();
+    when(chatMemory.get(unknown)).thenReturn(List.of());
+
+    assertThrows(
+        ConversationNotFoundException.class, () -> searchService.ask(new AskRequest("q", unknown)));
+    verify(ragChatClient, never()).prompt();
+  }
+
+  @ParameterizedTest
+  @ValueSource(
+      strings = {
+        "default",
+        "user-session-123",
+        "3F2B8C1E-7A4D-4E9B-9C6A-1D2E3F4A5B6C",
+        " 3f2b8c1e-7a4d-4e9b-9c6a-1d2e3f4a5b6c",
+        "3f2b8c1e7a4d4e9b9c6a1d2e3f4a5b6c",
+        "1-2-3-4-5",
+        "3f2b8c1e-7a4d-4e9b-9c6a-1d2e3f4a\0b6c"
+      })
+  void shouldRejectAnIdThatIsNotACanonicalUuidWithoutReadingMemory(String id) {
+    // Covers IDs from before the server issued them, such as the old shared "default", and a NUL
+    // byte, which Postgres cannot store.
+    assertThrows(
+        ConversationNotFoundException.class, () -> searchService.ask(new AskRequest("q", id)));
+    verifyNoInteractions(chatMemory);
+    verify(ragChatClient, never()).prompt();
   }
 
   // ============== Semantic Search Tests ==============

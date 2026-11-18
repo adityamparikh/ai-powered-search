@@ -95,8 +95,7 @@ class TypeSafeDecisionsRerankingLiveIT {
 
   @Test
   void jevKeepsTopKWithTheAnsweringPassageFirst(CapturedOutput output) {
-    AskResponse response =
-        searchService.ask(new AskRequest("Who wrote A Clash of Kings?", "jev-rerank-live"));
+    AskResponse response = searchService.ask(new AskRequest("Who wrote A Clash of Kings?"));
 
     assertThat(output).doesNotContain("Jev could not score");
     assertThat(response.sources()).hasSize(2).first().isEqualTo(ANSWER);
