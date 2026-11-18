@@ -829,7 +829,8 @@ springdoc.api-docs.path=/api-docs
 springdoc.swagger-ui.operationsSorter=method
 springdoc.swagger-ui.tagsSorter=alpha
 
-# Logging
+# Logging: INFO by default. These two DEBUG levels log full prompts and answers, so they are
+# only in the dev profile (application-dev.properties; --spring.profiles.active=dev)
 logging.level.org.springframework.ai.chat.client.advisor=debug
 logging.level.dev.aparikh.aipoweredsearch=debug
 ```

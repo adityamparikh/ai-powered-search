@@ -262,6 +262,29 @@ The repository includes several helper scripts for common tasks:
 - `TYPESAFE_API_KEY`: Optional; the key for the `typesafe` decisions provider (any placeholder for a local Laya or Nimble)
 - `POSTGRES_USER`: PostgreSQL username (defaults to 'postgres')
 - `POSTGRES_PASSWORD`: PostgreSQL password (defaults to 'postgres')
+- `TRACING_SAMPLING_PROBABILITY`: Fraction of requests traced (defaults to '0.1'; '1.0' in the `dev` profile)
+- `SPRING_PROFILES_ACTIVE`: Set to `dev` for verbose logging (see Logging and Tracing below)
+
+### Logging and Tracing
+
+The default profile logs at INFO and keeps questions, prompts, retrieved passages and answers out
+of the logs, which are also exported over OTLP. At INFO and above the application logs
+counts, document IDs, collection names, which RAG post-processors are active, prompt-cache token
+counts, and failures (by exception type where the message could quote model output).
+
+For verbose logs, run with the `dev` profile: `./gradlew bootRun --args='--spring.profiles.active=dev'`
+or `SPRING_PROFILES_ACTIVE=dev`. `application-dev.properties` sets
+`org.springframework.ai.chat.client.advisor` and `dev.aparikh.aipoweredsearch` to DEBUG, so
+`SimpleLoggerAdvisor` logs every full prompt (history and passages included) and response, and the
+services log the raw query and question. It also traces every request. Don't use it against real
+data.
+
+- Spring AI's prompt and completion observation logging (`spring.ai.chat.client.observations.*`,
+  `spring.ai.chat.observations.*`) is pinned off in `application.properties`.
+- The `VectorStore` bean drops the query text and filter from its spans
+  (`ContentFreeVectorStoreObservationConvention`).
+- `ContentLoggingTest` drives a RAG turn and a search through the real advisor chain and fails if a
+  question, passage or answer marker reaches the console with the default profile.
 
 ### External Services
 - **Solr**: Expected at `http://localhost:8983/solr`

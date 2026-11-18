@@ -568,7 +568,7 @@ public class SearchRepository {
       log.error("Vector fallback failed", e);
     }
 
-    log.warn("All search strategies returned no results for query: {}", query);
+    log.warn("All search strategies returned no results in collection '{}'", collection);
     return new SearchResponse(new ArrayList<>(), Map.of(), Map.of(), null);
   }
 
