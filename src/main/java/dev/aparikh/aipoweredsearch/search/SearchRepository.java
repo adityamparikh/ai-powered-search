@@ -46,6 +46,22 @@ public class SearchRepository {
   private static final String QUERY_TYPE_EDISMAX = "edismax";
 
   /**
+   * Turns off Solr's {@code ${...}} macro expansion, which would otherwise let a parameter value
+   * splice in another parameter (such as the unscreened {@code q}) before parsing. Nothing here
+   * uses macros. {@link SolrParamGuard} also rejects {@code $}; this is the second line (#64).
+   */
+  static final String EXPAND_MACROS = "expandMacros";
+
+  /**
+   * edismax user fields: every field, but no embedded {@code _query_}. This is Solr's default,
+   * pinned so that a configset default cannot re-enable embedded queries in model-generated {@code
+   * q}.
+   */
+  static final String UF = "uf";
+
+  static final String USER_FIELDS = "* -_query_";
+
+  /**
    * Multiplier applied to topK when fetching from individual searches. Over-fetching improves
    * fusion quality by giving RRF more candidates.
    */
@@ -81,10 +97,16 @@ public class SearchRepository {
 
   /**
    * Converts a SolrDocument to a Map, handling multi-valued fields by extracting the first value.
+   *
+   * <p>The {@code vector} field is never returned. Solr's {@code fl} cannot exclude a field, so a
+   * request without a field list (the endpoints' default) still fetches it; it is dropped here.
    */
   private Map<String, Object> convertSolrDocumentToMap(SolrDocument doc) {
     Map<String, Object> docMap = new HashMap<>();
     for (String fieldName : doc.getFieldNames()) {
+      if (FIELD_VECTOR.equals(fieldName)) {
+        continue;
+      }
       Object value = doc.getFieldValue(fieldName);
       if (value instanceof List) {
         List<?> list = (List<?>) value;
@@ -156,6 +178,7 @@ public class SearchRepository {
 
   public SearchResponse search(String collection, SearchRequest searchRequest) {
     SolrQuery query = new SolrQuery(searchRequest.query());
+    query.set(EXPAND_MACROS, false);
 
     // Use edismax for text queries (better than standard query parser)
     // Only apply for non-wildcard queries
@@ -163,6 +186,7 @@ public class SearchRepository {
       query.set("defType", QUERY_TYPE_EDISMAX);
       // Use catch-all field that Solr populates from all text fields
       query.set("qf", FIELD_TEXT_CATCHALL);
+      query.set(UF, USER_FIELDS);
     }
 
     if (searchRequest.filterQueries() != null) {
@@ -400,10 +424,7 @@ public class SearchRepository {
 
     Map<String, Object> keywordLeg =
         Map.of(
-            QUERY_TYPE_EDISMAX,
-            Map.of(
-                "query", query,
-                "qf", FIELD_TEXT_CATCHALL));
+            QUERY_TYPE_EDISMAX, Map.of("query", query, "qf", FIELD_TEXT_CATCHALL, UF, USER_FIELDS));
 
     Map<String, Object> vectorLeg =
         minScore == null
@@ -433,6 +454,8 @@ public class SearchRepository {
             .withParam(COMBINER, true)
             .withParam(COMBINER_QUERY, List.of(KEYWORD_LEG, VECTOR_LEG))
             .withParam(COMBINER_ALGORITHM, COMBINER_RRF)
+            // Also applies to the JSON body, which Solr macro-expands before parsing it.
+            .withParam(EXPAND_MACROS, false)
             // Per-leg candidate depth is max(start + rows, shards.rows)
             .withParam(ShardParams.SHARDS_ROWS, fetchSize);
     request.setPath(HYBRID_HANDLER);
@@ -468,6 +491,8 @@ public class SearchRepository {
     params.set("q", query);
     params.set("defType", QUERY_TYPE_EDISMAX);
     params.set("qf", FIELD_TEXT_CATCHALL);
+    params.set(UF, USER_FIELDS);
+    params.set(EXPAND_MACROS, false);
     params.set("rows", rows);
 
     setupFilterQuery(params, filterExpression);
@@ -515,6 +540,7 @@ public class SearchRepository {
 
     ModifiableSolrParams params = new ModifiableSolrParams();
     params.set("q", SolrQueryUtils.buildKnnQuery(FIELD_VECTOR, rows, vectorString));
+    params.set(EXPAND_MACROS, false);
     params.set("rows", rows);
 
     setupFilterQuery(params, filterExpression);

@@ -62,15 +62,15 @@ qf=title^10 content^2 author^5
 | Use case | User keywords | System constraints |
 
 ## sort (Sort Parameter)
-- Specifies result ordering by document score, field values, or function results
+- Specifies result ordering by document score or field values
 - Default: "score desc" (highest relevance first)
 - Syntax: field_name followed by direction (asc/desc)
 - Multiple criteria separated by commas; subsequent criteria break ties
+- Function sorts are not supported; a sort that is not "field asc|desc" is ignored
 - Examples:
   * "score desc" - highest relevance first
   * "price asc" - lowest price first
   * "inStock desc, price asc" - multi-field sorting (in stock first, then by price)
-  * "div(popularity,price) desc" - function-based sort
 - Best Practice: Sortable fields should have docValues="true" in schema
 
 ## fl (Field List Parameter)
