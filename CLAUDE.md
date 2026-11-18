@@ -471,8 +471,9 @@ Response:
 - Claude generates conversational answers based on retrieved context
 - Maintains conversation history for follow-up questions
 - **Server-issued conversation IDs**: omit `conversationId` to start a new conversation; the response
-  returns its ID (a random UUID), which follow-ups send back. An ID the server did not issue (no
-  history in chat memory) gets 404 with a problem-details body (`ConversationNotFoundException`)
+  returns its ID (a random UUID), which follow-ups send back. An ID the server did not issue (not a
+  canonical UUID, or no history in chat memory) gets 404 with a problem-details body
+  (`ConversationNotFoundException`); see Chat Memory below
 - Reduces hallucinations by grounding answers in indexed documents
 - Example: "How does dependency injection work in Spring?"
 
@@ -883,9 +884,24 @@ context, read from `RetrievalAugmentationAdvisor.DOCUMENT_CONTEXT` in the respon
 
 - The server issues conversation IDs (random UUIDs). A request without a `conversationId` starts a
   new conversation and the response returns its ID; follow-ups send that ID back
-- An ID with no history in chat memory was not issued by the server, so `SearchService.ask()` rejects
-  it with `ConversationNotFoundException` (404 problem detail) before any model call. The check is one
-  `ChatMemory.get(id)` per follow-up, the same read the memory advisor makes next
+- `SearchService.ask()` treats an ID as server-issued only if it passes two checks, and rejects anything
+  else with `ConversationNotFoundException` (404 problem detail) before any model call:
+  1. It has the canonical lowercase UUID form `UUID.randomUUID().toString()` produces (36 characters).
+     This runs before any memory read, so rows written before the server issued IDs, such as the old
+     shared `"default"` conversation or client-chosen IDs like `user-123`, are unreachable even though
+     they still have history. It also keeps input the database cannot store, such as a NUL byte, from
+     becoming a 500.
+  2. It has history in chat memory: one `ChatMemory.get(id)` per follow-up, the same read the memory
+     advisor makes next.
+- A client that chose its own UUID-shaped IDs before this change passes both checks and can still
+  continue those conversations. Binding a conversation to its owner is #67
+- Rows from before server-issued IDs are not deleted automatically. Once rejected they are unreachable;
+  to remove them, run (Postgres; `ConversationIdIT` checks this statement):
+
+  ```sql
+  DELETE FROM SPRING_AI_CHAT_MEMORY
+  WHERE conversation_id !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$';
+  ```
 - The memory advisor stores the user message before the model call, so a conversation exists from its
   first turn even if that turn fails. Its ID is only returned with an answer, though: a client whose
   first turn failed has no ID and starts again

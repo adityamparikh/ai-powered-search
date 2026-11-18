@@ -352,7 +352,8 @@ curl -X POST "http://localhost:8080/api/v1/search/ask" \
 
 The server issues conversation IDs. Omit `conversationId` to start a new conversation, and send the
 returned ID back to ask a follow-up. An ID the server did not issue gets `404` with a
-problem-details body.
+problem-details body. That includes the old shared `"default"` conversation and other IDs chosen by
+clients before this change; CLAUDE.md (Chat Memory) has the SQL that removes those rows.
 
 ## 🔍 Usage Examples
 

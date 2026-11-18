@@ -7,7 +7,7 @@ import org.jspecify.annotations.Nullable;
  *
  * @param question the natural language question to ask
  * @param conversationId the ID of the conversation to continue, as returned by an earlier {@code
- *     /ask}; null starts a new conversation. An ID the server did not issue is rejected.
+ *     /ask}; null or blank starts a new conversation. An ID the server did not issue is rejected.
  */
 public record AskRequest(String question, @Nullable String conversationId) {
   /**

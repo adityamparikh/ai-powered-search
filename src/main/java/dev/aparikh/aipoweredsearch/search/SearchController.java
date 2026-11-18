@@ -279,18 +279,18 @@ class SearchController {
   /**
    * Performs conversational question-answering using RAG (Retrieval-Augmented Generation).
    *
-   * <p>This method leverages the QuestionAnswerAdvisor to automatically retrieve relevant documents
-   * from the VectorStore based on the question, then uses Claude AI to generate a contextual
-   * answer. A request without a conversationId starts a new conversation; the response carries its
-   * server-issued ID, which follow-up questions pass back to keep their context. An ID the server
-   * did not issue is rejected with 404.
+   * <p>A RetrievalAugmentationAdvisor retrieves relevant documents with hybrid search (keyword and
+   * vector, fused with RRF), then Claude AI generates a contextual answer from them. A request
+   * without a conversationId starts a new conversation; the response carries its server-issued ID,
+   * which follow-up questions pass back to keep their context. An ID the server did not issue is
+   * rejected with 404.
    *
    * <p>The RAG process:
    *
    * <ol>
-   *   <li>Question is converted to embeddings using OpenAI
-   *   <li>Vector similarity search retrieves relevant documents from Solr
-   *   <li>Retrieved documents are added to the prompt context
+   *   <li>A follow-up is rewritten, with the conversation so far, into a standalone query
+   *   <li>Hybrid search (keyword and vector, RRF-fused in Solr) retrieves candidate documents
+   *   <li>The candidates are reranked (on by default), and the best are added to the prompt context
    *   <li>Claude AI generates an answer based on the retrieved context
    * </ol>
    *
@@ -303,8 +303,9 @@ class SearchController {
       summary = "Ask a question with RAG (Retrieval-Augmented Generation)",
       description =
           "Performs conversational question-answering using RAG. "
-              + "The QuestionAnswerAdvisor automatically retrieves relevant documents from the VectorStore, "
-              + "and Claude AI generates a natural language answer based on the retrieved context. "
+              + "A RetrievalAugmentationAdvisor retrieves relevant documents with hybrid search "
+              + "(keyword and vector, fused with RRF), and Claude AI generates a natural language "
+              + "answer based on the retrieved context. "
               + "Omit conversationId to start a new conversation: the response returns a "
               + "server-issued conversationId, which follow-up questions send back to keep their "
               + "history. A conversationId the server did not issue gets 404.")

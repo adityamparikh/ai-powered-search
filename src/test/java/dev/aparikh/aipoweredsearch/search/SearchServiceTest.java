@@ -28,6 +28,8 @@ import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.ai.chat.client.ChatClient;
@@ -491,12 +493,32 @@ class SearchServiceTest {
   }
 
   @Test
-  void shouldRejectAConversationIdTheServerDidNotIssue() {
-    when(chatMemory.get("user-session-123")).thenReturn(List.of());
+  void shouldRejectAUuidTheServerDidNotIssue() {
+    String unknown = UUID.randomUUID().toString();
+    when(chatMemory.get(unknown)).thenReturn(List.of());
 
     assertThrows(
-        ConversationNotFoundException.class,
-        () -> searchService.ask(new AskRequest("q", "user-session-123")));
+        ConversationNotFoundException.class, () -> searchService.ask(new AskRequest("q", unknown)));
+    verify(ragChatClient, never()).prompt();
+  }
+
+  @ParameterizedTest
+  @ValueSource(
+      strings = {
+        "default",
+        "user-session-123",
+        "3F2B8C1E-7A4D-4E9B-9C6A-1D2E3F4A5B6C",
+        " 3f2b8c1e-7a4d-4e9b-9c6a-1d2e3f4a5b6c",
+        "3f2b8c1e7a4d4e9b9c6a1d2e3f4a5b6c",
+        "1-2-3-4-5",
+        "3f2b8c1e-7a4d-4e9b-9c6a-1d2e3f4a\0b6c"
+      })
+  void shouldRejectAnIdThatIsNotACanonicalUuidWithoutReadingMemory(String id) {
+    // Covers IDs from before the server issued them, such as the old shared "default", and a NUL
+    // byte, which Postgres cannot store.
+    assertThrows(
+        ConversationNotFoundException.class, () -> searchService.ask(new AskRequest("q", id)));
+    verifyNoInteractions(chatMemory);
     verify(ragChatClient, never()).prompt();
   }
 
