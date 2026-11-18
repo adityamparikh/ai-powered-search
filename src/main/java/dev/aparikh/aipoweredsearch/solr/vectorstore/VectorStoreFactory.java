@@ -66,7 +66,13 @@ public class VectorStoreFactory {
     // ConcurrentHashMap.computeIfAbsent is atomic and efficient
     // It guarantees that the mapping function is called at most once
     return cache.computeIfAbsent(
-        collection, c -> SolrVectorStore.builder(solrClient, c, embeddingModel).build());
+        collection,
+        c ->
+            SolrVectorStore.builder(solrClient, c, embeddingModel)
+                // No observation registry, so these stores record nothing today. If one is ever
+                // added, their spans must not carry the search text or filter either.
+                .customObservationConvention(new ContentFreeVectorStoreObservationConvention())
+                .build());
   }
 
   /**

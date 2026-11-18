@@ -33,6 +33,8 @@ public class VectorStoreConfig {
       ObservationRegistry observationRegistry) {
     return SolrVectorStore.builder(solrClient, collectionName, embeddingModel)
         .observationRegistry(observationRegistry)
+        // Spans are exported over OTLP: keep the search text and filter out of them.
+        .customObservationConvention(new ContentFreeVectorStoreObservationConvention())
         .build();
   }
 }

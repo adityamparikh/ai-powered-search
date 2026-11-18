@@ -829,9 +829,8 @@ springdoc.api-docs.path=/api-docs
 springdoc.swagger-ui.operationsSorter=method
 springdoc.swagger-ui.tagsSorter=alpha
 
-# Logging
-logging.level.org.springframework.ai.chat.client.advisor=debug
-logging.level.dev.aparikh.aipoweredsearch=debug
+# Logging: INFO by default. The verbose DEBUG levels, which log full prompts and answers, are in
+# application-local.properties (--spring.profiles.active=local). See CLAUDE.md, Logging and Tracing.
 ```
 
 ### 7.2 Solr Configuration
