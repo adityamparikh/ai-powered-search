@@ -19,8 +19,8 @@ import org.slf4j.LoggerFactory;
  * {@link SearchService#hybridSearch}) passes them through this class.
  *
  * <p>An unsafe clause is dropped with a WARN rather than failing the request, so a manipulated
- * model reply degrades to a broader search instead of an error. A clause is unsafe when Solr would
- * hand it to another query parser:
+ * model reply degrades to a broader search instead of an error. A {@code fq} or {@code facet.query}
+ * clause is unsafe when Solr would hand it to another query parser:
  *
  * <ul>
  *   <li><strong>local params</strong> (<code>&#123;!join fromIndex=...&#125;</code>, <code>
@@ -30,10 +30,16 @@ import org.slf4j.LoggerFactory;
  *       </code> and <code>&#92;u007B!join</code> back into a live join;
  *   <li><strong>the magic fields</strong> {@code _query_} and {@code _val_}, which embed a nested
  *       query or a function query;
- *   <li><strong>parameter dereferences</strong> ({@code $q}): {@code sort=query($q,0) desc} makes
- *       Solr re-parse the user's {@code q} with the standard parser, so a join that edismax ignores
- *       as the main query still runs and its result shows up in the sort order.
+ *   <li><strong>any {@code $}</strong>: parameter references ({@code $q}, and {@code $ q}, since
+ *       Solr skips the whitespace) and macros (<code>$&#123;q&#125;</code>, or an empty-default
+ *       macro placed between the brace and the {@code !} of a local-params prefix) both make Solr
+ *       re-read another parameter, typically the unscreened {@code q}, with the standard parser. As
+ *       a second line of defence {@link SearchRepository} sends {@code expandMacros=false}.
  * </ul>
+ *
+ * <p>A {@code sort} must be a plain field sort: a comma-separated list of {@code <field> asc|desc}
+ * ({@code score} included). Function sorts are dropped: {@code query(...)} turns a sort into an
+ * oracle, and an arbitrary function is an easy way to make every request expensive.
  *
  * <p>{@code q} itself is not screened: the keyword leg parses it with edismax, which ignores local
  * params (SOLR-11501) and, with no explicit {@code uf}, does not honour {@code _query_}. Model
@@ -59,7 +65,13 @@ final class SolrParamGuard {
   private static final Pattern LOCAL_PARAMS = Pattern.compile("\\{\\s*!");
   private static final Pattern MAGIC_FIELD =
       Pattern.compile("(?<![A-Za-z0-9_])_(?:query|val)_(?![A-Za-z0-9_])");
-  private static final Pattern PARAM_DEREFERENCE = Pattern.compile("\\$[A-Za-z_]");
+  private static final Pattern PARAM_REFERENCE = Pattern.compile("\\$");
+
+  /** {@code <field> asc|desc}, comma-separated. */
+  private static final Pattern PLAIN_SORT =
+      Pattern.compile(
+          "\\s*[A-Za-z_][A-Za-z0-9_.]*\\s+(?i:asc|desc)\\s*"
+              + "(?:,\\s*[A-Za-z_][A-Za-z0-9_.]*\\s+(?i:asc|desc)\\s*)*");
 
   /** A plain field name or a glob of one: no aliases, functions, transformers or local params. */
   private static final Pattern PLAIN_FIELD = Pattern.compile("[A-Za-z0-9_.\\-*]+");
@@ -94,14 +106,15 @@ final class SolrParamGuard {
       return null;
     }
     List<String> kept = new ArrayList<>();
-    for (String clause : filterQueries) {
+    for (int i = 0; i < filterQueries.size(); i++) {
+      String clause = filterQueries.get(i);
       if (clause == null || clause.isBlank()) {
         continue;
       }
       if (kept.size() == MAX_FILTER_QUERIES) {
         log.warn(
             "Dropping {} filter query clause(s) beyond the limit of {}",
-            filterQueries.size() - MAX_FILTER_QUERIES,
+            filterQueries.size() - i,
             MAX_FILTER_QUERIES);
         break;
       }
@@ -113,12 +126,18 @@ final class SolrParamGuard {
   }
 
   /**
-   * Returns the sort if it is safe, otherwise null (Solr then sorts by relevance).
-   *
-   * <p>Plain function sorts such as {@code div(popularity,price) desc} are still accepted.
+   * Returns the sort if it is a plain field sort ({@code metadata_price asc, score desc}),
+   * otherwise null (Solr then sorts by relevance).
    */
   static @Nullable String sort(@Nullable String sort) {
-    return sort != null && !sort.isBlank() && isAcceptedClause("sort", sort) ? sort : null;
+    if (sort == null || sort.isBlank() || !isWithinLengthLimit("sort", sort)) {
+      return null;
+    }
+    if (!PLAIN_SORT.matcher(sort).matches()) {
+      log.warn("Dropping sort '{}': only '<field> asc|desc' sorts are allowed", forLog(sort));
+      return null;
+    }
+    return sort;
   }
 
   /** Returns the facet query if it is safe, otherwise null. */
@@ -181,30 +200,37 @@ final class SolrParamGuard {
   }
 
   /**
-   * Whether a clause is free of local params, magic fields and parameter dereferences, after Solr's
-   * escapes are undone.
+   * Whether a query clause is free of local params, magic fields and {@code $} (parameter
+   * references and macros), after Solr's escapes are undone.
    */
   static boolean isSafeClause(String clause) {
     String unescaped = unescape(clause);
     return !LOCAL_PARAMS.matcher(unescaped).find()
         && !MAGIC_FIELD.matcher(unescaped).find()
-        && !PARAM_DEREFERENCE.matcher(unescaped).find();
+        && !PARAM_REFERENCE.matcher(unescaped).find();
   }
 
   private static boolean isAcceptedClause(String param, String clause) {
+    if (!isWithinLengthLimit(param, clause)) {
+      return false;
+    }
+    if (!isSafeClause(clause)) {
+      log.warn(
+          "Dropping {} clause '{}': local params, _query_/_val_ and $ are not allowed",
+          param,
+          forLog(clause));
+      return false;
+    }
+    return true;
+  }
+
+  private static boolean isWithinLengthLimit(String param, String clause) {
     if (clause.length() > MAX_CLAUSE_LENGTH) {
       log.warn(
           "Dropping {} clause of {} characters (limit {})",
           param,
           clause.length(),
           MAX_CLAUSE_LENGTH);
-      return false;
-    }
-    if (!isSafeClause(clause)) {
-      log.warn(
-          "Dropping {} clause '{}': local params, _query_/_val_ and $param are not allowed",
-          param,
-          forLog(clause));
       return false;
     }
     return true;
