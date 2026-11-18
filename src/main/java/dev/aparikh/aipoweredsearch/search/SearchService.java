@@ -120,7 +120,7 @@ public class SearchService {
 
     String userMessage = buildQueryUserMessage(freeTextQuery, collection);
     QueryGenerationResponse queryGenerationResponse =
-        generateQueryWithAI(systemResource, userMessage);
+        SolrParamGuard.screen(generateQueryWithAI(systemResource, userMessage));
 
     SearchRequest searchRequest =
         new SearchRequest(
@@ -189,7 +189,7 @@ public class SearchService {
     log.debug("Semantic search returned {} documents", documents.size());
 
     // Convert Spring AI Documents to SearchResponse format
-    return toSearchResponse(documents, fieldsCsv);
+    return toSearchResponse(documents, SolrParamGuard.fieldList(fieldsCsv));
   }
 
   /**
@@ -241,15 +241,17 @@ public class SearchService {
     QueryGenerationResponse queryGenerationResponse =
         generateQueryWithAI(systemResource, userMessage);
 
-    // Step 3: Build filter expression if present
-    String filterExpression = buildFilterExpression(queryGenerationResponse.fq());
+    // Step 3: Build filter expression from the generated filters that are safe to send
+    String filterExpression =
+        buildFilterExpression(SolrParamGuard.filterQueries(queryGenerationResponse.fq()));
+    String fields = SolrParamGuard.fieldList(fieldsCsv);
 
     // Step 4: Execute hybrid search using RRF in Solr
     // Repository will handle embedding generation internally
     int topK = (k != null && k > 0) ? k : 100;
 
     return searchRepository.executeHybridRerankSearch(
-        collection, queryGenerationResponse.q(), topK, filterExpression, fieldsCsv, minScore);
+        collection, queryGenerationResponse.q(), topK, filterExpression, fields, minScore);
   }
 
   /**

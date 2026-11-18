@@ -81,10 +81,16 @@ public class SearchRepository {
 
   /**
    * Converts a SolrDocument to a Map, handling multi-valued fields by extracting the first value.
+   *
+   * <p>The {@code vector} field is never returned. Solr's {@code fl} cannot exclude a field, so a
+   * request without a field list (the endpoints' default) still fetches it; it is dropped here.
    */
   private Map<String, Object> convertSolrDocumentToMap(SolrDocument doc) {
     Map<String, Object> docMap = new HashMap<>();
     for (String fieldName : doc.getFieldNames()) {
+      if (FIELD_VECTOR.equals(fieldName)) {
+        continue;
+      }
       Object value = doc.getFieldValue(fieldName);
       if (value instanceof List) {
         List<?> list = (List<?>) value;
