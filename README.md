@@ -611,6 +611,18 @@ spring.datasource.password=${POSTGRES_PASSWORD:postgres}
 
 # Virtual Threads (Java 21)
 spring.threads.virtual.enabled=true
+
+# Input limits (defaults shown): a request over one gets 400 with a problem-details body
+# naming the limit. Lengths are Unicode code points; max-k must be at least 100.
+search.limits.max-k=200
+search.limits.max-query-length=1000
+search.limits.max-question-length=4000
+search.limits.max-batch-size=100
+# A batch is embedded in one OpenAI request (300k tokens at most), so its total content is capped
+search.limits.max-batch-content-length=150000
+search.limits.max-document-length=30000
+search.limits.max-id-length=512
+search.limits.max-metadata-length=10000
 ```
 
 ### Metadata Field Types

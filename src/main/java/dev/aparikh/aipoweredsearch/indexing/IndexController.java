@@ -6,6 +6,7 @@ import dev.aparikh.aipoweredsearch.indexing.model.IndexResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -99,6 +100,7 @@ class IndexController {
       @Parameter(
               description = "Document to index with content and optional metadata",
               required = true)
+          @Valid
           @RequestBody
           IndexRequest indexRequest) {
     return indexService.indexDocument(collection, indexRequest);
@@ -156,7 +158,7 @@ class IndexController {
               example = "products")
           @PathVariable
           String collection,
-      @Parameter(description = "Batch of documents to index", required = true) @RequestBody
+      @Parameter(description = "Batch of documents to index", required = true) @Valid @RequestBody
           BatchIndexRequest batchRequest) {
     return indexService.indexDocuments(collection, batchRequest);
   }
