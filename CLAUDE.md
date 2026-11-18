@@ -332,6 +332,42 @@ Controllers declare the version segment as a URI variable and the version as a m
 - **OpenAPI Spec**: http://localhost:8080/api-docs
 - **Health Check**: http://localhost:8080/actuator/health
 
+### Logging and Tracing
+
+The default profile keeps questions, prompts, retrieved passages and answers out of the logs. Logs
+go to the console only: `management.otlp.logging.endpoint` is set, but there is no OpenTelemetry
+Logback appender, so no log records are exported over OTLP. Metrics and traces are exported.
+
+- **Levels.** The root level is INFO. `org.springframework.ai.anthropic.AnthropicChatModel` is
+  ERROR, because its WARNs quote the whole prompt (an empty response) or content blocks.
+- **What INFO and above logs.** Counts, document IDs, collection names, which RAG post-processors
+  are active, prompt-cache token counts, and failures. A failure that could quote content is logged
+  by exception type: the reranker's parse error can quote the model's reply. A Solr failure is
+  logged by exception type and Solr error code (`SolrErrors.describe`), because Solr's messages
+  quote the query, the filters and document field values. The full exception is at DEBUG, and a
+  failed keyword search throws an exception with neither the message nor the cause, because the
+  servlet container logs an unhandled exception's whole cause chain at ERROR. The full inventory
+  belongs in the data-flow note (#79).
+- **Tracing.** `TRACING_SAMPLING_PROBABILITY` sets the fraction of requests traced (default 0.1).
+  `spring.ai.chat.observations.log-prompt`/`log-completion` and
+  `spring.ai.vectorstore.observations.log-query-response` are pinned to false. The `ChatClient`s are
+  built without an `ObservationRegistry`, so they record no observations.
+- **Vector store spans.** `VectorStoreConfig` and `VectorStoreFactory` build their stores with
+  `ContentFreeVectorStoreObservationConvention`, which drops the query text and filter from spans.
+  Today no request-path store records observations at all: the `VectorStoreFactory` stores that
+  serve semantic search and indexing have no registry, and nothing on a request path uses the
+  `VectorStore` bean.
+- **Verbose logs: the `local` profile.** Run `./gradlew bootRun --args='--spring.profiles.active=local'`
+  or set `SPRING_PROFILES_ACTIVE=local`. `application-local.properties` sets
+  `org.springframework.ai.chat.client.advisor` and `dev.aparikh.aipoweredsearch` to DEBUG, so
+  `SimpleLoggerAdvisor` logs every full prompt (history and passages included) and response, and
+  the services log the raw query and question. It puts `AnthropicChatModel` back to WARN and traces
+  every request. Use it only on a developer's machine, never on a shared or deployed environment.
+- **Tests.** `ContentLoggingTest` drives a RAG turn and a search through the real advisor chain
+  with a stub chat model, and fails if a question, passage or answer marker reaches the console
+  under the default profile. It does not see framework loggers or Solr failures.
+  `SolrErrorLoggingTest` covers the Solr failure paths in `SearchRepository` and `IndexService`.
+
 ## Vector Search and Indexing
 
 ### Vector Store Implementation

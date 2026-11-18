@@ -20,6 +20,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.slf4j.LoggerFactory;
+import org.springframework.ai.anthropic.AnthropicChatModel;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.SimpleLoggerAdvisor;
 import org.springframework.ai.chat.memory.ChatMemory;
@@ -41,23 +42,34 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 /**
- * Issue #74: with the default profile, no question, prompt, retrieved passage or answer reaches the
- * logs.
+ * Issue #74: with the default profile, no question, prompt, retrieved passage or answer that passes
+ * through the application's advisor chain reaches the logs.
  *
  * <p>Each test starts the real {@link AiConfig} wiring under {@link SpringApplicationBuilder}, so
- * the logging levels come from the real {@code application.properties} (and, for the {@code dev}
- * test, {@code application-dev.properties}). Only the chat model, the chat memory and Solr are
- * stubbed. A turn then runs through the real advisor chain: query rewriting, hybrid retrieval,
- * reranking, chat memory, {@link SimpleLoggerAdvisor} and {@link PromptCacheMetricsAdvisor}. The
- * question, the passage and the answer each carry a marker, and the test looks for the markers in
- * everything written to the console.
+ * the logging levels come from the real {@code application.properties} (and, for the {@code local}
+ * test, {@code application-local.properties}). A turn then runs through the real advisor chain:
+ * query rewriting, {@link HybridDocumentRetriever}, reranking, chat memory, {@link
+ * SimpleLoggerAdvisor} and {@link PromptCacheMetricsAdvisor}. The question, the passage and the
+ * answer each carry a marker, and the test looks for the markers in everything written to the
+ * console.
  *
- * <p>The {@code dev} test is the control: the same turn there must log every marker, so the default
- * test cannot pass merely because the scenario logs nothing at all.
+ * <p>The {@code local} test is the control: the same turn there must log every marker, so the
+ * default test cannot pass merely because the scenario logs nothing at all.
+ *
+ * <p>What it does not cover. The chat model is a stub, the chat memory is in memory, {@code
+ * SearchRepository} is a mock, and Spring AI's auto-configuration does not run. So it does not see
+ * the framework's own loggers ({@code AnthropicChatModel}, the OpenAI embedding model), the
+ * observation handlers that the {@code spring.ai.*.observations.*} properties switch, or Solr's
+ * failure paths. For {@code AnthropicChatModel} it only checks that the configured level resolves
+ * to ERROR; {@code SolrErrorLoggingTest} covers the Solr failure paths.
  */
 @ExtendWith(OutputCaptureExtension.class)
-// The dev test runs first so that the levels left behind for later test classes in this JVM are
+// The local test runs first so that the levels left behind for later test classes in this JVM are
 // the default ones. Each test reinitialises logging, so the order does not affect the assertions.
+//
+// Isolation: each test resets Logback, which is global to the JVM. That is safe only while JUnit
+// runs test classes one at a time, as the build does today. With parallel class execution, this
+// test would reset logging under another class that is running, and vice versa.
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class ContentLoggingTest {
 
@@ -77,8 +89,8 @@ class ContentLoggingTest {
 
   @Test
   @Order(1)
-  void theDevProfileLogsPromptsPassagesAndAnswers(CapturedOutput output) {
-    String answer = runTurns("dev");
+  void theLocalProfileLogsPromptsPassagesAndAnswers(CapturedOutput output) {
+    String answer = runTurns("local");
 
     assertThat(answer).contains(ANSWER_MARKER);
     assertThat(output.getAll()).contains(MARKERS);
@@ -120,10 +132,14 @@ class ContentLoggingTest {
             .profiles(profiles)
             .run()) {
 
-      boolean dev = profiles.length > 0;
+      boolean local = profiles.length > 0;
       assertThat(LoggerFactory.getLogger(SimpleLoggerAdvisor.class).isDebugEnabled())
-          .isEqualTo(dev);
-      assertThat(LoggerFactory.getLogger(SearchService.class).isDebugEnabled()).isEqualTo(dev);
+          .isEqualTo(local);
+      assertThat(LoggerFactory.getLogger(SearchService.class).isDebugEnabled()).isEqualTo(local);
+      // Its WARNs quote the whole prompt; the stub model cannot trigger them, so check the level.
+      assertThat(LoggerFactory.getLogger(AnthropicChatModel.class).isWarnEnabled())
+          .isEqualTo(local);
+      assertThat(LoggerFactory.getLogger(AnthropicChatModel.class).isErrorEnabled()).isTrue();
 
       ChatClient rag = context.getBean("ragChatClient", ChatClient.class);
       // A conversation ID, so the follow-up goes through the query rewrite.
