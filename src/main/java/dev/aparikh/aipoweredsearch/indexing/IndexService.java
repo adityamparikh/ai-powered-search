@@ -3,6 +3,7 @@ package dev.aparikh.aipoweredsearch.indexing;
 import dev.aparikh.aipoweredsearch.indexing.model.BatchIndexRequest;
 import dev.aparikh.aipoweredsearch.indexing.model.IndexRequest;
 import dev.aparikh.aipoweredsearch.indexing.model.IndexResponse;
+import dev.aparikh.aipoweredsearch.solr.SolrErrors;
 import dev.aparikh.aipoweredsearch.solr.vectorstore.VectorStoreFactory;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -50,10 +51,10 @@ public class IndexService {
   public IndexResponse indexDocument(String collection, IndexRequest indexRequest) {
     String safeCollection = sanitize(collection);
     log.debug("Indexing document in collection: {}", safeCollection);
+    // Generate document ID if not provided
+    String docId = indexRequest.id() != null ? indexRequest.id() : UUID.randomUUID().toString();
 
     try {
-      // Generate document ID if not provided
-      String docId = indexRequest.id() != null ? indexRequest.id() : UUID.randomUUID().toString();
 
       // Create Spring AI Document with metadata
       // VectorStore will automatically generate embeddings
@@ -74,7 +75,13 @@ public class IndexService {
       return new IndexResponse(
           1, 0, Collections.singletonList(docId), "Successfully indexed document");
     } catch (Exception e) {
-      log.error("Failed to index document in collection '{}'", safeCollection, e);
+      // Type and Solr code only: Solr's message quotes field values, which are passages.
+      log.error(
+          "Failed to index document '{}' in collection '{}' ({})",
+          sanitize(docId),
+          safeCollection,
+          SolrErrors.describe(e));
+      log.debug("Indexing failure", e);
       return new IndexResponse(
           0, 1, Collections.emptyList(), "Failed to index document: " + e.getMessage());
     }
@@ -117,7 +124,8 @@ public class IndexService {
           documents.add(document);
           indexedIds.add(docId);
         } catch (Exception e) {
-          log.error("Failed to prepare document for indexing", e);
+          log.warn("Failed to prepare document for indexing ({})", SolrErrors.describe(e));
+          log.debug("Document preparation failure", e);
           failed++;
         }
       }
@@ -138,7 +146,11 @@ public class IndexService {
           indexedIds,
           String.format("Successfully indexed %d documents, %d failed", indexedIds.size(), failed));
     } catch (Exception e) {
-      log.error("Failed to batch index documents in collection '{}'", collection, e);
+      log.error(
+          "Failed to batch index documents in collection '{}' ({})",
+          safeCollection,
+          SolrErrors.describe(e));
+      log.debug("Batch indexing failure", e);
       return new IndexResponse(
           indexedIds.size(),
           batchRequest.documents().size() - indexedIds.size(),

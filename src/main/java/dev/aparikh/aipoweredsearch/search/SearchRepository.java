@@ -4,6 +4,7 @@ import dev.aparikh.aipoweredsearch.embedding.EmbeddingService;
 import dev.aparikh.aipoweredsearch.search.model.FieldInfo;
 import dev.aparikh.aipoweredsearch.search.model.SearchRequest;
 import dev.aparikh.aipoweredsearch.search.model.SearchResponse;
+import dev.aparikh.aipoweredsearch.solr.SolrErrors;
 import dev.aparikh.aipoweredsearch.solr.SolrQueryUtils;
 import java.io.IOException;
 import java.util.ArrayList;
@@ -229,7 +230,14 @@ public class SearchRepository {
           Map.of(), // No highlighting without knowing field names
           spellCheckSuggestion);
     } catch (Exception e) {
-      throw new RuntimeException(e);
+      // Solr's message quotes the query and filters, and the servlet container logs an unhandled
+      // exception's whole cause chain at ERROR. So the exception thrown carries no cause and no
+      // message text; the full exception is at DEBUG.
+      String failure = SolrErrors.describe(e);
+      log.warn("Solr query failed in collection '{}' ({})", collection, failure);
+      log.debug("Solr query failure", e);
+      throw new IllegalStateException(
+          "Solr query failed in collection '" + collection + "' (" + failure + ")");
     }
   }
 
@@ -333,8 +341,12 @@ public class SearchRepository {
               HYBRID_HANDLER);
         }
       } else {
-        log.error("Error performing hybrid search with Solr RRF in collection: {}", collection, e);
-        log.warn("Hybrid search failed, attempting fallback");
+        // No message or stack trace above DEBUG: Solr's message quotes the query and filters.
+        log.warn(
+            "Hybrid search (Solr RRF) failed in collection '{}' ({}), attempting fallback",
+            collection,
+            SolrErrors.describe(e));
+        log.debug("Hybrid search failure", e);
       }
       return fallbackSearch(collection, query, vector, topK, filterExpression, fieldsCsv, minScore);
     }
@@ -550,7 +562,8 @@ public class SearchRepository {
         return new SearchResponse(keywordResults, Map.of(), Map.of(), null);
       }
     } catch (Exception e) {
-      log.error("Keyword fallback failed", e);
+      log.warn("Keyword fallback failed ({})", SolrErrors.describe(e));
+      log.debug("Keyword fallback failure", e);
     }
 
     // Try vector-only as last resort. minScore applies here — these are cosine similarities.
@@ -565,7 +578,8 @@ public class SearchRepository {
         return new SearchResponse(vectorResults, Map.of(), Map.of(), null);
       }
     } catch (Exception e) {
-      log.error("Vector fallback failed", e);
+      log.warn("Vector fallback failed ({})", SolrErrors.describe(e));
+      log.debug("Vector fallback failure", e);
     }
 
     log.warn("All search strategies returned no results in collection '{}'", collection);
