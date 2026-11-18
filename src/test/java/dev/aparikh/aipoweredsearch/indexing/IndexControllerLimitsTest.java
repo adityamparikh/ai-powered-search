@@ -14,6 +14,7 @@ import dev.aparikh.aipoweredsearch.indexing.model.IndexRequest;
 import dev.aparikh.aipoweredsearch.indexing.model.IndexResponse;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.IntStream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -34,6 +35,9 @@ class IndexControllerLimitsTest {
 
   private static final int MAX_BATCH_SIZE = 100;
   private static final int MAX_DOCUMENT_LENGTH = 30_000;
+  private static final int MAX_BATCH_CONTENT_LENGTH = 150_000;
+  private static final int MAX_ID_LENGTH = 512;
+  private static final int MAX_METADATA_LENGTH = 10_000;
 
   @Autowired private MockMvc mockMvc;
 
@@ -102,6 +106,97 @@ class IndexControllerLimitsTest {
         .andExpect(jsonPath("$.errors[0].field").value("documents[1].content"))
         .andExpect(jsonPath("$.errors[0].limit").value("search.limits.max-document-length"));
     verifyNoInteractions(indexService);
+  }
+
+  @Test
+  void acceptsBatchAtTotalContentLimit() throws Exception {
+    // Five documents of 30,000 code points: 150,000 in total, the default batch content limit.
+    mockMvc.perform(batch(documents(5, MAX_DOCUMENT_LENGTH))).andExpect(status().isOk());
+  }
+
+  @Test
+  void rejectsBatchOverTotalContentLimit() throws Exception {
+    List<IndexRequest> documents = new java.util.ArrayList<>(documents(5, MAX_DOCUMENT_LENGTH));
+    documents.add(document(1));
+    mockMvc
+        .perform(batch(documents))
+        .andExpect(status().isBadRequest())
+        .andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON))
+        .andExpect(jsonPath("$.errors.length()").value(1))
+        .andExpect(jsonPath("$.errors[0].field").value("documents"))
+        .andExpect(jsonPath("$.errors[0].limit").value("search.limits.max-batch-content-length"))
+        .andExpect(jsonPath("$.errors[0].max").value(MAX_BATCH_CONTENT_LENGTH))
+        .andExpect(
+            jsonPath("$.errors[0].message").value("must be at most 150000 characters in total"));
+    verifyNoInteractions(indexService);
+  }
+
+  @Test
+  void acceptsIdAtLimit() throws Exception {
+    IndexRequest request = new IndexRequest("i".repeat(MAX_ID_LENGTH), "text", null);
+    mockMvc.perform(index(request)).andExpect(status().isOk());
+  }
+
+  @Test
+  void rejectsIdOverLimit() throws Exception {
+    IndexRequest request = new IndexRequest("i".repeat(MAX_ID_LENGTH + 1), "text", null);
+    mockMvc
+        .perform(index(request))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.errors[0].field").value("id"))
+        .andExpect(jsonPath("$.errors[0].limit").value("search.limits.max-id-length"))
+        .andExpect(jsonPath("$.errors[0].max").value(MAX_ID_LENGTH));
+    verifyNoInteractions(indexService);
+  }
+
+  @Test
+  void acceptsMetadataAtLimit() throws Exception {
+    // The map counts 1, the key 1 and the value 9,998: 10,000 in all.
+    mockMvc
+        .perform(index(new IndexRequest("doc", "text", metadata(MAX_METADATA_LENGTH - 2))))
+        .andExpect(status().isOk());
+  }
+
+  @Test
+  void rejectsMetadataOverLimit() throws Exception {
+    mockMvc
+        .perform(index(new IndexRequest("doc", "text", metadata(MAX_METADATA_LENGTH - 1))))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.errors[0].field").value("metadata"))
+        .andExpect(jsonPath("$.errors[0].limit").value("search.limits.max-metadata-length"))
+        .andExpect(jsonPath("$.errors[0].max").value(MAX_METADATA_LENGTH));
+    verifyNoInteractions(indexService);
+  }
+
+  @Test
+  void rejectsBatchDocumentWithOversizedIdOrMetadata() throws Exception {
+    List<IndexRequest> documents =
+        List.of(
+            new IndexRequest("i".repeat(MAX_ID_LENGTH + 1), "text", null),
+            new IndexRequest("doc", "text", metadata(MAX_METADATA_LENGTH)));
+    mockMvc
+        .perform(batch(documents))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.errors.length()").value(2));
+    verifyNoInteractions(indexService);
+  }
+
+  @Test
+  void rejectsNullDocuments() throws Exception {
+    mockMvc
+        .perform(
+            post("/api/v1/index/{collection}/batch", "books")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"documents\":null}"))
+        .andExpect(status().isBadRequest())
+        .andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON))
+        .andExpect(jsonPath("$.title").value("Invalid request"))
+        .andExpect(jsonPath("$.errors[0].field").value("documents"));
+    verifyNoInteractions(indexService);
+  }
+
+  private static Map<String, Object> metadata(int valueLength) {
+    return Map.of("k", "v".repeat(valueLength));
   }
 
   private static IndexRequest document(int length) {

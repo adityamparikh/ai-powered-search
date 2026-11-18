@@ -85,6 +85,14 @@ class SearchControllerLimitsTest {
     }
 
     @Test
+    void semanticSearchAcceptsQueryAtLimit() throws Exception {
+      mockMvc
+          .perform(
+              get("/api/v1/search/books/semantic").param("query", "q".repeat(MAX_QUERY_LENGTH)))
+          .andExpect(status().isOk());
+    }
+
+    @Test
     void semanticSearchRejectsQueryOverLimit() throws Exception {
       mockMvc
           .perform(
@@ -95,6 +103,13 @@ class SearchControllerLimitsTest {
     }
 
     @Test
+    void hybridSearchAcceptsQueryAtLimit() throws Exception {
+      mockMvc
+          .perform(get("/api/v1/search/books/hybrid").param("query", "q".repeat(MAX_QUERY_LENGTH)))
+          .andExpect(status().isOk());
+    }
+
+    @Test
     void hybridSearchRejectsQueryOverLimit() throws Exception {
       mockMvc
           .perform(
@@ -102,6 +117,18 @@ class SearchControllerLimitsTest {
           .andExpect(status().isBadRequest())
           .andExpect(jsonPath("$.errors[0].limit").value("search.limits.max-query-length"));
       verifyNoInteractions(searchService);
+    }
+
+    @Test
+    void countsCodePointsNotUtf16Units() throws Exception {
+      // An emoji is two UTF-16 units but one code point, so 1000 of them are at the limit.
+      String emoji = "\uD83D\uDE00";
+      mockMvc
+          .perform(get("/api/v1/search/books").param("query", emoji.repeat(MAX_QUERY_LENGTH)))
+          .andExpect(status().isOk());
+      mockMvc
+          .perform(get("/api/v1/search/books").param("query", emoji.repeat(MAX_QUERY_LENGTH + 1)))
+          .andExpect(status().isBadRequest());
     }
   }
 
@@ -203,10 +230,67 @@ class SearchControllerLimitsTest {
       verifyNoInteractions(searchService);
     }
 
+    @Test
+    void askRejectsBlankQuestion() throws Exception {
+      mockMvc
+          .perform(ask(new AskRequest("   ", "c-1")))
+          .andExpect(status().isBadRequest())
+          .andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON))
+          .andExpect(jsonPath("$.title").value("Invalid request"))
+          .andExpect(jsonPath("$.errors[0].field").value("question"))
+          .andExpect(jsonPath("$.errors[0].limit").doesNotExist());
+      verifyNoInteractions(searchService);
+    }
+
+    @Test
+    void askRejectsMissingQuestion() throws Exception {
+      mockMvc
+          .perform(
+              post("/api/v1/search/ask")
+                  .contentType(MediaType.APPLICATION_JSON)
+                  .content("{\"conversationId\":\"c-1\"}"))
+          .andExpect(status().isBadRequest())
+          .andExpect(jsonPath("$.errors[0].field").value("question"));
+      verifyNoInteractions(searchService);
+    }
+
     private org.springframework.test.web.servlet.RequestBuilder ask(AskRequest request) {
       return post("/api/v1/search/ask")
           .contentType(MediaType.APPLICATION_JSON)
           .content(objectMapper.writeValueAsString(request));
+    }
+  }
+
+  @Nested
+  class StandardErrors {
+
+    @Test
+    void malformedKGetsProblemDetails() throws Exception {
+      mockMvc
+          .perform(get("/api/v1/search/books/hybrid").param("query", "java").param("k", "abc"))
+          .andExpect(status().isBadRequest())
+          .andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON))
+          .andExpect(jsonPath("$.status").value(400))
+          .andExpect(jsonPath("$.instance").value("/api/v1/search/books/hybrid"));
+      verifyNoInteractions(searchService);
+    }
+
+    @Test
+    void unsupportedApiVersionStillGets400WithProblemDetails() throws Exception {
+      mockMvc
+          .perform(get("/api/v9/search/books").param("query", "java"))
+          .andExpect(status().isBadRequest())
+          .andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON));
+      verifyNoInteractions(searchService);
+    }
+
+    @Test
+    void missingQueryGetsProblemDetails() throws Exception {
+      mockMvc
+          .perform(get("/api/v1/search/books"))
+          .andExpect(status().isBadRequest())
+          .andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON))
+          .andExpect(jsonPath("$.status").value(400));
     }
   }
 }

@@ -1,5 +1,6 @@
 package dev.aparikh.aipoweredsearch.search;
 
+import dev.aparikh.aipoweredsearch.limits.InputLimits;
 import dev.aparikh.aipoweredsearch.search.model.AskRequest;
 import dev.aparikh.aipoweredsearch.search.model.AskResponse;
 import dev.aparikh.aipoweredsearch.search.model.FieldInfo;
@@ -166,7 +167,7 @@ public class SearchService {
         fieldsCsv);
 
     // Use a higher default topK to improve recall for short/natural queries
-    int topK = (k != null && k > 0) ? k : 50;
+    int topK = (k != null && k > 0) ? k : InputLimits.DEFAULT_SEMANTIC_K;
     double similarityThreshold = (minScore != null) ? minScore : 0.0;
 
     // Build Spring AI SearchRequest - leverages VectorStore's built-in search capabilities
@@ -246,7 +247,7 @@ public class SearchService {
 
     // Step 4: Execute hybrid search using RRF in Solr
     // Repository will handle embedding generation internally
-    int topK = (k != null && k > 0) ? k : 100;
+    int topK = (k != null && k > 0) ? k : InputLimits.DEFAULT_HYBRID_K;
 
     return searchRepository.executeHybridRerankSearch(
         collection, queryGenerationResponse.q(), topK, filterExpression, fieldsCsv, minScore);

@@ -2,7 +2,6 @@ package dev.aparikh.aipoweredsearch.limits;
 
 import jakarta.validation.ConstraintValidator;
 import jakarta.validation.ConstraintValidatorContext;
-import java.util.Collection;
 import java.util.Objects;
 import org.jspecify.annotations.Nullable;
 
@@ -10,7 +9,9 @@ import org.jspecify.annotations.Nullable;
  * Checks a value against the {@link InputLimit} named by {@link WithinLimit}.
  *
  * <p>Spring creates constraint validators through the application context, so the current {@link
- * InputLimits} is injected rather than fixed at compile time.
+ * InputLimits} is injected rather than fixed at compile time. This also means the validator works
+ * only where Spring builds the {@code Validator}; a plain {@code
+ * Validation.buildDefaultValidatorFactory()} cannot instantiate it.
  */
 final class WithinLimitValidator implements ConstraintValidator<WithinLimit, Object> {
 
@@ -32,7 +33,7 @@ final class WithinLimitValidator implements ConstraintValidator<WithinLimit, Obj
       return true;
     }
     InputLimit checked = Objects.requireNonNull(limit, "initialize() was not called");
-    if (measure(value) <= checked.max(limits)) {
+    if (checked.measure(value) <= checked.max(limits)) {
       return true;
     }
     // The template holds only the limit's own text, never the rejected value, so nothing a client
@@ -40,16 +41,5 @@ final class WithinLimitValidator implements ConstraintValidator<WithinLimit, Obj
     context.disableDefaultConstraintViolation();
     context.buildConstraintViolationWithTemplate(checked.describe(limits)).addConstraintViolation();
     return false;
-  }
-
-  private static long measure(Object value) {
-    return switch (value) {
-      case CharSequence text -> text.length();
-      case Collection<?> collection -> collection.size();
-      case Number number -> number.longValue();
-      default ->
-          throw new IllegalArgumentException(
-              "@WithinLimit does not support " + value.getClass().getName());
-    };
   }
 }

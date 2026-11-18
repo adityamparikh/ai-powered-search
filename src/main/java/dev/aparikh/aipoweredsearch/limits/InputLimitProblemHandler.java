@@ -10,29 +10,39 @@ import org.jspecify.annotations.Nullable;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.MessageSourceResolvable;
 import org.springframework.core.MethodParameter;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ProblemDetail;
+import org.springframework.http.ResponseEntity;
 import org.springframework.validation.FieldError;
+import org.springframework.validation.ObjectError;
 import org.springframework.validation.method.ParameterErrors;
 import org.springframework.validation.method.ParameterValidationResult;
 import org.springframework.web.bind.MethodArgumentNotValidException;
-import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.context.request.WebRequest;
 import org.springframework.web.method.annotation.HandlerMethodValidationException;
+import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
 
 /**
- * Turns request validation failures into RFC 9457 problem details (400).
+ * Renders Spring MVC's standard exceptions as RFC 9457 problem details, and request validation
+ * failures as a 400 that names each violated {@link InputLimit}.
+ *
+ * <p>Extending {@link ResponseEntityExceptionHandler} gives every standard MVC error (a missing
+ * parameter, {@code k=abc}, an unsupported API version) a problem-details body instead of an empty
+ * one; the status codes are unchanged.
  *
  * <p>A {@code @RequestParam} constraint fails through Spring MVC's method validation ({@link
  * HandlerMethodValidationException}); a {@code @Valid} request body fails with {@link
  * MethodArgumentNotValidException}. Both are reported the same way: one entry per violation under
  * {@code errors}, and, when the violation is an {@link InputLimit}, the property that sets it and
- * its current maximum.
+ * its current maximum. The {@code type} member is omitted, which RFC 9457 reads as {@code
+ * about:blank}.
  *
  * <pre>{@code
  * {
- *   "type": "about:blank",
  *   "title": "Input limit exceeded",
  *   "status": 400,
  *   "detail": "query must be at most 1000 characters (search.limits.max-query-length)",
@@ -49,7 +59,7 @@ import org.springframework.web.method.annotation.HandlerMethodValidationExceptio
  */
 @RestControllerAdvice
 @EnableConfigurationProperties(InputLimits.class)
-class InputLimitProblemHandler {
+class InputLimitProblemHandler extends ResponseEntityExceptionHandler {
 
   private final InputLimits limits;
 
@@ -57,12 +67,20 @@ class InputLimitProblemHandler {
     this.limits = limits;
   }
 
-  @ExceptionHandler(HandlerMethodValidationException.class)
-  ProblemDetail handleMethodValidation(HandlerMethodValidationException ex) {
+  @Override
+  protected @Nullable ResponseEntity<Object> handleHandlerMethodValidationException(
+      HandlerMethodValidationException ex,
+      HttpHeaders headers,
+      HttpStatusCode status,
+      WebRequest request) {
+    if (ex.isForReturnValue()) {
+      // A constraint on what the controller returned is a server bug, not bad input (500).
+      return super.handleHandlerMethodValidationException(ex, headers, status, request);
+    }
     List<Violation> violations = new ArrayList<>();
     for (ParameterValidationResult result : ex.getParameterValidationResults()) {
       if (result instanceof ParameterErrors errors) {
-        errors.getFieldErrors().forEach(error -> violations.add(fromFieldError(error)));
+        errors.getAllErrors().forEach(error -> violations.add(fromObjectError(error)));
         continue;
       }
       String name = parameterName(result.getMethodParameter());
@@ -70,19 +88,29 @@ class InputLimitProblemHandler {
         violations.add(new Violation(name, message(error), limitOf(unwrap(result, error))));
       }
     }
-    return problem(violations);
+    return handleExceptionInternal(
+        ex, problem(violations), headers, HttpStatus.BAD_REQUEST, request);
   }
 
-  @ExceptionHandler(MethodArgumentNotValidException.class)
-  ProblemDetail handleBodyValidation(MethodArgumentNotValidException ex) {
-    return problem(
-        ex.getBindingResult().getFieldErrors().stream().map(this::fromFieldError).toList());
+  @Override
+  protected @Nullable ResponseEntity<Object> handleMethodArgumentNotValid(
+      MethodArgumentNotValidException ex,
+      HttpHeaders headers,
+      HttpStatusCode status,
+      WebRequest request) {
+    List<Violation> violations =
+        ex.getBindingResult().getAllErrors().stream().map(this::fromObjectError).toList();
+    return handleExceptionInternal(
+        ex, problem(violations), headers, HttpStatus.BAD_REQUEST, request);
   }
 
-  private Violation fromFieldError(FieldError error) {
+  /** A field error is named by its path; a global (class-level) one by the object's name. */
+  private Violation fromObjectError(ObjectError error) {
     ConstraintViolation<?> violation =
         error.contains(ConstraintViolation.class) ? error.unwrap(ConstraintViolation.class) : null;
-    return new Violation(error.getField(), message(error), limitOf(violation));
+    String field =
+        error instanceof FieldError fieldError ? fieldError.getField() : error.getObjectName();
+    return new Violation(field, message(error), limitOf(violation));
   }
 
   private ProblemDetail problem(List<Violation> violations) {

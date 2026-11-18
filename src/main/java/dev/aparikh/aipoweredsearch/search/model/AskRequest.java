@@ -2,6 +2,7 @@ package dev.aparikh.aipoweredsearch.search.model;
 
 import dev.aparikh.aipoweredsearch.limits.InputLimit;
 import dev.aparikh.aipoweredsearch.limits.WithinLimit;
+import jakarta.validation.constraints.NotBlank;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -13,7 +14,8 @@ import org.jspecify.annotations.Nullable;
  *     means use default
  */
 public record AskRequest(
-    @WithinLimit(InputLimit.QUESTION_LENGTH) String question, @Nullable String conversationId) {
+    @NotBlank @WithinLimit(InputLimit.QUESTION_LENGTH) String question,
+    @Nullable String conversationId) {
   /**
    * Creates an AskRequest with default conversation ID.
    *

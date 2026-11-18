@@ -7,6 +7,7 @@ import static java.lang.annotation.RetentionPolicy.RUNTIME;
 import jakarta.validation.Constraint;
 import jakarta.validation.Payload;
 import java.lang.annotation.Documented;
+import java.lang.annotation.Repeatable;
 import java.lang.annotation.Retention;
 import java.lang.annotation.Target;
 
@@ -16,8 +17,9 @@ import java.lang.annotation.Target;
  * <p>{@code @Max} and {@code @Size} take compile-time constants, so they cannot read {@code
  * search.limits.*}. This constraint names the limit instead, and {@link WithinLimitValidator} reads
  * its current value from {@link InputLimits}. What is measured depends on the type: the length of a
- * {@link CharSequence}, the size of a {@link java.util.Collection}, or the value of a {@link
- * Number}. {@code null} is valid; whether a value is required is a separate concern.
+ * {@link CharSequence} in code points, the size of a {@link java.util.Collection}, the value of a
+ * {@link Number}, and so on; see {@link InputLimit}. {@code null} is valid; whether a value is
+ * required is a separate concern. It is repeatable, so one element can carry several limits.
  *
  * <p>On a controller {@code @RequestParam}, Spring MVC's built-in method validation applies it; on
  * a request-body record component, {@code @Valid} on the body does.
@@ -26,6 +28,7 @@ import java.lang.annotation.Target;
 @Target({FIELD, PARAMETER})
 @Retention(RUNTIME)
 @Constraint(validatedBy = WithinLimitValidator.class)
+@Repeatable(WithinLimit.List.class)
 public @interface WithinLimit {
 
   /**
@@ -55,4 +58,18 @@ public @interface WithinLimit {
    * @return the payload
    */
   Class<? extends Payload>[] payload() default {};
+
+  /** Several {@link WithinLimit} constraints on the same element. */
+  @Documented
+  @Target({FIELD, PARAMETER})
+  @Retention(RUNTIME)
+  @interface List {
+
+    /**
+     * The constraints.
+     *
+     * @return the constraints
+     */
+    WithinLimit[] value();
+  }
 }

@@ -270,11 +270,22 @@ Every request is bounded before it reaches Claude, OpenAI or Solr. The limits ar
 
 | Property | Default | Bounds |
 |---|---|---|
-| `search.limits.max-k` | 200 | `k` on semantic and hybrid search (hybrid fetches `2k` per leg). Must be at least 100, the hybrid default |
-| `search.limits.max-query-length` | 1000 | Search `query`, in characters (keyword, semantic, hybrid) |
-| `search.limits.max-question-length` | 4000 | `/ask` `question`, in characters |
+| `search.limits.max-k` | 200 | `k` on semantic and hybrid search (hybrid fetches `2k` per leg). Must be at least `InputLimits.DEFAULT_HYBRID_K` (100) |
+| `search.limits.max-query-length` | 1000 | Search `query` (keyword, semantic, hybrid) |
+| `search.limits.max-question-length` | 4000 | `/ask` `question` |
 | `search.limits.max-batch-size` | 100 | Documents in one `POST /api/v1/index/{collection}/batch` |
-| `search.limits.max-document-length` | 30000 | `content` of each indexed document, single or batch, in characters |
+| `search.limits.max-batch-content-length` | 150000 | `content` summed over a batch |
+| `search.limits.max-document-length` | 30000 | `content` of each indexed document, single or batch |
+| `search.limits.max-id-length` | 512 | `id` of each indexed document |
+| `search.limits.max-metadata-length` | 10000 | `metadata` of each indexed document: code points of all keys and values, nested included, each entry, element and container counting at least 1 |
+
+- Lengths are **Unicode code points**, not UTF-16 units or tokens.
+- **Why a batch content limit:** `SolrVectorStore.add` embeds the whole batch in **one** OpenAI
+  request, and OpenAI caps a request at 300,000 tokens across all inputs. 150,000 code points
+  leaves room for up to 2 tokens per code point (code, non-Latin scripts); English is about 4 code
+  points per token. Each document is also one embedding input, capped at 8,191 tokens:
+  `max-document-length` (30,000) is calibrated for English, and denser text can exceed it.
+  Splitting documents and batching embedding calls by token count is issue #96 (chunking).
 
 - A request over a limit gets **400** with an RFC 9457 problem-details body
   (`application/problem+json`). Each entry under `errors` names the field, the limit's property and
@@ -284,7 +295,13 @@ Every request is bounded before it reaches Claude, OpenAI or Solr. The limits ar
   `@Max`/`@Size` only take compile-time constants. `InputLimitProblemHandler` maps the failures.
 - Don't put `@Validated` on a controller: that switches to AOP method validation, which throws
   `ConstraintViolationException` (a 500) instead of Spring MVC's `HandlerMethodValidationException`.
-- `k <= 0` is not rejected; it still falls back to the default (50 semantic, 100 hybrid).
+- `k <= 0` is not rejected; it still falls back to the default (`InputLimits.DEFAULT_SEMANTIC_K`
+  50, `DEFAULT_HYBRID_K` 100). `SearchService` uses those constants, and the `max-k` floor is derived
+  from them, so a default can never exceed the cap.
+- `/ask` also requires a non-blank `question` and a batch a non-null `documents` (400).
+- `InputLimitProblemHandler` extends `ResponseEntityExceptionHandler`, so every standard MVC error
+  (`k=abc`, a missing parameter, an unsupported API version) is problem details too, with the same
+  status as before.
 - `search.rag.hybrid.top-k` (default 20, also the ragEval depth) is server configuration, not
   request input, so it is not checked against `max-k`; it is well within it.
 
