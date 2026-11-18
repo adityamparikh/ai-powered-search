@@ -1,5 +1,7 @@
 package dev.aparikh.aipoweredsearch.search;
 
+import dev.aparikh.aipoweredsearch.limits.InputLimit;
+import dev.aparikh.aipoweredsearch.limits.WithinLimit;
 import dev.aparikh.aipoweredsearch.search.model.AskRequest;
 import dev.aparikh.aipoweredsearch.search.model.AskResponse;
 import dev.aparikh.aipoweredsearch.search.model.SearchResponse;
@@ -10,6 +12,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import org.jspecify.annotations.Nullable;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -92,7 +95,9 @@ class SearchController {
   public SearchResponse search(
       @Parameter(description = "Collection name to search in", required = true) @PathVariable
           String collection,
-      @Parameter(description = "Search query string", required = true) @RequestParam("query")
+      @Parameter(description = "Search query string", required = true)
+          @RequestParam("query")
+          @WithinLimit(InputLimit.QUERY_LENGTH)
           String query) {
     return searchService.search(collection, query);
   }
@@ -150,12 +155,14 @@ class SearchController {
               required = true,
               example = "machine learning frameworks for Java")
           @RequestParam("query")
+          @WithinLimit(InputLimit.QUERY_LENGTH)
           String query,
       @Parameter(
               description = "Number of results to return (topK)",
               required = false,
               example = "10")
           @RequestParam(name = "k", required = false)
+          @WithinLimit(InputLimit.K)
           @Nullable Integer k,
       @Parameter(
               description = "Minimum similarity score threshold [0..1]",
@@ -249,12 +256,14 @@ class SearchController {
               required = true,
               example = "comfortable running shoes")
           @RequestParam(name = "query")
+          @WithinLimit(InputLimit.QUERY_LENGTH)
           String query,
       @Parameter(
               description = "Number of results to return from vector search (topK)",
               required = false,
               example = "100")
           @RequestParam(name = "k", required = false)
+          @WithinLimit(InputLimit.K)
           @Nullable Integer k,
       @Parameter(
               description =
@@ -317,6 +326,7 @@ class SearchController {
   @PostMapping("/ask")
   public AskResponse ask(
       @Parameter(description = "Question request with optional conversation ID", required = true)
+          @Valid
           @RequestBody
           AskRequest askRequest) {
     return searchService.ask(askRequest);

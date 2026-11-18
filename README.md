@@ -611,6 +611,14 @@ spring.datasource.password=${POSTGRES_PASSWORD:postgres}
 
 # Virtual Threads (Java 21)
 spring.threads.virtual.enabled=true
+
+# Input limits (defaults shown): a request over one gets 400 with a problem-details body
+# naming the limit. Lengths are in characters; max-k must be at least 100.
+search.limits.max-k=200
+search.limits.max-query-length=1000
+search.limits.max-question-length=4000
+search.limits.max-batch-size=100
+search.limits.max-document-length=30000
 ```
 
 ### Metadata Field Types

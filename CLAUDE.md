@@ -263,6 +263,31 @@ The repository includes several helper scripts for common tasks:
 - `POSTGRES_USER`: PostgreSQL username (defaults to 'postgres')
 - `POSTGRES_PASSWORD`: PostgreSQL password (defaults to 'postgres')
 
+### Input Limits
+
+Every request is bounded before it reaches Claude, OpenAI or Solr. The limits are
+`search.limits.*` properties (`InputLimits`, in `dev.aparikh.aipoweredsearch.limits`):
+
+| Property | Default | Bounds |
+|---|---|---|
+| `search.limits.max-k` | 200 | `k` on semantic and hybrid search (hybrid fetches `2k` per leg). Must be at least 100, the hybrid default |
+| `search.limits.max-query-length` | 1000 | Search `query`, in characters (keyword, semantic, hybrid) |
+| `search.limits.max-question-length` | 4000 | `/ask` `question`, in characters |
+| `search.limits.max-batch-size` | 100 | Documents in one `POST /api/v1/index/{collection}/batch` |
+| `search.limits.max-document-length` | 30000 | `content` of each indexed document, single or batch, in characters |
+
+- A request over a limit gets **400** with an RFC 9457 problem-details body
+  (`application/problem+json`). Each entry under `errors` names the field, the limit's property and
+  its current `max`.
+- Enforced with Bean Validation: `@WithinLimit(InputLimit.X)` on a `@RequestParam` or request-body
+  record component. `WithinLimitValidator` reads the current value from `InputLimits`, because
+  `@Max`/`@Size` only take compile-time constants. `InputLimitProblemHandler` maps the failures.
+- Don't put `@Validated` on a controller: that switches to AOP method validation, which throws
+  `ConstraintViolationException` (a 500) instead of Spring MVC's `HandlerMethodValidationException`.
+- `k <= 0` is not rejected; it still falls back to the default (50 semantic, 100 hybrid).
+- `search.rag.hybrid.top-k` (default 20, also the ragEval depth) is server configuration, not
+  request input, so it is not checked against `max-k`; it is well within it.
+
 ### External Services
 - **Solr**: Expected at `http://localhost:8983/solr`
   - Must be Solr 10.1+ or 9.11+ (combined query / built-in RRF) with dense vector fields.
@@ -439,7 +464,7 @@ Documents can be indexed with automatic embedding generation via REST endpoints:
 - Fallback on error: if the combined request fails (e.g. no `/hybrid` handler → 404) or the query
   cannot be embedded, degrades to keyword-only → vector-only. An empty fused result is returned as is
 - Parameters:
-    - `k`: topK results (defaults to 100)
+    - `k`: topK results (defaults to 100, at most `search.limits.max-k`)
     - `minScore`: minimum cosine similarity [0..1] for the vector leg (`vectorSimilarity minReturn`);
       never applied to the keyword leg or the fused order
     - `fields`: comma-separated list of fields to return
