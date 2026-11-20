@@ -26,6 +26,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  *   <li>Grafana UI is accessible on its mapped port
  *   <li>OTLP HTTP endpoint is accepting requests
  *   <li>Prometheus metrics endpoint is accessible
+ *   <li>The alert rules in {@code grafana/provisioning/alerting/} are provisioned
  *   <li>Spring Boot's {@code @ServiceConnection} auto-configures OTLP endpoints
  * </ul>
  */
@@ -93,6 +94,28 @@ class GrafanaLgtmIntegrationTest {
     HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
 
     assertThat(response.statusCode()).isEqualTo(200);
+  }
+
+  @Test
+  void theCommittedAlertRulesAreProvisioned() throws Exception {
+    // The rules file is copied in exactly where docker-compose.yml mounts it. A malformed file,
+    // or one pointing at a data source the image does not have, is rejected by Grafana and the
+    // rules are missing here.
+    HttpRequest request =
+        HttpRequest.newBuilder()
+            .uri(
+                URI.create(
+                    lgtmStackContainer.getGrafanaHttpUrl() + "/api/v1/provisioning/alert-rules"))
+            .GET()
+            .build();
+
+    HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+
+    assertThat(response.statusCode()).isEqualTo(200);
+    assertThat(response.body())
+        .contains("\"uid\":\"ai-search-http-5xx-ratio\"")
+        .contains("\"uid\":\"ai-search-ask-p95-latency\"")
+        .contains("\"datasourceUid\":\"prometheus\"");
   }
 
   @Test

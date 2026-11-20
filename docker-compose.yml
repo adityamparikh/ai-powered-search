@@ -61,6 +61,7 @@ services:
       - "9090:9090"   # Prometheus
     volumes:
       - ./grafana/provisioning/dashboards:/otel-lgtm/grafana/conf/provisioning/dashboards
+      - ./grafana/provisioning/alerting/ai-powered-search.yaml:/otel-lgtm/grafana/conf/provisioning/alerting/ai-powered-search.yaml:ro
       - ./grafana/dashboards:/grafana-dashboards
     environment:
       - GF_SECURITY_ADMIN_USER=admin

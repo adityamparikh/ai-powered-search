@@ -52,6 +52,12 @@ Client
 
 ## Prerequisites
 
+> **Not needed with `docker compose up -d`.** The application already exports metrics, traces and
+> logs over OTLP to the `lgtm` service (`management.otlp.*` in `application.properties`), and the
+> dashboards and the alert rules in `provisioning/alerting/` are provisioned automatically. Steps
+> 1-3 below describe an alternative Prometheus-scrape setup that this repo does not use. How to
+> query Prometheus, Loki and Tempo from a shell is in [docs/observability.md](../docs/observability.md).
+
 ### 1. Add Prometheus Micrometer Registry
 
 Your `build.gradle.kts` already includes `spring-boot-starter-actuator`. Add the Prometheus registry:

@@ -105,6 +105,8 @@ tasks.withType<Test> {
 // BilledTestsAreOptInTest fails the build if a key-gated test class has neither tag.
 tasks.test {
     useJUnitPlatform { excludeTags("rag-eval", "live") }
+    // GrafanaLgtmIntegrationTest provisions these files into a container: re-run it when they change.
+    inputs.dir("grafana/provisioning").withPropertyName("grafanaProvisioning").withPathSensitivity(PathSensitivity.RELATIVE)
     finalizedBy(tasks.jacocoTestReport)
 }
 
