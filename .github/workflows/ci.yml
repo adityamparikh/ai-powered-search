@@ -1,0 +1,53 @@
+name: CI
+
+# The full gauntlet on every pull request: `./gradlew verify` runs `build` (spotlessCheck,
+# javac with Error Prone + NullAway, every keyless test, JaCoCo, the jar) plus `checkLicense`.
+# No model API keys are set: tests that call paid APIs are tagged `live` or `rag-eval`, which
+# `test` excludes, and the keyless tests mock the models.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Build and verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 25
+      - uses: gradle/actions/setup-gradle@v5
+      - name: ./gradlew verify
+        run: ./gradlew verify
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: |
+            build/reports/tests/
+            build/test-results/
+            build/reports/dependency-license/
+          retention-days: 7
+
+  # Dependabot reads build.gradle.kts but cannot resolve BOM-managed versions, so most runtime
+  # dependencies were invisible to it. Submitting the resolved Gradle graph from main fixes that.
+  dependency-submission:
+    name: Submit dependency graph
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 25
+      - uses: gradle/actions/dependency-submission@v5
