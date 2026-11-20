@@ -6,6 +6,7 @@ import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
+import dev.aparikh.aipoweredsearch.LiveModelTest;
 import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -56,6 +57,7 @@ import org.springframework.context.annotation.Import;
       "spring.ai.model.chat=anthropic"
     })
 @Import({RestClientConfig.class, AiConfig.class, PostgresTestConfiguration.class})
+@LiveModelTest
 @EnabledIfEnvironmentVariables({
   @EnabledIfEnvironmentVariable(named = "ANTHROPIC_API_KEY", matches = ".+"),
   @EnabledIfEnvironmentVariable(named = "OPENAI_API_KEY", matches = ".+")

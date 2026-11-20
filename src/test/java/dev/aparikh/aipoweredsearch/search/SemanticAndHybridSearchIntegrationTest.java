@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import dev.aparikh.aipoweredsearch.LiveModelTest;
 import dev.aparikh.aipoweredsearch.config.PostgresTestConfiguration;
 import dev.aparikh.aipoweredsearch.config.SolrTestConfiguration;
 import dev.aparikh.aipoweredsearch.config.SolrTestContainers;
@@ -54,6 +55,7 @@ import tools.jackson.databind.ObjectMapper;
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @Testcontainers
 @Import({PostgresTestConfiguration.class, SolrTestConfiguration.class})
+@LiveModelTest
 @EnabledIfEnvironmentVariables({
   @EnabledIfEnvironmentVariable(named = "ANTHROPIC_API_KEY", matches = ".*"),
   @EnabledIfEnvironmentVariable(named = "OPENAI_API_KEY", matches = ".*")

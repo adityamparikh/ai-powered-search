@@ -2,6 +2,7 @@ package dev.aparikh.aipoweredsearch.search;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import dev.aparikh.aipoweredsearch.LiveModelTest;
 import dev.aparikh.aipoweredsearch.config.PostgresTestConfiguration;
 import dev.aparikh.aipoweredsearch.config.SolrTestConfiguration;
 import dev.aparikh.aipoweredsearch.search.model.AskRequest;
@@ -34,6 +35,7 @@ import org.springframework.context.annotation.Primary;
  * keep {@code top-k} of them with the answering passage first. Needs {@code TYPESAFE_API_KEY}; the
  * chat model is a stub, so only the Jev calls are billed.
  */
+@LiveModelTest
 @EnabledIfEnvironmentVariable(named = "TYPESAFE_API_KEY", matches = ".+")
 @SpringBootTest(
     properties = {
