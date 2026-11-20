@@ -6,7 +6,7 @@ val typesafeVersion = "0.3.0"
 
 plugins {
     java
-    id("org.springframework.boot") version "4.1.1"
+    id("org.springframework.boot") version "4.2.0"
     id("io.spring.dependency-management") version "1.1.7"
     id("org.sonarqube") version "7.5.0.8588"
     jacoco
@@ -27,7 +27,7 @@ repositories {
     mavenCentral()
 }
 
-extra["springAiVersion"] = "2.0.2"
+extra["springAiVersion"] = "2.1.0"
 
 dependencies {
     implementation("org.springframework.boot:spring-boot-starter-actuator")
