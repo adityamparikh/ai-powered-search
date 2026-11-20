@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is an AI-powered search application built with Spring Boot 4.1.1 and Java 25. The application integrates Apache Solr for both traditional keyword search and semantic vector search, with Anthropic Claude for intelligent query generation and OpenAI for vector embeddings.
+This is an AI-powered search application built with Spring Boot 4.2.0 and Java 25. The application integrates Apache Solr for both traditional keyword search and semantic vector search, with Anthropic Claude for intelligent query generation and OpenAI for vector embeddings.
 
 ### Core Architecture
 
@@ -47,7 +47,7 @@ The application follows a **package-by-feature** structure organized around main
 
 ### Key Dependencies
 
-- **Spring Boot 4.1.1** with Spring AI 2.0.2
+- **Spring Boot 4.2.0** with Spring AI 2.1.0
 - **Anthropic Claude AI** (claude-sonnet-5-5) for query generation and chat
 - **OpenAI** (text-embedding-3-small) for vector embeddings (1536 dimensions)
 - **SolrJ 10.1.0** client against **Apache Solr 10.1.0** server, with dense vector support and
@@ -338,7 +338,7 @@ Controllers declare the version segment as a URI variable and the version as a m
 
 The `SolrVectorStore` is a custom implementation that:
 
-- Extends `AbstractObservationVectorStore` from Spring AI 2.0.2
+- Extends `AbstractObservationVectorStore` from Spring AI 2.1.0
 - Implements the `VectorStore` interface for document storage and similarity search
 - Uses Solr's `DenseVectorField` type for KNN (K-Nearest Neighbors) search with HNSW algorithm
 - Supports cosine similarity metric for vector comparison
