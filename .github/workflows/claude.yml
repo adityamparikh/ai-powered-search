@@ -49,12 +49,14 @@ jobs:
 
           # Custom context for Spring Boot application
           prompt: |
-            You are working on a Spring Boot 3.5.7 application with Java 21.
-            This is an AI-powered search application using Apache Solr for search,
-            Anthropic Claude for AI, and OpenAI for embeddings.
-            The project uses Gradle for build management.
-            When making changes, ensure Spring Boot best practices and
-            maintain the package-by-feature architecture.
+            You are working on ai-powered-search: a Spring Boot 4.1 / Java 25 application
+            (Spring AI 2.0, SolrJ 10) that does keyword, vector and hybrid search over Apache
+            Solr, with Anthropic Claude for query generation and answers and OpenAI for embeddings.
+            Read CLAUDE.md first: it lists the build commands, the repository layout, the rules
+            and traps, and the operations that need a human.
+            - Prove your work with ./gradlew verify before you finish.
+            - Never push to main. Commit to the branch this action created and open a pull request.
+            - Never run ./gradlew ragEval or ./gradlew liveTest: they make billed model calls.
 
           # Claude args configured for Java/Spring Boot development
           claude_args: |
