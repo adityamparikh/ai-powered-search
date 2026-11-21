@@ -177,7 +177,8 @@ is what `anthropics/claude-code-action` uses to obtain its GitHub App token.
 `.claude/skills/` holds the repeated jobs: `work-issue` (an issue or epic sub-issue end to end),
 `run-rag-eval` (measure a RAG change against the baseline; billed, ask first), `upgrade-dependency`
 (bump a version, check licences and the advisor contract tests), `add-rag-stage` (a new
-flag-guarded, fail-safe RAG stage).
+flag-guarded, fail-safe RAG stage), `fix-sonar-findings` (list Sonar issues through its web API and
+fix them without changing behaviour; needs `SONAR_HOST_URL` and `SONAR_TOKEN`).
 
 ## Where to read more
 
