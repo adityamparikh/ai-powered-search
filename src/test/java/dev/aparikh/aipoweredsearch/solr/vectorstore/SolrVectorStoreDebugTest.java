@@ -2,6 +2,7 @@ package dev.aparikh.aipoweredsearch.solr.vectorstore;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import dev.aparikh.aipoweredsearch.LiveModelTest;
 import dev.aparikh.aipoweredsearch.config.PostgresTestConfiguration;
 import dev.aparikh.aipoweredsearch.config.RestClientConfig;
 import dev.aparikh.aipoweredsearch.config.SolrConfig;
@@ -38,6 +39,7 @@ import org.testcontainers.solr.SolrContainer;
   SolrConfig.class,
   SolrTestConfiguration.class
 })
+@LiveModelTest
 @EnabledIfEnvironmentVariable(named = "OPENAI_API_KEY", matches = ".+")
 class SolrVectorStoreDebugTest {
 

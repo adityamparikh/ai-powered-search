@@ -1,996 +1,198 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for coding agents working in this repository. This file is a routing table: the rules,
+the commands and the map are here; the reference material is in the files listed under "Where to
+read more", loaded only when the task needs it.
 
-## Project Overview
+**ai-powered-search** is a Spring Boot 4.1.1 / Java 25 application (Spring AI 2.0.2, SolrJ 10.1.0)
+that does keyword, vector and hybrid search over Apache Solr 10.1 (or 9.11) and answers questions
+with RAG (`POST /api/v1/search/ask`). Anthropic Claude generates Solr queries, rewrites follow-ups,
+reranks and answers; OpenAI `text-embedding-3-small` (1536 dimensions) embeds; PostgreSQL 16 holds
+chat memory; an optional TypeSafe "decisions" provider screens passages.
 
-This is an AI-powered search application built with Spring Boot 4.1.1 and Java 25. The application integrates Apache Solr for both traditional keyword search and semantic vector search, with Anthropic Claude for intelligent query generation and OpenAI for vector embeddings.
+## Rules and traps
 
-### Core Architecture
+Read these before changing code. Each one has broken something here before, or would.
 
-Mermaid diagrams of the components and of the hybrid search, `/ask` and indexing flows are in
-[docs/architecture.md](docs/architecture.md). Update them when a request path changes.
+- **Keep the pass-through `DocumentJoiner`** in `AiConfig.ragChatClient`. Spring AI's default
+  `ConcatenationDocumentJoiner` re-sorts by score and undoes Solr's RRF order (hybrid rows carry
+  no fused score).
+- **Fusion happens in Solr, not in Java.** Hybrid search is one request to the collection's
+  `/hybrid` handler (`solr.CombinedQuerySearchHandler`). Do not reintroduce an application-side
+  merger; `RrfMerger` was removed on purpose.
+- **Use the project configset (`solr-config/conf`)** for any collection a test or the eval harness
+  searches by keyword. In Solr's `_default`, `_text_` is never populated, so the BM25 leg silently
+  returns nothing. Tests on `_default` must call `SolrTestContainers.registerHybridHandler(...)`.
+- **Start Solr in tests with `SolrTestContainers.newSolrContainer()`.** Testcontainers'
+  `SolrContainer` 2.0.5 cannot start Solr 10.
+- **`searchChatClient` is stateless.** Never add a memory advisor to it; only `ragChatClient`
+  keeps memory, keyed by the request's `conversationId`.
+- **Advisors run by `getOrder()`, not list position.** `RagAdvisorOrderingIT` pins memory before
+  retrieval; keep it green.
+- **Post-processors must judge the rewrite.** Wrap any new RAG post-processor with
+  `AiConfig.judgedAgainstTheRewrite(...)`; `RetrievalAugmentationAdvisor` hands them the original
+  follow-up.
+- **New RAG stages ship behind a property that defaults to off**, and fail safe: a timeout, parse
+  error or outage degrades to the previous behaviour with a `WARN`, never a 5xx.
+- **`TYPESAFE_API_KEY` defaults to the string `false`**, not empty
+  (`spring.ai.typesafe.api-key=${TYPESAFE_API_KEY:false}`). An empty key fails startup.
+- **Formatting is enforced.** `check` runs `spotlessCheck` (google-java-format over `src/**/*.java`)
+  and fails on unformatted code. Run `./gradlew spotlessApply`; never hand-format or disable it.
+- **NullAway is a compile error** on main sources (JSpecify mode). Use
+  `org.jspecify.annotations.@Nullable`; never suppress it. It is off for test sources.
+- **A test that calls a paid API gets `@LiveModelTest`** as well as its `@EnabledIfEnvironmentVariable`
+  key check. `BilledTestsAreOptInTest` fails the build otherwise.
+- **The configuration class is `AiConfig`** (not `SpringAiConfig`). Path versioning: controllers map
+  `/api/{version}/...` with `version = "v1"`; `ApiVersioningTest` pins it.
+- **Docs move with the code.** Update CLAUDE.md, README and `docs/` (diagrams in
+  `docs/architecture.md`) in the same PR when commands, configuration or a request path change.
 
-The application follows a **package-by-feature** structure organized around main domains:
+## Ask before running
 
-- **Search Domain** (`dev.aparikh.aipoweredsearch.search`):
-  - `SearchController`: REST endpoints for search operations
-  - `SearchService`: Orchestrates traditional, semantic, and hybrid search with AI query generation
-  - `SearchRepository`: Low-level Solr query execution and field introspection
-  - Traditional search: Converts free-text queries into structured Solr queries using Claude AI
-  - Semantic search: Uses vector embeddings (OpenAI) for similarity-based retrieval
-  - Hybrid search: Solr-native RRF (Reciprocal Rank Fusion, Solr 10.1 combined query, 10.1+ or 9.11+) combining keyword and vector signals
+Never do these without the maintainer's explicit go-ahead in this session:
 
-- **Indexing Domain** (`dev.aparikh.aipoweredsearch.indexing`):
-  - `IndexController`: REST endpoints for document indexing
-  - `IndexService`: Manages document indexing with automatic vector embedding generation
-  - Supports both single and batch document indexing
+- `./gradlew ragEval` or `./gradlew liveTest` (they refuse to start without
+  `-PallowBilledCalls=true`; do not add the flag on your own), `./run-vector-tests.sh`, and any
+  other command that sends real requests to Anthropic, OpenAI or TypeSafe, including `bootRun`
+  traffic or `POST /api/v1/index/...` with real keys (indexing embeds every document).
+- `docker compose down -v`, deleting a Solr collection or configset, or dropping/truncating the
+  PostgreSQL chat-memory table: these destroy indexed documents and conversations.
+- `git push` to `main`, force-pushes, merging a PR, or editing GitHub settings, labels or issues.
+  Work on a branch and open a pull request.
+- Commenting `@claude` on an issue or PR, or anything else that triggers the Claude workflows
+  (`.github/workflows/claude*.yml`); each run is billed and `claude.yml` can push commits.
+- Adding a dependency under a licence not in `config/allowed-licenses.json`, or editing that file.
 
-- **Vector Store** (`dev.aparikh.aipoweredsearch.solr.vectorstore`):
-  - `SolrVectorStore`: Custom Spring AI VectorStore implementation for Solr 9.x+
-  - `VectorStoreFactory`: Factory for creating VectorStore instances
-  - Implements dense vector support with HNSW (Hierarchical Navigable Small World) algorithm
-  - Handles automatic embedding generation and vector similarity search
-
-- **RRF Fusion** (Solr, not the application):
-    - Solr's combined query feature (10.1+, backported to 9.11) (`solr.CombinedQuerySearchHandler`, SOLR-17319) fuses
-      the keyword and vector legs server-side, in one request to the `/hybrid` handler
-    - Formula: `score = sum(1 / (k + rank))` with `combiner.rrf.k` (Solr default: 60)
-
-- **Configuration** (`dev.aparikh.aipoweredsearch.config`):
-    - `AiConfig`: Multi-LLM configuration for Anthropic (chat) and OpenAI (embeddings)
-  - `SolrConfig`: Solr client configuration with HttpJdkSolrClient
-    - `PromptCacheMetricsAdvisor`: Logs Anthropic prompt caching metrics
-  - Chat Memory: PostgreSQL-backed conversational context for `/ask`, keyed by the request's `conversationId`
-    ("default" when absent). `searchChatClient` (query generation for keyword and hybrid search) is stateless:
-    it has no memory advisor, so searches never share or leak context
-
-### Key Dependencies
-
-- **Spring Boot 4.1.1** with Spring AI 2.0.2
-- **Anthropic Claude AI** (claude-sonnet-5-5) for query generation and chat
-- **OpenAI** (text-embedding-3-small) for vector embeddings (1536 dimensions)
-- **SolrJ 10.1.0** client against **Apache Solr 10.1.0** server, with dense vector support and
-  built-in RRF hybrid search (combined query)
-- **ZooKeeper 3.9** for SolrCloud coordination
-- **PostgreSQL 16** for chat memory persistence
-- **Testcontainers** for integration testing with Solr, PostgreSQL, and Ollama
-- **SpringDoc OpenAPI** for API documentation
-
-### Schema-Agnostic Design
-
-The hybrid RRF search implementation is **schema-agnostic**, meaning it works with any Solr collection without requiring
-specific field names:
-
-- **Uses `_text_` catch-all field**: Solr's built-in field that aggregates all text content from all text fields
-- **No field assumptions**: Doesn't require specific fields like `title`, `content`, or `category`
-- **Graceful degradation**: Works even if your schema has custom field names
-- **Easy integration**: Drop-in search for any existing Solr collection
-- **Dynamic metadata**: Uses `metadata_*` dynamic fields pattern for flexible document attributes
-
-This makes the search functionality portable across different schemas and use cases. The application discovers available
-fields at runtime and adapts accordingly.
-
-### Advanced Solr Features
-
-The application leverages advanced Apache Solr features for enhanced search quality and user experience:
-
-- **Solr-native RRF (Reciprocal Rank Fusion)**: Balanced fusion of keyword and vector search inside Solr (combined query, Solr 10.1+ or 9.11+)
-- **Highlighting**: Shows users why results matched their query
-- **Faceting**: Filter and aggregate results by category, year, etc.
-- **Spell Checking**: "Did you mean...?" suggestions for misspelled queries
-- **Enhanced Field Boosting**: Title^5, Tags^3, Content^2 with phrase boosting
-- **Synonym Expansion**: Domain-specific synonyms for AI, programming, frameworks, databases, cloud
-
-**See [SOLR_ENHANCEMENTS.md](SOLR_ENHANCEMENTS.md) for detailed documentation.**
-
-## Anthropic Prompt Caching
-
-The application implements Anthropic's prompt caching feature to reduce costs by up to 90% and improve response times by
-up to 85% for subsequent requests with identical prompts.
-
-### Configuration
-
-Prompt caching is configured via application properties and can be controlled with environment variables:
-
-```properties
-# Enable/disable prompt caching (default: true)
-spring.ai.anthropic.prompt-caching.enabled=${ANTHROPIC_PROMPT_CACHING_ENABLED:true}
-# Cache strategy (default: SYSTEM_AND_TOOLS)
-spring.ai.anthropic.prompt-caching.strategy=${ANTHROPIC_PROMPT_CACHING_STRATEGY:SYSTEM_AND_TOOLS}
-```
-
-### Available Cache Strategies
-
-| Strategy                 | Description                        | Best For                                                   |
-|--------------------------|------------------------------------|------------------------------------------------------------|
-| **NONE**                 | Disables caching                   | One-off requests with no repeated content                  |
-| **SYSTEM_ONLY**          | Caches system prompts only         | Stable system prompts with <20 tools                       |
-| **TOOLS_ONLY**           | Caches tool definitions only       | Large tool sets (5000+ tokens) with dynamic system prompts |
-| **SYSTEM_AND_TOOLS**     | Caches both independently          | Applications with 20+ tools (default)                      |
-| **CONVERSATION_HISTORY** | Caches entire conversation history | Multi-turn conversations with ChatClient memory            |
-
-### Cache Metrics Logging
-
-When caching is enabled, the `PromptCacheMetricsAdvisor` automatically logs cache performance metrics:
-
-```log
-[Prompt Caching] Cache HIT - Read: 2048 tokens, Regular input: 256 tokens, Output: 150 tokens
-[Prompt Caching] Cost savings: ~80% (cache reads are 90% cheaper than regular input)
-```
-
-Or on cache miss (first request):
-
-```log
-[Prompt Caching] Cache MISS - Created: 2048 tokens, Regular input: 256 tokens, Output: 150 tokens
-[Prompt Caching] Cache created. Subsequent requests with identical prompts will benefit from ~90% cost reduction
-```
-
-### Implementation Details
-
-- **Location**: `src/main/java/dev/aparikh/aipoweredsearch/config/`
-    - `AiConfig.java`: Configures AnthropicChatOptions with caching
-    - `PromptCacheMetricsAdvisor.java`: Logs cache metrics as a CallAdvisor
-
-- **How it works**:
-    - Cache options are configured when creating ChatClient beans
-    - The advisor intercepts all chat responses and extracts cache metrics from Anthropic API usage data
-    - Metrics include: cache creation tokens, cache read tokens, regular input tokens, and output tokens
-    - Cost savings are calculated based on Anthropic's pricing (cache reads are 90% cheaper)
-
-- **Supported models**: Claude Opus 4, Claude Sonnet 4, Claude Sonnet 3.7, Claude Sonnet 3.5, Claude Haiku 3.5, Claude
-  Haiku 3
-
-- **Token requirements**:
-    - Claude Sonnet 4: 1024+ tokens minimum for caching
-    - Claude Haiku models: 2048+ tokens minimum
-    - Other models: 1024+ tokens minimum
-
-### Disabling Prompt Caching
-
-To disable prompt caching:
+## Commands
 
 ```bash
-# Via environment variable
-export ANTHROPIC_PROMPT_CACHING_ENABLED=false
+./gradlew verify            # THE pre-push command: build + checkLicense (what CI runs)
+./gradlew spotlessApply     # fix formatting; run it before verify/check
+./gradlew build             # compile (Error Prone + NullAway), spotlessCheck, test, JaCoCo, jar
+./gradlew check             # build minus the jar
+./gradlew test              # every keyless test; never calls a paid API, even with keys exported
+./gradlew test --tests "SearchServiceTest"                     # one class
+./gradlew test --tests "dev.aparikh.aipoweredsearch.search.*"  # one package
+./gradlew checkLicense      # dependency licences vs config/allowed-licenses.json (not in check)
+./gradlew test jacocoTestReport   # coverage: build/reports/jacoco/test/html/index.html
+./gradlew bootRun           # needs ANTHROPIC_API_KEY, OPENAI_API_KEY and docker compose services
+./gradlew bootBuildImage    # OCI image
 
-# Or in application.properties
-spring.ai.anthropic.prompt-caching.enabled=false
+# Billed: ask first (see above)
+./gradlew liveTest -PallowBilledCalls=true [--tests ...]   # tests tagged live (@LiveModelTest)
+./gradlew ragEval  -PallowBilledCalls=true [-Drag.eval.*]  # RAG evaluation harness
+
+docker compose up -d        # Solr 10.1 + ZooKeeper, PostgreSQL 16, Grafana LGTM
+docker compose ps; docker compose logs solr
 ```
 
-When disabled, no cache options are set and the advisor will not log cache metrics.
-
-## Development Commands
-
-### Build and Run
-```bash
-./gradlew build                 # Build the project
-./gradlew bootRun              # Run the application
-./gradlew clean build          # Clean build
-./gradlew bootBuildImage       # Build Docker image
-```
-
-### Testing
-```bash
-./gradlew test                                    # Run all tests
-./gradlew check                                  # Run all checks including tests
-./gradlew test --tests "ClassName"              # Run specific test class
-./gradlew test --tests "dev.aparikh.aipoweredsearch.search.*"  # Run all search tests
-./gradlew test --tests "dev.aparikh.aipoweredsearch.indexing.*" # Run all indexing tests
-```
-
-### Test Execution Examples
-```bash
-# Integration tests (require containers)
-./gradlew test --tests "SearchIntegrationTest"
-./gradlew test --tests "IndexIntegrationTest"
-./gradlew test --tests "SolrVectorStoreIT"
-
-# Unit tests (fast, no containers)
-./gradlew test --tests "SearchServiceTest"
-./gradlew test --tests "IndexServiceTest"
-./gradlew test --tests "SearchControllerTest"
-./gradlew test --tests "IndexControllerTest"
-
-# Vector store tests (require OPENAI_API_KEY)
-./gradlew test --tests "SolrVectorStoreIT" --info
-./gradlew test --tests "SolrVectorStoreObservationIT" --info
-
-# Specific search types
-./gradlew test --tests "SemanticAndHybridSearchIntegrationTest"
-./gradlew test --tests "SearchRepositoryIT"
-```
-
-### Code Quality and Coverage
-
-```bash
-# Generate code coverage report
-./gradlew test jacocoTestReport
-open build/reports/jacoco/test/html/index.html
-
-# Run SonarQube analysis (requires running SonarQube server)
-./gradlew sonarqube \
-  -Dsonar.host.url=http://localhost:9000 \
-  -Dsonar.token=your-token
-
-# Dependency licences (Apache 2.0 project; allowed licences in config/allowed-licenses.json)
-./gradlew checkLicense
-./gradlew generateLicenseReport   # build/reports/dependency-license/index.html
-
-# Generate Javadoc
-./gradlew javadoc
-open build/docs/javadoc/index.html
-```
-
-**Quality Metrics Tracked:**
-
-- Code coverage via JaCoCo (XML and HTML reports)
-- Code smells and technical debt
-- Security vulnerabilities (OWASP Top 10)
-- Maintainability and reliability ratings
-- Exclusions: Application classes, Config classes, model/dto packages
-
-### Helper Scripts
-
-The repository includes several helper scripts for common tasks:
-
-**`run-vector-tests.sh`**: Run vector store tests with proper environment setup
-```bash
-./run-vector-tests.sh
-```
-
-- Checks if OPENAI_API_KEY is set
-- Runs SolrVectorStoreIT and SolrVectorStoreObservationIT
-- Displays test results summary
-- Provides HTML report location
-
-**`init-solr.sh`**: Initialize Solr with custom schema (runs via Docker Compose)
-
-- Starts Solr in SolrCloud mode with ZooKeeper
-- Uploads custom configset to ZooKeeper
-- Creates "books" collection with vector field configuration
-- Configures 1536-dimensional vector field with HNSW and cosine similarity
-- Auto-runs when starting docker-compose
-
-**`fix-evaluation-tests.sh`**: Fix evaluation tests (development utility)
-
-## Configuration Requirements
-
-### Environment Variables
-- `ANTHROPIC_API_KEY`: Required for Claude AI integration (query generation and chat)
-- `ANTHROPIC_CHAT_MODEL`: Claude model for chat, query generation and reranking (defaults to 'claude-sonnet-5-5')
-- `RAG_QUERY_REWRITE_MODEL`: Model that rewrites follow-up questions for retrieval (defaults to 'claude-haiku-4-5')
-- `ANTHROPIC_PROMPT_CACHING_ENABLED`: Enable Anthropic prompt caching (defaults to 'true')
-- `ANTHROPIC_PROMPT_CACHING_STRATEGY`: Cache strategy (defaults to 'SYSTEM_AND_TOOLS')
-- `OPENAI_API_KEY`: Required for OpenAI embeddings (vector search and indexing)
-- `TYPESAFE_API_KEY`: Optional; the key for the `typesafe` decisions provider (any placeholder for a local Laya or Nimble)
-- `POSTGRES_USER`: PostgreSQL username (defaults to 'postgres')
-- `POSTGRES_PASSWORD`: PostgreSQL password (defaults to 'postgres')
-
-### External Services
-- **Solr**: Expected at `http://localhost:8983/solr`
-  - Must be Solr 10.1+ or 9.11+ (combined query / built-in RRF) with dense vector fields.
-    CI runs the hybrid tests against both (`SOLR_TEST_IMAGE=solr:9.11.0` selects 9.11 locally)
-  - Collections must expose the `/hybrid` handler (`solr.CombinedQuerySearchHandler`); the
-    project configset in `solr-config/conf` declares it
-  - Collections must include vector field with DenseVectorField type
-  - Managed via SolrCloud with ZooKeeper coordination
-  - See Solr Schema Requirements section below
-- **ZooKeeper**: Expected at `localhost:2181` (internal, managed by Docker)
-    - Coordinates SolrCloud cluster
-    - Stores collection configurations
-- **PostgreSQL**: Expected at `jdbc:postgresql://localhost:5432/chatmemory`
-  - Used for chat memory persistence
-- **Docker**: Required for running external services and Testcontainers tests
-
-### Running with Docker Compose
-```bash
-docker-compose up -d  # Start Solr, ZooKeeper, and PostgreSQL
-docker-compose down   # Stop services
-docker-compose down -v  # Stop and wipe volumes (do this if an existing Solr 9 volume fails to start on 10.1)
-docker-compose ps     # Check service status
-docker-compose logs solr  # View Solr logs
-```
-
-**Services started:**
-
-- Solr 10.1.0 on port 8983 (with ZooKeeper coordination)
-- ZooKeeper 3.9 on port 2181
-- PostgreSQL 16 on port 5432
-
-**Volumes:**
-
-- `solr_data`: Persistent Solr data
-- `postgres_data`: Persistent PostgreSQL data
-- `./solr-config`: Custom Solr schema configuration
-- `./mydata`: Sample data for indexing
-
-### API Versioning
-
-Endpoints use the **path-segment API versioning** built into Spring Framework 7 / Spring Boot 4,
-rather than hardcoding a version into each mapping:
-
-```properties
-spring.mvc.apiversion.use.path-segment=1
-spring.mvc.apiversion.default=v1
-```
-
-Controllers declare the version segment as a URI variable and the version as a mapping attribute:
-
-```java
-@RequestMapping(path = "/api/{version}/search", version = "v1")
-```
-
-- **URLs are unchanged** — `/api/v1/search/...` works exactly as before. `SemanticApiVersionParser`
-  skips leading non-digits, so `v1` parses as `1.0.0`.
-- **Adding a version** is a new mapping with `version = "v2"`, not a new path. Spring routes on the
-  segment; baseline versions (`"1.2+"`) match that version and anything higher.
-- **Unsupported versions return 400** (`InvalidApiVersionException`). The supported set is detected
-  from the mappings themselves via `detect-supported`, which defaults to true.
-- **Non-versioned paths are unaffected.** `/actuator/**` and `/api-docs` are served by separate
-  handler mappings that never consult the version strategy, so path segment 1 not being a version
-  there is harmless. `ApiVersioningTest` pins this, since it would otherwise be an easy regression.
-
-### API Documentation
-- **Swagger UI**: http://localhost:8080/swagger-ui.html
-- **OpenAPI Spec**: http://localhost:8080/api-docs
-- **Health Check**: http://localhost:8080/actuator/health
-
-## Vector Search and Indexing
-
-### Vector Store Implementation
-
-The `SolrVectorStore` is a custom implementation that:
-
-- Extends `AbstractObservationVectorStore` from Spring AI 2.0.2
-- Implements the `VectorStore` interface for document storage and similarity search
-- Uses Solr's `DenseVectorField` type for KNN (K-Nearest Neighbors) search with HNSW algorithm
-- Supports cosine similarity metric for vector comparison
-- Automatically generates embeddings using OpenAI's text-embedding-3-small model (1536 dimensions)
-- Includes observability support via Micrometer for tracking operations
-- Uses POST method for search queries to avoid URI length limitations
-- Handles Solr's multi-valued fields with proper type conversion
-
-**Location**: `src/main/java/dev/aparikh/aipoweredsearch/solr/vectorstore/SolrVectorStore.java`
-
-### Solr Schema Requirements
-
-For vector search to work, Solr collections must have the following configuration:
-
-```xml
-<!-- Core fields -->
-<field name="id" type="string" indexed="true" stored="true" required="true"/>
-<field name="content" type="text_general" indexed="true" stored="true"/>
-<field name="vector" type="knn_vector_1536" indexed="true" stored="true"/>
-
-<!-- Vector field type definition -->
-<fieldType name="knn_vector_1536" class="solr.DenseVectorField"
-           vectorDimension="1536"
-           similarityFunction="cosine"
-           knnAlgorithm="hnsw"/>
-
-<!-- Dynamic metadata fields for document attributes -->
-<dynamicField name="metadata_*" type="text_general" indexed="true" stored="true"/>
-```
-
-The vector field type must match the embedding dimension (1536 for text-embedding-3-small).
-
-### Indexing API
-
-Documents can be indexed with automatic embedding generation via REST endpoints:
-
-**Single Document**: `POST /api/v1/index/{collection}`
-```json
-{
-  "id": "doc1",
-  "content": "Your document text here",
-  "metadata": {
-    "author": "John Doe",
-    "category": "tech",
-    "tags": ["java", "spring", "ai"]
-  }
-}
-```
-
-**Batch Indexing**: `POST /api/v1/index/{collection}/batch`
-```json
-{
-  "documents": [
-    {
-      "id": "doc1",
-      "content": "First document",
-      "metadata": {"category": "tech"}
-    },
-    {
-      "content": "Document without ID (auto-generated UUID)",
-      "metadata": {"category": "science"}
-    }
-  ]
-}
-```
-
-**Features**:
-- Auto-generates UUIDs if document ID is not provided
-- Handles null or empty metadata gracefully
-- Supports complex metadata (nested objects, arrays, various types)
-- Processes Unicode and special characters correctly
-- Efficient batch processing for multiple documents
-
-**Implementation**: `IndexService` in `src/main/java/dev/aparikh/aipoweredsearch/indexing/`
-
-### Search APIs
-
-**Traditional Search**: `GET /api/v1/search/{collection}?query={natural_language_query}`
-- Uses Claude AI to generate structured Solr queries (q, fq, sort, fl, facets)
-- Best for exact matches, filtering, faceting, and traditional search operations
-- Returns results based on keyword matching and Solr scoring
-- Example: "find spring boot documents from 2024, group by category"
-
-**Semantic Search**: `GET /api/v1/search/{collection}/semantic?query={text}`
-- Uses vector embeddings and cosine similarity for semantic matching
-- Best for finding conceptually similar documents
-- Returns results ranked by similarity score
-- Combines AI-powered filter parsing with vector similarity
-- Example: "comfortable running shoes under $100"
-
-**Hybrid Search (RRF)**:
-`GET /api/v1/search/{collection}/hybrid?query={text}&k={topK}&minScore={threshold}&fields={csv}`
-
-- Uses Solr's built-in RRF (Reciprocal Rank Fusion) to combine keyword and vector signals
-- Sends one combined-query request; Solr runs both legs and fuses them server-side
-- Best for balanced search that leverages both exact matches and semantic understanding
-- Schema-agnostic: works with any Solr collection using `_text_` catch-all field
-- Fallback on error: if the combined request fails (e.g. no `/hybrid` handler → 404) or the query
-  cannot be embedded, degrades to keyword-only → vector-only. An empty fused result is returned as is
-- Parameters:
-    - `k`: topK results (defaults to 100)
-    - `minScore`: minimum cosine similarity [0..1] for the vector leg (`vectorSimilarity minReturn`);
-      never applied to the keyword leg or the fused order
-    - `fields`: comma-separated list of fields to return
-- Example: "machine learning frameworks" (finds both exact term matches and semantically similar content)
-
-**RAG Question Answering**: `POST /api/v1/search/ask`
-
-Request body:
-
-```json
-{
-  "question": "What are the benefits of Spring Boot?",
-  "conversationId": "optional-session-id"
-}
-```
-
-Response:
-
-```json
-{
-  "answer": "Generated answer based on retrieved context",
-  "conversationId": "session-id",
-  "sources": ["doc-1", "doc-2"]
-}
-```
-
-- Uses RetrievalAugmentationAdvisor with HybridDocumentRetriever to retrieve relevant documents
-  via hybrid search (keyword + vector, RRF-fused)
-- Claude generates conversational answers based on retrieved context
-- Maintains conversation history for follow-up questions
-- Reduces hallucinations by grounding answers in indexed documents
-- Example: "How does dependency injection work in Spring?"
-
-**Search Flow**:
-1. Claude AI parses natural language filters and search intent
-2. For semantic/hybrid search: generates query embedding using OpenAI
-3. Executes search in Solr:
-    - Traditional: BM25 keyword search
-   - Semantic: KNN similarity search (topK=50 by default)
-   - Hybrid: Solr-native RRF (combined query) fusing keyword and vector results
-4. For RAG: RetrievalAugmentationAdvisor retrieves hybrid context and injects into prompt
-5. Returns documents with scores and enhanced features (highlighting, facets, spell check)
-
-**Implementation**:
-
-- `SearchService` in `src/main/java/dev/aparikh/aipoweredsearch/search/`
-- `SearchRepository.executeHybridRerankSearch()` for hybrid search orchestration
-- `SearchService.ask()` for RAG question answering
-- `AiConfig.ragChatClient` bean with RetrievalAugmentationAdvisor configuration
-- `HybridDocumentRetriever` adapting hybrid search to Spring AI's `DocumentRetriever` SPI
-
-## Testing Architecture
-
-The project has comprehensive test coverage across four levels:
-
-### Test Levels
-
-1. **Unit Tests** (`@ExtendWith(MockitoExtension.class)` or `@WebMvcTest`)
-   - Service layer tests: `SearchServiceTest`, `IndexServiceTest`
-   - Controller layer tests: `SearchControllerTest`, `IndexControllerTest`
-   - Fast execution, no external dependencies
-   - Use mocked dependencies and static mocking for builders
-
-2. **Integration Tests** (`@SpringBootTest` with Testcontainers)
-   - Full application context tests: `SearchIntegrationTest`, `IndexIntegrationTest`
-   - Search functionality tests: `SemanticAndHybridSearchIntegrationTest`, `RagQuestionAnswerIntegrationTest`
-   - Uses Testcontainers for Solr, ZooKeeper, and PostgreSQL
-   - Tests complete request/response cycles
-   - Verifies actual database interactions
-   - Requires ANTHROPIC_API_KEY and OPENAI_API_KEY for semantic/hybrid/RAG tests
-
-3. **Vector Store Tests** (Requires OpenAI API key)
-   - `SolrVectorStoreIT`: Tests vector store operations
-   - `SolrVectorStoreObservationIT`: Tests observability features
-   - Uses real embeddings (not mocked) when `OPENAI_API_KEY` is set
-   - Tests skip gracefully if API key is not available
-
-4. **Evaluation Tests** (LLM-based testing)
-    - `EvaluationTestBase`: Base class for LLM evaluation tests (Ollama judge + Solr corpus)
-    - `RagEvaluationIT`: the RAG evaluation harness for `/ask` (epic #32); see below
-    - Uses Ollama (via Testcontainers, or `-Drag.eval.ollama-url`) as the judge
-    - Configuration in `EvaluationModelsTestConfiguration.java` (judge only; Solr comes from
-      `SolrTestConfiguration`)
-
-### Test Configuration
-- Separate test configuration: `src/test/resources/application-test.properties`
-- PostgreSQL test config: `PostgresTestConfiguration.java`
-- Solr test config: `SolrTestConfiguration.java`
-- Evaluation models config: `EvaluationModelsTestConfiguration.java`
-- Mock embeddings for integration tests (1536-dimensional float arrays)
-- Awaitility for async operation verification in Solr
-
-### Running Tests
-```bash
-# Run all tests
-./gradlew test
-
-# Run tests by package
-./gradlew test --tests "dev.aparikh.aipoweredsearch.search.*"
-./gradlew test --tests "dev.aparikh.aipoweredsearch.indexing.*"
-
-# Run specific test classes
-./gradlew test --tests "SearchIntegrationTest"
-./gradlew test --tests "IndexServiceTest"
-
-# Run semantic/hybrid search integration tests (requires API keys)
-./gradlew test --tests "SemanticAndHybridSearchIntegrationTest"
-
-# Run RAG integration tests (requires API keys)
-./gradlew test --tests "RagQuestionAnswerIntegrationTest"
-
-# Run with detailed output
-./gradlew test --tests "SolrVectorStoreIT" --info
-
-# Run vector store tests with helper script
-./run-vector-tests.sh
-```
-
-### Running Vector Store Tests
-
-Vector store integration tests require a valid OpenAI API key:
-
-```bash
-export OPENAI_API_KEY="your-actual-api-key"
-./gradlew test --tests "dev.aparikh.aipoweredsearch.solr.vectorstore.*"
-```
-
-A helper script is provided: `./run-vector-tests.sh`
-
-### Running Prompt Cache Tests
-
-Prompt caching integration tests require a valid Anthropic API key:
-
-```bash
-export ANTHROPIC_API_KEY="your-actual-api-key"
-./gradlew test --tests "PromptCacheMetricsAdvisorIT" --info
-```
-
-The test validates:
-
-- Cache MISS on first request (cache creation)
-- Cache HIT on subsequent identical requests
-- Correct cache metrics logging
-- Cost savings calculations
-
-### Running the RAG Evaluation Harness
-
-`RagEvaluationIT` scores `/api/v1/search/ask` on a fixed 71-book fixture
-(`src/test/resources/eval/books-fixture.json`) and 50 labelled cases
-(`src/test/resources/eval/rag-eval-set.json`) across five categories: follow-up, filter,
-vocab-gap, injection and keyword. It reports, per category:
-
-- recall@20 after fusion;
-- recall after reranking (relevant documents that reached the prompt);
-- follow-up parity;
-- context precision;
-- injection pass-through;
-- p50/p95 latency and tokens per `/ask`;
-- judge-scored relevance and faithfulness.
-
-The report goes to `build/reports/rag-eval/report.{md,json}`.
-
-```bash
-# Needs ANTHROPIC_API_KEY and OPENAI_API_KEY; skipped without them. Makes billed calls,
-# so ./gradlew test and build exclude it (tag "rag-eval"); it has its own task.
-./gradlew ragEval -Drag.eval.ollama-url=http://localhost:11434
-
-# Same harness with stages on (';'-separated properties) and a report label
-./gradlew ragEval \
-  -Drag.eval.props='search.rag.planner.enabled=true' -Drag.eval.label=planner
-
-# Retrieval metrics only, no judge
-./gradlew ragEval -Drag.eval.judge=false
-```
-
-- The harness builds its collection from the **project configset** (`solr-config/conf`), not
-  Solr's `_default`. In `_default`, `_text_` is never populated, so the BM25 leg silently returns
-  nothing.
-- Filterable metadata uses explicit typed fields: `metadata_author` (`string`),
-  `metadata_price` (`pdouble`) and `metadata_year` (`pint`).
-- The baseline numbers are in `docs/rag-eval-baseline.md`. How to read the report and add cases
-  is in `docs/rag-evaluation.md`.
-- Related tests:
-  - `RagEvalFixtureIT` checks the fixture setup (OpenAI key only);
-  - `RagMetricsTest` covers the metric math;
-  - `RagEvalHarnessTest` checks the eval set against the fixture and the report aggregation
-    (no keys);
-  - `RetrievalAugmentationAdvisorContractTest` and `RagAdvisorOrderingIT` pin the Spring AI
-    advisor behaviour the pipeline relies on (no keys).
-
-## Key Implementation Patterns
-
-### Multi-LLM Configuration
-
-When using both Anthropic and OpenAI, Spring AI cannot auto-configure `ChatClient`. Explicit configuration is required
-in `AiConfig`:
-```java
-@Bean
-public ChatClient searchChatClient(ChatModel chatModel, ...) {
-    // Stateless: query generation keeps no chat memory. Only ragChatClient (/ask) has a
-    // MessageChatMemoryAdvisor, keyed by the request's conversationId.
-    return ChatClient.builder(chatModel)
-        .defaultAdvisors(SimpleLoggerAdvisor.builder().build(), ...)
-        .build();
-}
-```
-
-**Note**: The configuration class is `AiConfig.java`, not `SpringAiConfig`.
-
-### Vector Store Builder Pattern
-`SolrVectorStore` uses the builder pattern extending `AbstractVectorStoreBuilder`:
-```java
-SolrVectorStore vectorStore = SolrVectorStore.builder(solrClient, collection, embeddingModel)
-    .options(SolrVectorStoreOptions.defaults())
-    .build();
-```
-
-### Spring AI Filter Expression Syntax
-The vector store uses Spring AI's filter expression language:
-```java
-SearchRequest request = SearchRequest.builder()
-    .query("search text")
-    .topK(10)
-    .similarityThreshold(0.7)
-    .filterExpression("category == 'AI'")  // Not Solr syntax
-    .build();
-```
-
-The filter expression is converted to Solr query format internally.
-
-### Embedding Storage
-Embeddings are stored in Document metadata with key "embedding". The VectorStore automatically generates embeddings for documents without them during `add()` operations.
-
-### Metadata Handling
-Solr returns multi-valued fields as lists. The vector store extracts first values and converts types:
-```java
-// Handles: {"category": ["AI"]} -> {"category": "AI"}
-// Handles: {"year": [2024L]} -> {"year": 2024}
-```
-
-### Package Structure
-Code is organized by **feature** (not layer):
-```
-dev.aparikh.aipoweredsearch/
-├── search/              # Search domain
-│   ├── SearchController
-│   ├── SearchService
-│   ├── SearchRepository
-│   └── model/          # Search-specific models
-├── indexing/           # Indexing domain
-│   ├── IndexController
-│   ├── IndexService
-│   └── model/         # Indexing-specific models
-├── solr/vectorstore/  # Vector store implementation
-│   ├── SolrVectorStore
-│   ├── VectorStoreFactory
-│   └── SolrVectorStoreOptions
-├── embedding/         # Embedding utilities
-│   ├── EmbeddingService
-│   └── VectorFormatUtils
-└── config/            # Cross-cutting configuration
-    ├── AiConfig
-    ├── SolrConfig
-    └── PromptCacheMetricsAdvisor
-```
-
-## Important Implementation Details
-
-### Solr Client Configuration
-The project uses `HttpJdkSolrClient` for improved performance with HTTP/2 features including multiplexing, header
-compression, and better connection management. The client is configured with appropriate timeouts for production use.
-
-**Note**: SolrJ 10 removed the Jetty-backed `Http2SolrClient` and replaced it with `HttpJdkSolrClient`, which is built on
-the JDK's `java.net.http.HttpClient`. SolrJ therefore no longer pulls in Jetty, and the previous Jetty 11.x version
-pinning and exclusions have been removed from `build.gradle.kts`.
-
-### Vector Search POST Method
-Vector searches use POST method to avoid "URI too long" errors when sending large embedding arrays (1536 dimensions).
-
-### Hybrid Search with Solr-Native RRF
-
-`executeHybridRerankSearch()` in `SearchRepository` sends **one** JSON request to the collection's
-`/hybrid` handler (`solr.CombinedQuerySearchHandler`, Solr 10.1+ and 9.11+, SOLR-17319). Solr runs both legs
-and fuses them with RRF; the application does no merging:
-
-```json
-POST /solr/{collection}/hybrid
-{
-  "queries": {
-    "keyword": { "edismax": { "query": "...", "qf": "_text_" } },
-    "vector":  { "knn": { "f": "vector", "topK": 20, "query": "[...]" } }
-  },
-  "limit": 10,
-  "filter": ["..."],
-  "params": {
-    "combiner": true,
-    "combiner.query": ["keyword", "vector"],
-    "combiner.algorithm": "rrf",
-    "shards.rows": 20
-  }
-}
-```
-
-**Key features**:
-
-- One Solr round-trip; fusion is global across shards
-- RRF formula: `score = sum(1 / (k + rank))`, k = `combiner.rrf.k` (Solr default 60)
-- `shards.rows = topK * 2` over-fetches candidates per leg (per-leg depth is
-  `max(start + rows, shards.rows)`)
-- `filter` applies to both legs
-- `minScore` turns the vector leg into `{!vectorSimilarity minReturn=minScore}`; it never touches the
-  keyword leg or the fused output
-- Schema-agnostic using `_text_` catch-all field
-- Fallback: if the combined request fails (e.g. a collection without the `/hybrid` handler → 404) or the
-  query cannot be embedded, it degrades to keyword-only, then vector-only
-- **No `score` on hybrid rows.** Solr 10.1 orders hits by fused RRF score, but the per-document
-  `score` it returns is a raw per-leg score (BM25 or cosine), so it is not requested. Use
-  `buildHybridRequest(...)` with `debug=results` to see `combinerExplanations` (each document's rank
-  per leg; note that 10.1 can attach the wrong leg *names* to those ranks)
-- Grouping and `cursorMark` are not supported in combined mode
-- Tests on `_default` collections register the handler with
-  `SolrTestContainers.registerHybridHandler(...)`; `SolrHybridSearchIT` covers fusion end to end
-- Testcontainers' `SolrContainer` 2.0.5 cannot start Solr 10 (bare `-DzkRun`); use
-  `SolrTestContainers.newSolrContainer()`
-
-### Observation and Metrics
-The `SolrVectorStore` extends `AbstractObservationVectorStore` for integration with Micrometer:
-- Tracks add/delete operations
-- Monitors similarity search performance
-- Provides metrics for observability platforms
-
-### RAG Configuration
-
-The RAG (Retrieval-Augmented Generation) feature uses a dedicated `ragChatClient` bean configured in `AiConfig`:
-
-RAG retrieval uses **hybrid search** (keyword + vector, fused with RRF), not vector similarity
-alone. This requires the `spring-ai-rag` dependency:
-
-```kotlin
-implementation("org.springframework.ai:spring-ai-rag")
-```
-
-```java
-
-@Bean
-@Qualifier("ragChatClient")
-public ChatClient ragChatClient(ChatModel chatModel,
-                                ChatMemory chatMemory,
-                                HybridDocumentRetriever hybridDocumentRetriever,
-                                ...) {
-    return ChatClient.builder(chatModel)
-            .defaultAdvisors(
-                    RetrievalAugmentationAdvisor.builder()
-                            .documentRetriever(hybridDocumentRetriever)
-                            // Pass-through joiner: the default ConcatenationDocumentJoiner
-                            // re-sorts by score and would undo the RRF ranking.
-                            .documentJoiner(documentsForQuery -> documentsForQuery.values().stream()
-                                    .flatMap(List::stream)
-                                    .flatMap(List::stream)
-                                    .toList())
-                            .build(),
-                    MessageChatMemoryAdvisor.builder(chatMemory).build(),
-                    SimpleLoggerAdvisor.builder().build(),
-                    PromptCacheMetricsAdvisor.builder()
-                            .cachingEnabled(cachingEnabled)
-                            .build()
-            )
-            .build();
-}
-```
-
-**Key components**:
-
-- **RetrievalAugmentationAdvisor**: Spring AI's modular RAG advisor; delegates retrieval to a
-  `DocumentRetriever` and injects the results into the prompt
-- **HybridDocumentRetriever**: Implements `DocumentRetriever` over
-  `SearchRepository.executeHybridRerankSearch()`. Calls the repository directly, deliberately
-  skipping `SearchService`'s Claude query-generation step — that is worth its latency for a
-  search API but not on a RAG turn, where the model already has the question.
-- **Pass-through DocumentJoiner**: Required. The default `ConcatenationDocumentJoiner` re-sorts
-  documents by their own score, which would discard the fused RRF ordering.
-- **MessageChatMemoryAdvisor**: Maintains conversation context across multiple questions
-- **SimpleLoggerAdvisor**: Logs prompts and responses for debugging
-- **PromptCacheMetricsAdvisor**: Tracks Anthropic prompt caching metrics
-- **Collection**: `solr.default.collection` property (defaults to "books")
-- **RerankingDocumentPostProcessor**: Asks Claude to judge the retrieved candidates against the
-  question, reorder them, and discard the rest. This is the third and last place the pipeline can
-  improve context quality — the retriever decides what is a *candidate*, reranking decides what
-  actually reaches the prompt.
-- **Retrieval depth**: `search.rag.hybrid.top-k` (defaults to 20). This is a *candidate* count,
-  not a context size: reranking is expected to trim it. Reranking earns its keep by discarding,
-  so retrieval must over-fetch — reranking N documents down to N only reorders them.
-- **Reranking**: `search.rag.rerank.enabled` (defaults to true), `search.rag.rerank.top-k`
-  (defaults to 5). Disabling it avoids a second model call per RAG turn, but then every
-  retrieved chunk goes straight into the prompt — lower `search.rag.hybrid.top-k` if you do.
-  The reranking prompt is unique per question, so it does not benefit from prompt caching.
-  Failures are never fatal: an unavailable model, a malformed ranking, or indexes pointing
-  nowhere all degrade to the retriever's RRF order.
-- **Conversation-aware retrieval**: Spring AI's `CompressionQueryTransformer` rewrites each
-  question, with the conversation so far, into a standalone query before retrieval, so a follow-up
-  such as "Anything cheaper by the same author?" is searched with the author filled in. It runs on
-  `search.rag.query-rewrite.model` (default `claude-haiku-4-5`). See Craig Walls' *Making RAG
-  Conversation-Aware* recipe. Two additions to the recipe: a first question, which has no
-  conversation to fold in, is searched as asked; and the reranker judges candidates against the
-  rewrite (left in the query context under `rag.standalone`), because `RetrievalAugmentationAdvisor`
-  hands post-processors the original question. The shared `"default"` conversation (requests
-  without a `conversationId`) is not rewritten, since its history mixes unrelated callers, and a
-  failed rewrite falls back to the question as asked.
-- **Decisions (opt-in, pluggable)**: a decisions provider answers narrow questions about each
-  retrieved passage with calibrated probabilities instead of generated text.
-  `search.rag.decisions.enabled=true` screens candidates before reranking (prompt injection,
-  relevance, answer evidence); `search.rag.rerank.provider=decisions` replaces the Claude reranker,
-  keeping the `search.rag.rerank.top-k` passages most likely to answer and discarding only those below
-  `search.rag.decisions.rerank.minimum-score` (default 0). Both judge a follow-up's standalone rewrite.
-  - **Pluggable**: `search.rag.decisions.provider` (default `typesafe`) selects the provider. A
-    provider is a `@Configuration` contributing beans named `decisionsFilter` and `decisionsReranker`
-    (`AiConfig.DECISIONS_FILTER`, `DECISIONS_RERANKER`); `AiConfig` wires them without knowing the
-    provider. Another provider, such as OpenAI's Decisions API, would be a new configuration.
-  - **`typesafe`** (`TypeSafeDecisionsConfig`): `JevDocumentFilter` and `JevDocumentReranker` on the
-    TypeSafe starter's client: hosted Jev, or a local model with the same API (Laya, Nimble) via
-    `spring.ai.typesafe.base-url` and `spring.ai.typesafe.model`. The key comes from
-    `TYPESAFE_API_KEY` (`spring.ai.typesafe.api-key=${TYPESAFE_API_KEY:false}`); a local model needs
-    only a placeholder. The starter activates when that property is present and not `false`, and an
-    empty key fails startup, so an unset variable resolves to `false` and TypeSafe stays off.
-  - **Off by default**: one call per passage adds latency, and hosted Jev sends passages to TypeSafe.
-    A passage the provider cannot judge is passed through with a WARN, so screening is best-effort.
-    Asking for a decisions stage that no provider supplies (no key, a typo) logs a WARN: passages are
-    not screened, or Claude reranks.
-- **Field projection**: `id,content,metadata_*` — excludes the 1536-dim `vector` field, which
-  Solr would otherwise return on every hit under the default `fl=*`
-
-**Sources**: `AskResponse.sources` reports the IDs of documents actually placed in the prompt
-context, read from `RetrievalAugmentationAdvisor.DOCUMENT_CONTEXT` in the response context.
-`SearchService.ask()` therefore requests `.call().chatClientResponse()` rather than
-`.call().content()`.
-
-### Chat Memory
-
-- Conversation ID defaults to "default" if not provided in AskRequest
-- PostgreSQL-backed for persistence across restarts
-- Schema auto-initialization enabled via `spring.ai.chat.memory.repository.jdbc.initialize-schema=always`
-- Allows multi-turn conversations where context is maintained
-
-### Virtual Threads
-The application uses Java virtual threads (`spring.threads.virtual.enabled=true`) for improved concurrency handling.
-
-## Common Issues and Solutions
-
-### "Only DenseVectorField is compatible with Vector Query Parsers"
-If you see this error: `Error from server at http://localhost:8983/solr: only DenseVectorField is compatible with Vector Query Parsers`
-
-**Cause**: The Solr collection doesn't have the proper vector field configuration.
-
-**Solution**:
-1. Restart Docker containers to run the initialization script:
-   ```bash
-   docker-compose down
-   docker-compose up -d
-   ```
-
-2. The `init-solr.sh` script will automatically create collections with proper vector field configuration:
-   - Field type: `knn_vector_1536` (1536 dimensions)
-   - Field name: `vector`
-   - Similarity function: cosine
-   - Algorithm: HNSW
-
-3. Verify the field configuration:
-   ```bash
-   curl "http://localhost:8983/solr/books/schema/fields/vector"
-   ```
-
-4. If using a custom collection name, ensure it's created with the vector field or modify `init-solr.sh` to add your collection name.
-
-### Vector Store Tests Require API Key
-If vector store tests fail with "Cannot invoke EmbeddingResponse.getResults() because embeddingResponse is null":
-- Set valid `OPENAI_API_KEY` environment variable
-- Tests use real embeddings, not mocks
-- Use `./run-vector-tests.sh` helper script
-
-### Jetty HTTP Protocol Violations (no longer applicable)
-Earlier versions of this project could fail with "HTTP protocol violation: Authentication challenge without
-WWW-Authenticate header" when an invalid OpenAI API key was used, because both SolrJ and Spring AI routed HTTP traffic
-through Jetty.
-
-Jetty is no longer on the classpath: SolrJ 10 uses the JDK `HttpClient` and Spring AI 2.x uses the official vendor SDKs.
-If OpenAI calls fail, verify that `OPENAI_API_KEY` contains a valid key.
-
-### Filter Expression Handling
-
-The application uses two different approaches for filter handling depending on the layer:
-
-#### SearchService Layer (Semantic Search via SearchRepository)
-
-**Uses Solr-native filter syntax** generated by Claude AI:
-
-- Claude AI generates filters like: `"metadata_year:[2020 TO *]"`, `"category:tech"`, `"status:active"`
-- `SearchService.semanticSearch()` passes these directly to `SearchRepository.semanticSearch()`
-- `SearchRepository` applies filters using `solrQuery.addFilterQuery()` without parsing
-- **Why**: Spring AI's `FilterExpressionTextParser` cannot handle Solr range syntax `[min TO max]`
-- **Benefit**: Full Solr query syntax support including ranges, Boolean operators, wildcards
-
-Example flow:
-
-```java
-// 1. User query: "AI articles from 2020 onwards"
-// 2. Claude generates: fq=["metadata_year:[2020 TO *]"]
-// 3. SearchService passes to SearchRepository directly
-// 4. SearchRepository applies: solrQuery.addFilterQuery("metadata_year:[2020 TO *]")
-```
-
-#### SolrVectorStore Layer (Direct VectorStore API)
-
-**Uses Spring AI filter expression syntax**:
-
-- Spring AI filter syntax: `category == 'AI'`, `year == '2024'`
-- `SolrVectorStore.convertFilterToSolrQuery()` converts to Solr syntax: `metadata_category:AI`
-- **Why**: When using `VectorStore` interface directly (e.g., in tests), must use Spring AI syntax
-- **Limitation**: Only supports simple equality expressions `key == 'value'`, not ranges
-
-Example flow:
-
-```java
-// Direct VectorStore usage
-SearchRequest request = SearchRequest.builder()
-    .query("search text")
-    .topK(10)
-    .filterExpression("category == 'AI'")  // Spring AI syntax
-    .build();
-vectorStore.similaritySearch(request);
-// Internally converted to: metadata_category:AI
-```
-
-#### Summary
-
-- **SearchService → SearchRepository**: Solr-native syntax (full Solr capabilities)
-- **Direct VectorStore API**: Spring AI syntax (simple equality only)
-- **Why dual approach**: SearchService needs advanced Solr filters that Spring AI parser cannot handle
-
-### Test Container Port Conflicts
-If Testcontainers fail to start:
-- Ensure Docker Desktop is running
-- Check for port conflicts with existing Solr/PostgreSQL instances
-- Testcontainers uses random ports to avoid conflicts
-
-## Related Documentation
-
-- Spring AI Documentation: https://docs.spring.io/spring-ai/reference/
-- Apache Solr Documentation: https://solr.apache.org/guide/
-- Testcontainers Documentation: https://www.testcontainers.org/
-- OpenAPI/Swagger UI: Available at `/swagger-ui.html` when application is running
+Tests need a running Docker daemon (Testcontainers). `verify` runs without the configuration cache
+because the licence plugin does not support it; `build` keeps it. A failed build prints the test
+and line; JUnit XML is in `build/test-results/test/`, HTML in `build/reports/tests/test/`.
+
+## Repository layout
+
+| Path | What it is |
+|---|---|
+| `src/main/java/dev/aparikh/aipoweredsearch/` | The application, package by feature (below) |
+| `src/main/resources/application.properties` | All configuration and its env-var defaults; `prompts/*.st` are the query-generation system prompts |
+| `src/test/java/...` | Tests, same packages, plus `evaluation/` (RAG harness), `fixtures/` (book dataset generator), `LiveModelTest`, `BilledTestsAreOptInTest` |
+| `src/test/resources/eval/` | RAG eval fixture (71 books) and the 50 labelled cases |
+| `src/test/resources/test-data/` | JSON documents the search ITs index |
+| `solr-config/conf/` | The project Solr configset: `managed-schema.xml` (vector field, `metadata_*`, `copyField` to `_text_`), `solrconfig.xml` (`/hybrid` handler), synonyms |
+| `init-solr.sh` | Run by the `solr` service: uploads the configset, creates `books`, restarts Solr |
+| `docker-compose.yml` | Local Solr, ZooKeeper, PostgreSQL, LGTM; reads `POSTGRES_*` from `.env` |
+| `grafana/` | `dashboards/*.json` (4 dashboards), `provisioning/dashboards/`, `provisioning/alerting/` (alert rules) |
+| `build.gradle.kts` | Dependencies and versions, Error Prone/NullAway, Spotless, the `test`/`liveTest`/`ragEval`/`verify` tasks, licence report; `gradle.properties` turns on the build and configuration caches; `gradle/wrapper/` pins Gradle 9.8.2 |
+| `config/allowed-licenses.json` | Licences `checkLicense` accepts; `LICENSE` and `NOTICE` are the project's Apache 2.0 licence |
+| `.github/workflows/` | `ci.yml` (`verify` on every PR, dependency graph), `hybrid-search-solr.yml` (Solr 10.1/9.11 matrix), `claude-code-review.yml` (AI review on PRs), `claude.yml` and `claude-pr-review.yml` (`@claude`); the three Claude workflows skip, with a notice, when their secret (`CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY`) is not set |
+| `.github/ISSUE_TEMPLATE/`, `.github/pull_request_template.md` | Spec template and the PR review checklist |
+| `.claude/skills/` | Project skills for the repeated jobs (see "Skills") |
+| `.env.example` | Every env var the app and compose read; copy to `.env` (git-ignored) |
+| `run-vector-tests.sh` | Runs the vector store live tests (billed) |
+| `schema-books.json` | A Solr schema API dump kept for reference; nothing reads it |
+| `.junie/guidelines.md` | Generic Spring Boot advice for JetBrains Junie; not project rules |
+
+Docs, and whether to trust them:
+
+| Status | Files |
+|---|---|
+| **Current**, kept in step with the code | `CLAUDE.md`, `README.md`, everything in `docs/` except `docs/archive/`, `SOLR_ENHANCEMENTS.md`, `grafana/README.md` |
+| Secondary reference, not reviewed with every change; code and `docs/` win on conflict | `QUICK_REFERENCE.md`, `VECTOR_SEARCH_QUICK_REFERENCE.md`, `SOLR-SETUP.md`, `CHAT_MEMORY.md` |
+| **Historical**, do not follow | `docs/archive/*` (client-side RRF era; see `docs/archive/README.md`) |
+
+Main packages (`dev.aparikh.aipoweredsearch`):
+
+- `search/`: `SearchController` (`/api/v1/search/...`), `SearchService` (Claude query generation,
+  `ask()`), `SearchRepository` (Solr queries, `executeHybridRerankSearch()` and its fallbacks),
+  `HybridDocumentRetriever` (RAG retrieval), `RerankingDocumentPostProcessor` (Claude reranker), `model/`.
+- `indexing/`: `IndexController` (`/api/v1/index/...`), `IndexService`, `model/`.
+- `solr/`: `SolrQueryUtils`; `solr/vectorstore/`: `SolrVectorStore` (Spring AI `VectorStore`),
+  `SolrVectorStoreOptions`, `VectorStoreFactory`, `VectorStoreConfig`.
+- `embedding/`: `EmbeddingService`, `VectorFormatUtils`.
+- `config/`: `AiConfig` (chat clients, RAG advisor chain, query rewrite, embedding model),
+  `TypeSafeDecisionsConfig`, `PromptCacheMetricsAdvisor`, `SolrConfig`,
+  `SolrConfigurationProperties`, `RestClientConfig`, `OpenApiConfig`.
+
+## Tools an agent needs
+
+- **`gh`**: specs, epics and acceptance criteria live in GitHub issues, not in the tree. Read them
+  with `gh issue view <n> -R adityamparikh/ai-powered-search` (epic #32 is the RAG pipeline and its
+  ground rules; #87 is the roadmap); `gh pr view`, `gh pr checks` for CI. Authenticate with
+  `gh auth login`. Reading is fine; writing needs a go-ahead (see above).
+- **`docker compose`** for the local services; **Docker** for Testcontainers.
+- **`curl` against Solr**: `curl "http://localhost:8983/solr/books/schema/fields/vector"`,
+  `curl "http://localhost:8983/solr/admin/collections?action=LIST"`.
+- **`psql`** through the container: `docker exec -it ai-powered-search-postgres psql -U postgres -d chatmemory`.
+- **Telemetry**: Prometheus `localhost:9090`, Loki `localhost:3100`, Tempo `localhost:3200`,
+  Grafana `localhost:3000` (no login locally). Query recipes are in `docs/observability.md`.
+- **App**: `http://localhost:8080/swagger-ui.html`, `/api-docs`, `/actuator/health`.
+
+## Environment
+
+`.env.example` lists every variable with its default. Required for `bootRun`: `ANTHROPIC_API_KEY`,
+`OPENAI_API_KEY`. Optional: `TYPESAFE_API_KEY`, `ANTHROPIC_CHAT_MODEL` (`claude-sonnet-5-5`),
+`RAG_QUERY_REWRITE_MODEL` (`claude-haiku-4-5`), `ANTHROPIC_PROMPT_CACHING_*`, `POSTGRES_USER` /
+`POSTGRES_PASSWORD` (`postgres`), `OTEL_EXPORTER_OTLP_ENDPOINT`. Tests need none of them: the keyless
+suite sets placeholder keys itself, and CI runs it with no keys at all.
+
+Keys an agent can see can be exfiltrated by a prompt injection. Use an Anthropic key from a
+dedicated workspace with a spend limit and a project-scoped OpenAI key, never account-wide keys.
+In GitHub Actions, `claude.yml` holds `contents: write`; `id-token: write` in the Claude workflows
+is what `anthropics/claude-code-action` uses to obtain its GitHub App token.
+
+## Working on an issue
+
+1. Read the issue and, for an epic sub-issue, the epic's ground rules (`gh issue view 32`). Respect
+   its build order and "Out of scope".
+2. Branch, change, add tests that assert behaviour (real Solr through Testcontainers where it
+   matters, not just `verify(mock)`), update the docs the change touches.
+3. `./gradlew spotlessApply && ./gradlew verify` until green.
+4. Open a PR from the template; the body says `Closes #<issue>`, and every checklist item is true.
+   New specs use the **Spec** issue template, which asks for failure and rollback behaviour and
+   non-goals.
+
+## Skills
+
+`.claude/skills/` holds the repeated jobs: `work-issue` (an issue or epic sub-issue end to end),
+`run-rag-eval` (measure a RAG change against the baseline; billed, ask first), `upgrade-dependency`
+(bump a version, check licences and the advisor contract tests), `add-rag-stage` (a new
+flag-guarded, fail-safe RAG stage), `fix-sonar-findings` (list Sonar issues through its web API and
+fix them without changing behaviour; needs `SONAR_HOST_URL` and `SONAR_TOKEN`).
+
+## Where to read more
+
+| File | Read it when |
+|---|---|
+| `docs/architecture.md` | You need the request flow of any endpoint (Mermaid component and sequence diagrams) |
+| `docs/api.md` | You touch an endpoint, its payloads or API versioning |
+| `docs/hybrid-search.md` | You touch `SearchRepository`, the vector store, the Solr schema or filter handling |
+| `docs/rag-pipeline.md` | You touch `/ask`: retrieval, query rewrite, decisions, reranking, chat memory, their properties |
+| `docs/prompt-caching.md` | You touch Anthropic chat options or `PromptCacheMetricsAdvisor` |
+| `docs/testing.md` | You add tests, need the live/keyless split, or a test infra helper |
+| `docs/rag-evaluation.md` | You run or extend the RAG eval, or decide whether to flip a stage flag (thresholds) |
+| `docs/rag-eval-baseline.md` | You compare an eval run with the baseline numbers |
+| `docs/observability.md` | You need metrics, logs, traces or alerts from a running app |
+| `docs/rollback.md` | A change must be undone: flags, revert, Solr configset, chat memory |
+| `docs/troubleshooting.md` | You hit a known error (vector field, formatting, NullAway, billed-call guard) |
+| `SOLR_ENHANCEMENTS.md` | You change highlighting, facets, spellcheck, boosting or synonyms |

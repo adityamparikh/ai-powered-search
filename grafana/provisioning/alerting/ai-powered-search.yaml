@@ -1,0 +1,102 @@
+# Grafana alert rules for ai-powered-search, provisioned into the lgtm service
+# (docker-compose.yml mounts this file into /otel-lgtm/grafana/conf/provisioning/alerting/).
+# The queries are the ones the dashboards in grafana/dashboards/ plot, on the Prometheus data source
+# the otel-lgtm image provisions (uid "prometheus"); `job` is spring.application.name.
+# GrafanaLgtmIntegrationTest provisions this file into a real LGTM container and checks both rules load.
+# Firing alerts are listed by the Grafana API, which an agent can read:
+#   curl -s http://localhost:3000/api/prometheus/grafana/api/v1/alerts
+apiVersion: 1
+groups:
+  - orgId: 1
+    name: ai-powered-search
+    folder: ai-powered-search
+    interval: 1m
+    rules:
+      - uid: ai-search-http-5xx-ratio
+        title: ai-powered-search 5xx ratio above 5%
+        condition: C
+        for: 5m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: critical
+          service: ai-powered-search
+        annotations:
+          summary: More than 5% of HTTP requests to ai-powered-search returned 5xx over 5 minutes.
+          description: >-
+            Search and /ask degrade to fallbacks instead of failing, so a sustained 5xx ratio means
+            something the fallbacks do not cover (Solr down, PostgreSQL down, a bug).
+            Check the application logs in Loki ({service_name="ai-powered-search"} |= "ERROR").
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              instant: true
+              expr: >-
+                sum(rate(http_server_requests_seconds_count{job="ai-powered-search",status=~"5.."}[5m]))
+                / sum(rate(http_server_requests_seconds_count{job="ai-powered-search"}[5m]))
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0.05]
+
+      - uid: ai-search-ask-p95-latency
+        title: /ask p95 latency above 10s
+        condition: C
+        for: 10m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+          service: ai-powered-search
+        annotations:
+          summary: The p95 latency of POST /api/v1/search/ask has been above 10 seconds for 10 minutes.
+          description: >-
+            /ask makes up to four model calls (query rewrite, optional decisions screening,
+            reranking, the answer). A stage switched on recently (search.rag.*) or a slow model
+            is the usual cause; see docs/rollback.md for turning a stage off.
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 900
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              instant: true
+              expr: >-
+                histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket{job="ai-powered-search",uri="/api/v1/search/ask"}[5m])) by (le))
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [10]

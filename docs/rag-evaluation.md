@@ -11,17 +11,18 @@ and [Spring AI — Evaluation testing](https://docs.spring.io/spring-ai/referenc
 
 The harness makes real, billed model calls (Claude for generation and reranking, OpenAI for
 embeddings), so `./gradlew test` and `./gradlew build` never run it (it is tagged `rag-eval`). It
-has its own task:
+has its own task, which refuses to start without `-PallowBilledCalls=true`. Agents: ask the
+maintainer before running it.
 
 ```bash
 export ANTHROPIC_API_KEY=...   # skipped without it
 export OPENAI_API_KEY=...      # skipped without it
 
 # Baseline: every stage flag at its default (off)
-./gradlew ragEval
+./gradlew ragEval -PallowBilledCalls=true
 
 # Same harness with stages switched on (';'-separated Spring properties)
-./gradlew ragEval \
+./gradlew ragEval -PallowBilledCalls=true \
   -Drag.eval.props='search.rag.planner.enabled=true;search.rag.hyde.enabled=true' \
   -Drag.eval.label=planner-hyde
 ```

@@ -3,6 +3,7 @@ package dev.aparikh.aipoweredsearch.search;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import dev.aparikh.aipoweredsearch.LiveModelTest;
 import dev.aparikh.aipoweredsearch.config.AiConfig;
 import dev.aparikh.aipoweredsearch.config.PostgresTestConfiguration;
 import dev.aparikh.aipoweredsearch.config.RestClientConfig;
@@ -64,6 +65,7 @@ import org.testcontainers.solr.SolrContainer;
   PostgresTestConfiguration.class,
   SolrTestConfiguration.class
 })
+@LiveModelTest
 @EnabledIfEnvironmentVariables({
   @EnabledIfEnvironmentVariable(named = "ANTHROPIC_API_KEY", matches = ".*"),
   @EnabledIfEnvironmentVariable(named = "OPENAI_API_KEY", matches = ".*")

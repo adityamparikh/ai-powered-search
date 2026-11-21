@@ -102,7 +102,8 @@ cd ai-powered-search
 
 ### 2. Environment Variables
 
-Set the required environment variables:
+Copy [`.env.example`](.env.example) to `.env` (git-ignored), fill in the keys, and load it with
+`set -a; source .env; set +a`. Or export the variables directly:
 
 ```bash
 # Required
@@ -117,6 +118,9 @@ export POSTGRES_PASSWORD="postgres"
 export ANTHROPIC_PROMPT_CACHING_ENABLED=true
 export ANTHROPIC_PROMPT_CACHING_STRATEGY=SYSTEM_AND_TOOLS
 ```
+
+Use keys made for this project: an Anthropic key from a dedicated workspace with a spend limit and
+an OpenAI project key with a budget. Coding agents in this shell can read them.
 
 ### 3. Start External Services
 
@@ -469,7 +473,14 @@ curl -X POST "http://localhost:8080/api/v1/search" \
 ### Run All Tests
 
 ```bash
-./gradlew test
+./gradlew test      # every keyless test; never calls a paid API, even with keys exported
+./gradlew verify    # what CI runs: build (format, NullAway, tests, coverage) + checkLicense
+```
+
+Tests that call the real Anthropic, OpenAI or TypeSafe APIs are tagged `live` and only run on request:
+
+```bash
+./gradlew liveTest -PallowBilledCalls=true   # billed; skips classes whose key is not exported
 ```
 
 ### Run Specific Test Classes
@@ -517,8 +528,8 @@ switched on.
 
 ```bash
 # Requires ANTHROPIC_API_KEY and OPENAI_API_KEY; makes billed model calls.
-# Never part of ./gradlew test or build.
-./gradlew ragEval
+# Never part of ./gradlew test or build, and refuses to start without the flag.
+./gradlew ragEval -PallowBilledCalls=true
 open build/reports/rag-eval/report.md
 ```
 
@@ -567,7 +578,7 @@ Pull requests are automatically reviewed by Claude AI for:
 - **Spring Boot**: Best practices, RESTful design, configuration patterns
 - **AI/ML**: Prompt engineering, vector store efficiency, RAG implementation
 
-See [Claude PR Review Documentation](docs/CLAUDE_PR_REVIEW.md) for setup and configuration.
+The review prompt lives in [`.github/workflows/claude-code-review.yml`](.github/workflows/claude-code-review.yml); edit it there.
 
 ### Comprehensive Javadocs
 
@@ -644,10 +655,11 @@ Comprehensive documentation is available:
 
 - **[CLAUDE.md](CLAUDE.md)**: Instructions for AI assistants working with this codebase (start here!)
 - **[SOLR_ENHANCEMENTS.md](SOLR_ENHANCEMENTS.md)**: Native RRF, schema-agnostic design, and Solr features
-- **[TECHNICAL_DETAILS.md](TECHNICAL_DETAILS.md)**: In-depth technical implementation details
-- **[VECTOR_SEARCH_GUIDE.md](VECTOR_SEARCH_GUIDE.md)**: Complete guide to vector search, indexing, and semantic search
+- **[docs/](docs/)**: architecture and request flows, API reference, hybrid search, the RAG pipeline, testing,
+  observability, rollback and troubleshooting (the CLAUDE.md "Where to read more" table lists each file)
 - **[QUICK_REFERENCE.md](QUICK_REFERENCE.md)**: Quick lookup guide for developers
 - **[SOLR-SETUP.md](SOLR-SETUP.md)**: Solr schema configuration and setup
+- **[docs/archive/](docs/archive/)**: historical write-ups from before Solr-native RRF; kept for context, not current
 
 ## 🔍 Search Approaches
 
@@ -676,16 +688,17 @@ Comprehensive documentation is available:
 | Technical documentation help  | RAG            | Complex questions need context from multiple docs          |
 | E-commerce with typos         | **Hybrid RRF** | Vector search handles misspellings, keyword adds precision |
 
-See [TECHNICAL_DETAILS.md](TECHNICAL_DETAILS.md) for implementation details.
+See [docs/architecture.md](docs/architecture.md) for how each approach flows through the code.
 
 ## 🤝 Contributing
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests for new functionality
-5. Ensure all tests pass
-6. Submit a pull request
+1. Start from an issue. New work gets one from the **Spec** issue template (Problem, Proposed change,
+   Acceptance criteria, Failure and rollback, Out of scope).
+2. Create a feature branch; never push to `main`.
+3. Make the change with tests that assert real behaviour, and update CLAUDE.md, README and `docs/` in the same PR
+   when commands, configuration or a request path change.
+4. Run `./gradlew spotlessApply`, then `./gradlew verify` (build, every keyless test, licence check). It must be green.
+5. Open a pull request. The template's checklist is the review checklist; the body must say `Closes #<issue>`.
 
 ## 📄 License
 
@@ -708,7 +721,7 @@ dependency under a licence that is not listed, review the licence first, then ad
 - **Issues**: [GitHub Issues](https://github.com/adityamparikh/ai-powered-search/issues)
 - **Documentation**: See `/docs` directory
 - **API Reference**: Swagger UI at `/swagger-ui.html`
-- **Guides**: Check VECTOR_SEARCH_GUIDE.md for comprehensive documentation
+- **Guides**: Start at [docs/architecture.md](docs/architecture.md) and [docs/api.md](docs/api.md)
 
 ## 🙏 Acknowledgments
 

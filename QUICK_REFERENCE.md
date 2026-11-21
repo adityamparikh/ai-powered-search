@@ -331,7 +331,7 @@ docker-compose logs solr | grep "QTime"
 
 ### Documentation
 
-- Vector search guide: `VECTOR_SEARCH_GUIDE.md`
+- Vector search guide: `docs/archive/VECTOR_SEARCH_GUIDE.md` (historical)
 - Solr setup: `SOLR-SETUP.md`
 - Claude instructions: `CLAUDE.md`
 - Quick reference: `QUICK_REFERENCE.md` (this file)
@@ -482,7 +482,7 @@ curl "http://localhost:8983/solr/books/select?q=*:*&facet=true&facet.field=categ
 
 ## Support & Resources
 
-- **Documentation**: See `VECTOR_SEARCH_GUIDE.md` for comprehensive guide
+- **Documentation**: See `docs/archive/VECTOR_SEARCH_GUIDE.md` (historical) for comprehensive guide
 - **Solr Admin**: http://localhost:8983/solr
 - **API Docs**: http://localhost:8080/swagger-ui.html
 - **Issues**: Report via GitHub issues
