@@ -6,6 +6,7 @@ import org.apache.solr.client.solrj.SolrClient;
 import org.jspecify.annotations.Nullable;
 import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.vectorstore.VectorStore;
+import org.springframework.modulith.NamedInterface;
 import org.springframework.stereotype.Component;
 
 /**
@@ -28,8 +29,14 @@ import org.springframework.stereotype.Component;
  *   <li>No global locks that could become bottlenecks
  *   <li>Simpler implementation with fewer moving parts
  * </ul>
+ *
+ * <p>This factory is the only type in {@code solr.vectorstore} that other modules may use: it is
+ * exposed as the Spring Modulith named interface {@code solr :: vectorstore} and hands out Spring
+ * AI's {@link VectorStore} interface, so {@link SolrVectorStore} and its options stay internal to
+ * the {@code solr} module.
  */
 @Component
+@NamedInterface("vectorstore")
 public class VectorStoreFactory {
 
   private final SolrClient solrClient;
