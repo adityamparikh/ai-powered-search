@@ -1,9 +1,6 @@
 package dev.aparikh.aipoweredsearch;
 
 import static com.tngtech.archunit.base.DescribedPredicate.describe;
-import static com.tngtech.archunit.core.domain.JavaClass.Predicates.resideInAnyPackage;
-import static com.tngtech.archunit.core.domain.JavaClass.Predicates.type;
-import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.fields;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 import static com.tngtech.archunit.library.dependencies.SlicesRuleDefinition.slices;
@@ -90,14 +87,14 @@ class ArchitectureTest {
    */
   @ArchTest
   static final ArchRule solrJStaysBehindTheRepository =
-      classes()
+      noClasses()
           .that()
-          .resideInAPackage("org.apache.solr..")
+          .resideOutsideOfPackages(ROOT + ".solr..", ROOT + ".config..")
+          .and()
+          .doNotBelongToAnyOf(SearchRepository.class)
           .should()
-          .onlyBeAccessed()
-          .byClassesThat(
-              resideInAnyPackage(ROOT + ".solr..", ROOT + ".config..", "org.apache.solr..")
-                  .or(type(SearchRepository.class)))
+          .dependOnClassesThat()
+          .resideInAPackage("org.apache.solr..")
           .because("controllers and services go through SearchRepository or the vector store");
 
   @ArchTest
