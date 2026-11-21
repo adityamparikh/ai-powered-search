@@ -3,7 +3,6 @@ package dev.aparikh.aipoweredsearch;
 import static com.tngtech.archunit.base.DescribedPredicate.describe;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.fields;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
-import static com.tngtech.archunit.library.dependencies.SlicesRuleDefinition.slices;
 
 import com.tngtech.archunit.core.importer.ImportOption;
 import com.tngtech.archunit.junit.AnalyzeClasses;
@@ -17,6 +16,11 @@ import org.springframework.beans.factory.annotation.Autowired;
  * failures, so they hold for every change, whoever (or whatever) wrote it.
  *
  * <p>Runs without containers or API keys: ArchUnit reads compiled classes only.
+ *
+ * <p>Complements Spring Modulith's {@code ModularityTests}, which checks cycles and access to
+ * module internals. These rules cover what that does not: dependency direction between modules, and
+ * class-level design decisions. If a rule blocks a deliberate design change, change the rule in the
+ * same PR and say why.
  */
 @AnalyzeClasses(
     packages = "dev.aparikh.aipoweredsearch",
@@ -24,11 +28,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 class ArchitectureTest {
 
   private static final String ROOT = "dev.aparikh.aipoweredsearch";
-
-  /** Package-by-feature only works while the features do not tangle. */
-  @ArchTest
-  static final ArchRule packagesAreFreeOfCycles =
-      slices().matching(ROOT + ".(*)..").should().beFreeOfCycles();
 
   @ArchTest
   static final ArchRule searchDoesNotDependOnIndexing =
