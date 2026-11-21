@@ -33,31 +33,29 @@ alone. This requires the `spring-ai-rag` dependency:
 implementation("org.springframework.ai:spring-ai-rag")
 ```
 
-```java
+Abridged from `AiConfig.ragChatClient` (read the method for the full wiring and its comments):
 
+```java
 @Bean
-@Qualifier("ragChatClient")
-public ChatClient ragChatClient(ChatModel chatModel,
-                                ChatMemory chatMemory,
+public ChatClient ragChatClient(ChatModel chatModel, ChatMemory chatMemory,
                                 HybridDocumentRetriever hybridDocumentRetriever,
-                                ...) {
+                                QueryTransformer queryTransformer, /* reranker, decisions beans, flags */ ...) {
+    RetrievalAugmentationAdvisor.Builder ragAdvisor = RetrievalAugmentationAdvisor.builder()
+            .queryTransformers(queryTransformer)           // follow-up -> standalone query
+            .documentRetriever(hybridDocumentRetriever)    // Solr /hybrid, RRF
+            .queryAugmenter(ContextualQueryAugmenter.builder().allowEmptyContext(true).build())
+            // Pass-through joiner: the default ConcatenationDocumentJoiner re-sorts by score
+            // and would undo the RRF ranking.
+            .documentJoiner(documentsForQuery -> documentsForQuery.values().stream()
+                    .flatMap(List::stream).flatMap(List::stream).toList());
+    // decisions filter (optional), then the reranker (Claude, or the decisions reranker),
+    // each wrapped with judgedAgainstTheRewrite(...)
+    ragAdvisor.documentPostProcessors(postProcessors);
     return ChatClient.builder(chatModel)
-            .defaultAdvisors(
-                    RetrievalAugmentationAdvisor.builder()
-                            .documentRetriever(hybridDocumentRetriever)
-                            // Pass-through joiner: the default ConcatenationDocumentJoiner
-                            // re-sorts by score and would undo the RRF ranking.
-                            .documentJoiner(documentsForQuery -> documentsForQuery.values().stream()
-                                    .flatMap(List::stream)
-                                    .flatMap(List::stream)
-                                    .toList())
-                            .build(),
+            .defaultAdvisors(ragAdvisor.build(),
                     MessageChatMemoryAdvisor.builder(chatMemory).build(),
                     SimpleLoggerAdvisor.builder().build(),
-                    PromptCacheMetricsAdvisor.builder()
-                            .cachingEnabled(cachingEnabled)
-                            .build()
-            )
+                    PromptCacheMetricsAdvisor.builder().cachingEnabled(cachingEnabled).build())
             .build();
 }
 ```
