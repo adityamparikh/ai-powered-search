@@ -105,7 +105,7 @@ and line; JUnit XML is in `build/test-results/test/`, HTML in `build/reports/tes
 | `grafana/` | `dashboards/*.json` (4 dashboards), `provisioning/dashboards/`, `provisioning/alerting/` (alert rules) |
 | `build.gradle.kts` | Dependencies and versions, Error Prone/NullAway, Spotless, the `test`/`liveTest`/`ragEval`/`verify` tasks, licence report; `gradle.properties` turns on the build and configuration caches; `gradle/wrapper/` pins Gradle 9.8.2 |
 | `config/allowed-licenses.json` | Licences `checkLicense` accepts; `LICENSE` and `NOTICE` are the project's Apache 2.0 licence |
-| `.github/workflows/` | `ci.yml` (`verify` on every PR, dependency graph), `hybrid-search-solr.yml` (Solr 10.1/9.11 matrix), `claude-code-review.yml` (AI review on PRs), `claude.yml` and `claude-pr-review.yml` (`@claude`) |
+| `.github/workflows/` | `ci.yml` (`verify` on every PR, dependency graph), `hybrid-search-solr.yml` (Solr 10.1/9.11 matrix), `claude-code-review.yml` (AI review on PRs), `claude.yml` and `claude-pr-review.yml` (`@claude`); the three Claude workflows skip, with a notice, when their secret (`CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY`) is not set |
 | `.github/ISSUE_TEMPLATE/`, `.github/pull_request_template.md` | Spec template and the PR review checklist |
 | `.claude/skills/` | Project skills for the repeated jobs (see "Skills") |
 | `.env.example` | Every env var the app and compose read; copy to `.env` (git-ignored) |
