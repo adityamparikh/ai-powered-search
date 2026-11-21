@@ -103,7 +103,8 @@ and line; JUnit XML is in `build/test-results/test/`, HTML in `build/reports/tes
 | `init-solr.sh` | Run by the `solr` service: uploads the configset, creates `books`, restarts Solr |
 | `docker-compose.yml` | Local Solr, ZooKeeper, PostgreSQL, LGTM; reads `POSTGRES_*` from `.env` |
 | `grafana/` | `dashboards/*.json` (4 dashboards), `provisioning/dashboards/`, `provisioning/alerting/` (alert rules) |
-| `config/allowed-licenses.json` | Licences `checkLicense` accepts |
+| `build.gradle.kts` | Dependencies and versions, Error Prone/NullAway, Spotless, the `test`/`liveTest`/`ragEval`/`verify` tasks, licence report; `gradle.properties` turns on the build and configuration caches; `gradle/wrapper/` pins Gradle 9.8.2 |
+| `config/allowed-licenses.json` | Licences `checkLicense` accepts; `LICENSE` and `NOTICE` are the project's Apache 2.0 licence |
 | `.github/workflows/` | `ci.yml` (`verify` on every PR, dependency graph), `hybrid-search-solr.yml` (Solr 10.1/9.11 matrix), `claude-code-review.yml` (AI review on PRs), `claude.yml` and `claude-pr-review.yml` (`@claude`) |
 | `.github/ISSUE_TEMPLATE/`, `.github/pull_request_template.md` | Spec template and the PR review checklist |
 | `.claude/skills/` | Project skills for the repeated jobs (see "Skills") |
