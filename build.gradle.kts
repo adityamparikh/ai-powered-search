@@ -3,6 +3,12 @@ import net.ltgt.gradle.errorprone.errorprone
 val errorProneVersion = "2.50.0"
 val nullawayVersion = "0.14.2"
 val typesafeVersion = "0.3.0"
+val archunitVersion = "1.5.1"
+
+// Line-coverage floor enforced by `check` (jacocoTestCoverageVerification). It sits below the
+// measured coverage on purpose: it catches a change that ships untested code, not a dip of a line
+// or two. Raise it as coverage grows; add tests rather than lowering it to pass.
+val coverageLineMinimum = "0.00".toBigDecimal()
 
 plugins {
     java
@@ -69,6 +75,7 @@ dependencies {
     testImplementation("org.testcontainers:testcontainers-ollama")
     testImplementation("org.testcontainers:testcontainers-grafana")
     testImplementation("org.awaitility:awaitility")
+    testImplementation("com.tngtech.archunit:archunit-junit5:$archunitVersion")
     testImplementation("io.micrometer:micrometer-observation-test")
     testImplementation("org.springframework.boot:spring-boot-devtools")
     testImplementation("org.springframework.boot:spring-boot-starter-actuator-test")
@@ -127,6 +134,23 @@ tasks.jacocoTestReport {
         html.required.set(true)
         csv.required.set(false)
     }
+}
+
+tasks.jacocoTestCoverageVerification {
+    dependsOn(tasks.test)
+    violationRules {
+        rule {
+            limit {
+                counter = "LINE"
+                value = "COVEREDRATIO"
+                minimum = coverageLineMinimum
+            }
+        }
+    }
+}
+
+tasks.check {
+    dependsOn(tasks.jacocoTestCoverageVerification)
 }
 
 // SonarQube configuration

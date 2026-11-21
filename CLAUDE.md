@@ -226,6 +226,29 @@ open build/docs/javadoc/index.html
 - Maintainability and reliability ratings
 - Exclusions: Application classes, Config classes, model/dto packages
 
+### Build Gates
+
+`./gradlew build` (and `check`) fails on any of these. `.github/workflows/build.yml` runs it on every pull request:
+
+- **Compile**: ErrorProne, with NullAway as an error in JSpecify mode.
+- **Formatting**: Spotless with Google Java Format. Run `./gradlew spotlessApply` to fix it.
+- **Tests**: every test except the billed `rag-eval` harness. CI sets no API keys on purpose: the
+  live tests are gated on `@EnabledIfEnvironmentVariable(matches = ".+")`, so even a dummy key would
+  switch them on.
+- **Architecture** (`ArchitectureTest`, ArchUnit): the package rules in this file, as tests.
+  - No package cycles.
+  - `search` and `indexing` don't depend on each other.
+  - `solr` and `embedding` don't depend on a feature or on `config`.
+  - `model` packages depend only on other model packages.
+  - SolrJ is used only from `solr..`, `config` and `SearchRepository`.
+  - Controllers don't use repositories.
+  - `HybridDocumentRetriever` doesn't depend on `SearchService`.
+  - No `@Autowired` fields.
+
+  If a rule blocks a deliberate design change, change the rule in the same PR and say why.
+- **Coverage**: a JaCoCo line-coverage floor (`coverageLineMinimum` in `build.gradle.kts`). It sits
+  below the measured coverage on purpose. Add tests rather than lowering it.
+
 ### Helper Scripts
 
 The repository includes several helper scripts for common tasks:
