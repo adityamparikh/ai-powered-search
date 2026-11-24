@@ -35,6 +35,8 @@ repositories {
 }
 
 extra["springAiVersion"] = "2.0.2"
+// Spring Modulith 2.1.x is the line built against Spring Boot 4.1.
+extra["springModulithVersion"] = "2.1.3"
 
 dependencies {
     implementation("org.springframework.boot:spring-boot-starter-actuator")
@@ -65,7 +67,12 @@ dependencies {
     implementation("commons-io:commons-io:2.22.0")
     implementation("org.apache.commons:commons-lang3:3.21.0")
 
+    // Spring Modulith: only the annotations (@ApplicationModule, @NamedInterface) used in
+    // package-info.java. No runtime behaviour; module boundaries are verified in ModularityTests.
+    implementation("org.springframework.modulith:spring-modulith-api")
+
     testImplementation("org.springframework.boot:spring-boot-starter-test")
+    testImplementation("org.springframework.modulith:spring-modulith-starter-test")
     testImplementation("org.springframework.boot:spring-boot-starter-webmvc-test")
     testImplementation("org.springframework.boot:spring-boot-testcontainers")
     testImplementation("org.springframework.ai:spring-ai-spring-boot-testcontainers")
@@ -90,6 +97,7 @@ dependencies {
 dependencyManagement {
     imports {
         mavenBom("org.springframework.ai:spring-ai-bom:${property("springAiVersion")}")
+        mavenBom("org.springframework.modulith:spring-modulith-bom:${property("springModulithVersion")}")
     }
 }
 
