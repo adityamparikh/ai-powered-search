@@ -355,12 +355,22 @@ public class SolrVectorStore extends AbstractObservationVectorStore {
       return fieldName;
     } else if (operand instanceof Filter.Value value) {
       Object v = value.value();
-      if (v instanceof String s) {
-        return "\"" + s + "\"";
+      if (v instanceof java.util.Collection<?> values) {
+        // The right-hand side of IN: a disjunction of terms, e.g. ("bob" OR "carol").
+        return values.stream()
+            .map(SolrVectorStore::formatValue)
+            .collect(java.util.stream.Collectors.joining(" OR "));
       }
-      return String.valueOf(v);
+      return formatValue(v);
     }
     return "";
+  }
+
+  private static String formatValue(@Nullable Object value) {
+    if (value instanceof String s) {
+      return "\"" + s + "\"";
+    }
+    return String.valueOf(value);
   }
 
   private String convertExpression(Filter.Expression expression) {
@@ -376,7 +386,7 @@ public class SolrVectorStore extends AbstractObservationVectorStore {
       case LTE -> left + ":[* TO " + right + "]";
       case AND -> left + " AND " + right;
       case OR -> left + " OR " + right;
-      case IN -> left + ":(" + right.replace("\"", "") + ")"; // Simplification for IN
+      case IN -> left + ":(" + right + ")";
       default -> {
         log.warn("Unsupported filter expression type, ignoring: {}", expression.type());
         yield "";
@@ -451,6 +461,13 @@ public class SolrVectorStore extends AbstractObservationVectorStore {
       }
     } else if (contentObj != null) {
       content = contentObj.toString();
+    }
+
+    // Spring AI's Document needs text, so a hit with no stored content would fail the whole
+    // search. Skip it, as for a hit without an id.
+    if (content == null) {
+      log.debug("Skipping Solr document '{}': it has no stored content", id);
+      return null;
     }
 
     // Extract score and normalize for cosine similarity

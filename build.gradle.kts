@@ -4,6 +4,12 @@ val errorProneVersion = "2.50.0"
 val nullawayVersion = "0.14.2"
 val typesafeVersion = "0.3.0"
 
+// Line-coverage floor enforced by `check` (jacocoTestCoverageVerification). Measured without API
+// keys, as in CI, line coverage is 96.7%; the floor sits a few points below so that it catches a
+// change that ships untested code, not a dip of a line or two. Raise it as coverage grows; add
+// tests rather than lowering it to pass.
+val coverageLineMinimum = "0.90".toBigDecimal()
+
 plugins {
     java
     id("org.springframework.boot") version "4.1.1"
@@ -28,6 +34,8 @@ repositories {
 }
 
 extra["springAiVersion"] = "2.0.2"
+// Spring Modulith 2.1.x is the line built against Spring Boot 4.1.
+extra["springModulithVersion"] = "2.1.3"
 
 dependencies {
     implementation("org.springframework.boot:spring-boot-starter-actuator")
@@ -58,7 +66,12 @@ dependencies {
     implementation("commons-io:commons-io:2.22.0")
     implementation("org.apache.commons:commons-lang3:3.21.0")
 
+    // Spring Modulith: only the annotations (@ApplicationModule, @NamedInterface) used in
+    // package-info.java. No runtime behaviour; module boundaries are verified in ModularityTests.
+    implementation("org.springframework.modulith:spring-modulith-api")
+
     testImplementation("org.springframework.boot:spring-boot-starter-test")
+    testImplementation("org.springframework.modulith:spring-modulith-starter-test")
     testImplementation("org.springframework.boot:spring-boot-starter-webmvc-test")
     testImplementation("org.springframework.boot:spring-boot-testcontainers")
     testImplementation("org.springframework.ai:spring-ai-spring-boot-testcontainers")
@@ -82,6 +95,7 @@ dependencies {
 dependencyManagement {
     imports {
         mavenBom("org.springframework.ai:spring-ai-bom:${property("springAiVersion")}")
+        mavenBom("org.springframework.modulith:spring-modulith-bom:${property("springModulithVersion")}")
     }
 }
 
@@ -127,6 +141,23 @@ tasks.jacocoTestReport {
         html.required.set(true)
         csv.required.set(false)
     }
+}
+
+tasks.jacocoTestCoverageVerification {
+    dependsOn(tasks.test)
+    violationRules {
+        rule {
+            limit {
+                counter = "LINE"
+                value = "COVEREDRATIO"
+                minimum = coverageLineMinimum
+            }
+        }
+    }
+}
+
+tasks.check {
+    dependsOn(tasks.jacocoTestCoverageVerification)
 }
 
 // SonarQube configuration

@@ -56,6 +56,8 @@ The application follows a **package-by-feature** structure organized around main
 - **PostgreSQL 16** for chat memory persistence
 - **Testcontainers** for integration testing with Solr, PostgreSQL, and Ollama
 - **SpringDoc OpenAPI** for API documentation
+- **Spring Modulith 2.1.3** for module boundary verification. It adds annotations only, with no
+  runtime behaviour; see "Module Boundaries" below
 
 ### Schema-Agnostic Design
 
@@ -511,11 +513,13 @@ The project has comprehensive test coverage across four levels:
    - Verifies actual database interactions
    - Requires ANTHROPIC_API_KEY and OPENAI_API_KEY for semantic/hybrid/RAG tests
 
-3. **Vector Store Tests** (Requires OpenAI API key)
-   - `SolrVectorStoreIT`: Tests vector store operations
-   - `SolrVectorStoreObservationIT`: Tests observability features
-   - Uses real embeddings (not mocked) when `OPENAI_API_KEY` is set
-   - Tests skip gracefully if API key is not available
+3. **Vector Store Tests**
+   - `SolrVectorStoreKeylessIT`: add, search, delete and every filter operator against a real Solr
+     built from the project configset. No API key needed: `KeywordAxisEmbeddingModel` maps each
+     keyword to one axis, so the similarity order is known in advance
+   - `SolrVectorStoreTest`: failure paths and Solr document mapping, with a mocked `SolrClient`
+   - `SolrVectorStoreIT` and `SolrVectorStoreObservationIT`: the same operations with real OpenAI
+     embeddings. They need `OPENAI_API_KEY` and skip without it
 
 4. **Evaluation Tests** (LLM-based testing)
     - `EvaluationTestBase`: Base class for LLM evaluation tests (Ollama judge + Solr corpus)
@@ -705,6 +709,42 @@ dev.aparikh.aipoweredsearch/
     ├── SolrConfig
     └── PromptCacheMetricsAdvisor
 ```
+
+### Module Boundaries (Spring Modulith)
+
+Each direct sub-package above (`search`, `indexing`, `solr`, `embedding`, `config`) is a
+[Spring Modulith](https://docs.spring.io/spring-modulith/reference/) application module.
+`ModularityTests` checks the boundaries on every `./gradlew build`, without starting a Spring context.
+
+- **A module's API** is the public types in its base package (for example `search.SearchService`).
+  Its sub-packages (`search.model`, `indexing.model`, `solr.vectorstore`) are **internal**: other
+  modules may not use them.
+- **Exceptions are explicit.** `solr.vectorstore.VectorStoreFactory` is exposed as the named
+  interface `solr :: vectorstore`. It hands out Spring AI's `VectorStore`, so `SolrVectorStore` stays
+  internal. Before exposing anything else, ask whether the caller should be in the owning module instead.
+- **No cycles** between modules.
+- **Each module declares what it may depend on** with `@ApplicationModule(allowedDependencies = ...)`
+  in its `package-info.java`. A dependency that isn't listed fails `ModularityTests`.
+
+  | Module      | May depend on                                 |
+  |-------------|-----------------------------------------------|
+  | `search`    | `solr`, `solr :: vectorstore`, `embedding`    |
+  | `indexing`  | `solr :: vectorstore`                         |
+  | `solr`      | `embedding`                                   |
+  | `embedding` | nothing                                       |
+  | `config`    | `search` (wires the RAG beans)                |
+
+  So `search` and `indexing` never depend on each other, and the shared infrastructure (`solr`,
+  `embedding`) never reaches up into a feature.
+- **Spring Modulith, not ArchUnit, for this app.** Modulith checks the boundaries between modules,
+  not rules between classes inside a module. Use ArchUnit for plain Java projects.
+- **When `ModularityTests` fails, fix the design, not the test.** Move the code to the module that
+  owns it, or add a deliberate API. Never delete or `@Disabled` the test. If you widen what a module
+  may depend on (`@NamedInterface`, `@ApplicationModule(allowedDependencies = ...)` in
+  `package-info.java`), call it out in the PR description as an architecture change.
+- **Module map:** `./gradlew test --tests ModularityTests` writes PlantUML diagrams and per-module
+  canvases to `build/spring-modulith-docs/`. Read them instead of reconstructing the dependency
+  graph from imports.
 
 ## Important Implementation Details
 
