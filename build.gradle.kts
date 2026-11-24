@@ -4,11 +4,11 @@ val errorProneVersion = "2.50.0"
 val nullawayVersion = "0.14.2"
 val typesafeVersion = "0.3.0"
 
-// Line-coverage floor enforced by `check` (jacocoTestCoverageVerification). It sits below the
-// measured coverage (66% without API keys, as in CI) on purpose: it catches a change that ships
-// untested code, not a dip of a line or two. Raise it as coverage grows; add tests rather than
-// lowering it to pass.
-val coverageLineMinimum = "0.60".toBigDecimal()
+// Line-coverage floor enforced by `check` (jacocoTestCoverageVerification). Measured without API
+// keys, as in CI, line coverage is 96.7%; the floor sits a few points below so that it catches a
+// change that ships untested code, not a dip of a line or two. Raise it as coverage grows; add
+// tests rather than lowering it to pass.
+val coverageLineMinimum = "0.90".toBigDecimal()
 
 plugins {
     java

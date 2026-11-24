@@ -513,11 +513,13 @@ The project has comprehensive test coverage across four levels:
    - Verifies actual database interactions
    - Requires ANTHROPIC_API_KEY and OPENAI_API_KEY for semantic/hybrid/RAG tests
 
-3. **Vector Store Tests** (Requires OpenAI API key)
-   - `SolrVectorStoreIT`: Tests vector store operations
-   - `SolrVectorStoreObservationIT`: Tests observability features
-   - Uses real embeddings (not mocked) when `OPENAI_API_KEY` is set
-   - Tests skip gracefully if API key is not available
+3. **Vector Store Tests**
+   - `SolrVectorStoreKeylessIT`: add, search, delete and every filter operator against a real Solr
+     built from the project configset. No API key needed: `KeywordAxisEmbeddingModel` maps each
+     keyword to one axis, so the similarity order is known in advance
+   - `SolrVectorStoreTest`: failure paths and Solr document mapping, with a mocked `SolrClient`
+   - `SolrVectorStoreIT` and `SolrVectorStoreObservationIT`: the same operations with real OpenAI
+     embeddings. They need `OPENAI_API_KEY` and skip without it
 
 4. **Evaluation Tests** (LLM-based testing)
     - `EvaluationTestBase`: Base class for LLM evaluation tests (Ollama judge + Solr corpus)
