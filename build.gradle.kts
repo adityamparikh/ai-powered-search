@@ -3,7 +3,6 @@ import net.ltgt.gradle.errorprone.errorprone
 val errorProneVersion = "2.50.0"
 val nullawayVersion = "0.14.2"
 val typesafeVersion = "0.3.0"
-val archunitVersion = "1.5.1"
 
 // Line-coverage floor enforced by `check` (jacocoTestCoverageVerification). It sits below the
 // measured coverage (66% without API keys, as in CI) on purpose: it catches a change that ships
@@ -83,7 +82,6 @@ dependencies {
     testImplementation("org.testcontainers:testcontainers-ollama")
     testImplementation("org.testcontainers:testcontainers-grafana")
     testImplementation("org.awaitility:awaitility")
-    testImplementation("com.tngtech.archunit:archunit-junit5:$archunitVersion")
     testImplementation("io.micrometer:micrometer-observation-test")
     testImplementation("org.springframework.boot:spring-boot-devtools")
     testImplementation("org.springframework.boot:spring-boot-starter-actuator-test")

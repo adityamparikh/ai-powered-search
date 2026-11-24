@@ -721,6 +721,21 @@ Each direct sub-package above (`search`, `indexing`, `solr`, `embedding`, `confi
   interface `solr :: vectorstore`. It hands out Spring AI's `VectorStore`, so `SolrVectorStore` stays
   internal. Before exposing anything else, ask whether the caller should be in the owning module instead.
 - **No cycles** between modules.
+- **Each module declares what it may depend on** with `@ApplicationModule(allowedDependencies = ...)`
+  in its `package-info.java`. A dependency that isn't listed fails `ModularityTests`.
+
+  | Module      | May depend on                                 |
+  |-------------|-----------------------------------------------|
+  | `search`    | `solr`, `solr :: vectorstore`, `embedding`    |
+  | `indexing`  | `solr :: vectorstore`                         |
+  | `solr`      | `embedding`                                   |
+  | `embedding` | nothing                                       |
+  | `config`    | `search` (wires the RAG beans)                |
+
+  So `search` and `indexing` never depend on each other, and the shared infrastructure (`solr`,
+  `embedding`) never reaches up into a feature.
+- **Spring Modulith, not ArchUnit, for this app.** Modulith checks the boundaries between modules,
+  not rules between classes inside a module. Use ArchUnit for plain Java projects.
 - **When `ModularityTests` fails, fix the design, not the test.** Move the code to the module that
   owns it, or add a deliberate API. Never delete or `@Disabled` the test. If you widen what a module
   may depend on (`@NamedInterface`, `@ApplicationModule(allowedDependencies = ...)` in
