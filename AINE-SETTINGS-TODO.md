@@ -19,7 +19,7 @@ gh api -X PUT repos/adityamparikh/ai-powered-search/branches/main/protection \
 {
   "required_status_checks": {
     "strict": true,
-    "contexts": ["Build and verify", "Solr 10.1.0", "Solr 9.11.0"]
+    "contexts": ["Build and verify", "Solr 9.11.0"]
   },
   "enforce_admins": true,
   "required_pull_request_reviews": {

@@ -60,7 +60,7 @@ Never do these without the maintainer's explicit go-ahead in this session:
 - `git push` to `main`, force-pushes, merging a PR, or editing GitHub settings, labels or issues.
   Work on a branch and open a pull request.
 - Commenting `@claude` on an issue or PR, or anything else that triggers the Claude workflows
-  (`.github/workflows/claude*.yml`); each run is billed and `claude.yml` can push commits.
+  (`.github/workflows/claude*.yml`); each run is billed, and `claude.yml` and `claude-pr-review.yml` can push commits.
 - Adding a dependency under a licence not in `config/allowed-licenses.json`, or editing that file.
 
 ## Commands
@@ -105,7 +105,7 @@ and line; JUnit XML is in `build/test-results/test/`, HTML in `build/reports/tes
 | `grafana/` | `dashboards/*.json` (4 dashboards), `provisioning/dashboards/`, `provisioning/alerting/` (alert rules) |
 | `build.gradle.kts` | Dependencies and versions, Error Prone/NullAway, Spotless, the `test`/`liveTest`/`ragEval`/`verify` tasks, licence report; `gradle.properties` turns on the build and configuration caches; `gradle/wrapper/` pins Gradle 9.8.2 |
 | `config/allowed-licenses.json` | Licences `checkLicense` accepts; `LICENSE` and `NOTICE` are the project's Apache 2.0 licence |
-| `.github/workflows/` | `ci.yml` (`verify` on every PR, dependency graph), `hybrid-search-solr.yml` (Solr 10.1/9.11 matrix), `claude-code-review.yml` (AI review on PRs), `claude.yml` and `claude-pr-review.yml` (`@claude`); the three Claude workflows skip, with a notice, when their secret (`CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY`) is not set |
+| `.github/workflows/` | `ci.yml` (`verify` on every PR, dependency graph), `hybrid-search-solr.yml` (the Solr tests on 9.11; `verify` covers 10.1), `claude-code-review.yml` (AI review on PRs), `claude.yml` and `claude-pr-review.yml` (`@claude`); the three Claude workflows skip, with a notice, when their secret (`CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY`) is not set |
 | `.github/ISSUE_TEMPLATE/`, `.github/pull_request_template.md` | Spec template and the PR review checklist |
 | `.claude/skills/` | Project skills for the repeated jobs (see "Skills") |
 | `.env.example` | Every env var the app and compose read; copy to `.env` (git-ignored) |
@@ -153,12 +153,13 @@ Main packages (`dev.aparikh.aipoweredsearch`):
 `.env.example` lists every variable with its default. Required for `bootRun`: `ANTHROPIC_API_KEY`,
 `OPENAI_API_KEY`. Optional: `TYPESAFE_API_KEY`, `ANTHROPIC_CHAT_MODEL` (`claude-sonnet-5-5`),
 `RAG_QUERY_REWRITE_MODEL` (`claude-haiku-4-5`), `ANTHROPIC_PROMPT_CACHING_*`, `POSTGRES_USER` /
-`POSTGRES_PASSWORD` (`postgres`), `OTEL_EXPORTER_OTLP_ENDPOINT`. Tests need none of them: the keyless
-suite sets placeholder keys itself, and CI runs it with no keys at all.
+`POSTGRES_PASSWORD` (`postgres`), `OTEL_EXPORTER_OTLP_ENDPOINT`. Tests need none of them: the `test` task strips
+`ANTHROPIC_API_KEY`, `OPENAI_API_KEY` and `TYPESAFE_API_KEY` from the test JVM, tests that build a
+context supply placeholders, and CI runs with no keys at all.
 
 Keys an agent can see can be exfiltrated by a prompt injection. Use an Anthropic key from a
 dedicated workspace with a spend limit and a project-scoped OpenAI key, never account-wide keys.
-In GitHub Actions, `claude.yml` holds `contents: write`; `id-token: write` in the Claude workflows
+In GitHub Actions, `claude.yml` and `claude-pr-review.yml` hold `contents: write`; `id-token: write` in the Claude workflows
 is what `anthropics/claude-code-action` uses to obtain its GitHub App token.
 
 ## Working on an issue

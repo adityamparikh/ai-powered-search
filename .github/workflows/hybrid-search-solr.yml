@@ -1,8 +1,9 @@
 name: Hybrid search on Solr
 
 # Hybrid search relies on Solr's combined query (server-side RRF), available in Solr 10.1
-# and 9.11. Run the keyless Solr tests against both. No API keys are needed: the embedding
-# and chat models are mocked. The full build runs once, on Solr 10.1, in ci.yml.
+# and 9.11. ci.yml's `verify` already runs every keyless test on the default image (Solr 10.1),
+# so this workflow covers the other supported line, 9.11. No API keys are needed: the embedding
+# and chat models are mocked.
 on:
   pull_request:
   push:
@@ -11,14 +12,20 @@ on:
 permissions:
   contents: read
 
+# A newer push to the same PR or branch supersedes the run in progress.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   solr:
     name: Solr ${{ matrix.solr }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        solr: ["10.1.0", "9.11.0"]
+        solr: ["9.11.0"]
     env:
       SOLR_TEST_IMAGE: solr:${{ matrix.solr }}
     steps:
