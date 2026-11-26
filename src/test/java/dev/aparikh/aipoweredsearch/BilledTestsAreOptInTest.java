@@ -69,7 +69,9 @@ class BilledTestsAreOptInTest {
   private static final class MethodGated {
 
     @EnabledIfEnvironmentVariable(named = "ANTHROPIC_API_KEY", matches = ".+")
-    void callsAPaidModel() {}
+    void callsAPaidModel() {
+      // Intentionally empty: a fixture for the scan, never run. Only its annotation matters.
+    }
   }
 
   /** True when the class, or any method it declares, is enabled by a model API key. */
