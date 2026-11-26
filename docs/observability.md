@@ -37,11 +37,16 @@ Useful Prometheus queries (the same ones the dashboards plot):
 
 ```promql
 # p95 latency per endpoint
-histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket{job="ai-powered-search",uri=~"/api/v1/.*"}[5m])) by (le, uri))
+histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket{job="ai-powered-search",uri=~"/api/[^/]+/.*"}[5m])) by (le, uri))
 # 5xx ratio
 sum(rate(http_server_requests_seconds_count{job="ai-powered-search",status=~"5.."}[5m]))
   / sum(rate(http_server_requests_seconds_count{job="ai-powered-search"}[5m]))
 ```
+
+The `uri` label is the request mapping pattern, whose version segment may be `{version}` rather
+than `v1`, so the dashboards and the alert match it with `uri=~"/api/[^/]+/..."`. Latency quantiles need bucketed histograms:
+`management.metrics.distribution.percentiles-histogram.http.server.requests=true` in
+`application.properties`. Without it the OTLP histogram has no buckets.
 
 List metric names when a query returns nothing (names differ between OTLP and the Prometheus
 registry): `curl -s localhost:9090/api/v1/label/__name__/values | tr ',' '\n' | grep -i <word>`.

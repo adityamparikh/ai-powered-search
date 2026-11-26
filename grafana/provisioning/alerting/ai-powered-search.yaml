@@ -82,7 +82,7 @@ groups:
               refId: A
               instant: true
               expr: >-
-                histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket{job="ai-powered-search",uri="/api/v1/search/ask"}[5m])) by (le))
+                histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket{job="ai-powered-search",uri=~"/api/[^/]+/search/ask"}[5m])) by (le))
           - refId: B
             datasourceUid: __expr__
             model:
