@@ -7,7 +7,7 @@ CLAUDE.md. How to read and extend the RAG evaluation is in [rag-evaluation.md](r
 
 | Task | Runs | Calls paid APIs? | Needs |
 |---|---|---|---|
-| `./gradlew test` (and `build`, `verify`) | every test except the tags `live` and `rag-eval` | **Never**, even with real keys exported | Docker (Testcontainers) |
+| `./gradlew test` (and `build`, `verify`) | every test except the tags `live` and `rag-eval` | **Never**, even with real keys exported: the task strips the three model API keys from the test JVM | Docker (Testcontainers) |
 | `./gradlew liveTest -PallowBilledCalls=true` | tests tagged `live` (`@LiveModelTest`) | Yes: Anthropic, OpenAI and/or TypeSafe | the class's API key; classes whose key is missing skip |
 | `./gradlew ragEval -PallowBilledCalls=true` | `RagEvaluationIT` (tag `rag-eval`) | Yes, ~50 cases | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` |
 

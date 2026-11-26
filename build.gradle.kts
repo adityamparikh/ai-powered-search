@@ -105,6 +105,10 @@ tasks.withType<Test> {
 // BilledTestsAreOptInTest fails the build if a key-gated test class has neither tag.
 tasks.test {
     useJUnitPlatform { excludeTags("rag-eval", "live") }
+    // Belt and braces: the keyless suite never sees real model API keys, even when they are
+    // exported in the shell. A test that reads a key some other way (a method-level gate,
+    // assumeTrue(System.getenv(...)), getenv().getOrDefault(...)) then cannot make a billed call.
+    environment.keys.removeAll(setOf("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "TYPESAFE_API_KEY"))
     // GrafanaLgtmIntegrationTest provisions these files into a container: re-run it when they change.
     inputs.dir("grafana/provisioning").withPropertyName("grafanaProvisioning").withPathSensitivity(PathSensitivity.RELATIVE)
     finalizedBy(tasks.jacocoTestReport)

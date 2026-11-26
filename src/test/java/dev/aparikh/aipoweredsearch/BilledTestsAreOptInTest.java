@@ -3,6 +3,7 @@ package dev.aparikh.aipoweredsearch;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.io.IOException;
+import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -25,6 +26,10 @@ import org.springframework.core.type.classreading.MetadataReaderFactory;
  * usually have their keys exported. Such a class must carry a tag that {@code ./gradlew test}
  * excludes: {@link LiveModelTest} ({@code live}) or {@code rag-eval}. Then only {@code ./gradlew
  * liveTest -PallowBilledCalls=true} or {@code ./gradlew ragEval -PallowBilledCalls=true} run it.
+ *
+ * <p>The scan covers class-level and method-level {@code @EnabledIfEnvironmentVariable}. It is a
+ * lint, not the only guard: the {@code test} task also strips the keys from the test JVM's
+ * environment, so a key read some other way still finds nothing.
  */
 class BilledTestsAreOptInTest {
 
@@ -41,7 +46,8 @@ class BilledTestsAreOptInTest {
     // The scan must actually find the key-gated classes, or this test proves nothing.
     assertThat(gated)
         .extracting(Class::getSimpleName)
-        .contains("PromptCacheMetricsAdvisorIT", "SolrVectorStoreIT", "RagEvaluationIT");
+        .contains(
+            "PromptCacheMetricsAdvisorIT", "SolrVectorStoreIT", "RagEvaluationIT", "MethodGated");
     assertThat(gated)
         .as("classes gated on a model API key without an opt-in tag (add @LiveModelTest)")
         .filteredOn(type -> !hasOptInTag(type))
@@ -58,10 +64,36 @@ class BilledTestsAreOptInTest {
   @LiveModelTest
   private static final class Marked {}
 
+  /** Gated on a key at method level only: the scan must still find it. Tagged, so it passes. */
+  @LiveModelTest
+  private static final class MethodGated {
+
+    @EnabledIfEnvironmentVariable(named = "ANTHROPIC_API_KEY", matches = ".+")
+    void callsAPaidModel() {}
+  }
+
+  /** True when the class, or any method it declares, is enabled by a model API key. */
   private boolean isGatedOnAModelApiKey(Class<?> type) {
-    return AnnotationSupport.findRepeatableAnnotations(type, EnabledIfEnvironmentVariable.class)
-        .stream()
-        .anyMatch(condition -> MODEL_API_KEYS.contains(condition.named()));
+    if (isGatedOnAModelApiKey(
+        AnnotationSupport.findRepeatableAnnotations(type, EnabledIfEnvironmentVariable.class))) {
+      return true;
+    }
+    final Method[] methods;
+    try {
+      methods = type.getDeclaredMethods();
+    } catch (LinkageError e) {
+      throw new IllegalStateException("Cannot inspect methods of " + type.getName(), e);
+    }
+    return Arrays.stream(methods)
+        .anyMatch(
+            method ->
+                isGatedOnAModelApiKey(
+                    AnnotationSupport.findRepeatableAnnotations(
+                        method, EnabledIfEnvironmentVariable.class)));
+  }
+
+  private static boolean isGatedOnAModelApiKey(List<EnabledIfEnvironmentVariable> conditions) {
+    return conditions.stream().anyMatch(condition -> MODEL_API_KEYS.contains(condition.named()));
   }
 
   private static boolean hasOptInTag(Class<?> type) {
