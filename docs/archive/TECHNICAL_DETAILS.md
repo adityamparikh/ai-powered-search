@@ -453,7 +453,7 @@ Pull requests are automatically reviewed by Claude AI for:
 - **Spring Boot**: Best practices, RESTful design, configuration patterns
 - **AI/ML**: Prompt engineering, vector store efficiency, RAG implementation
 
-See [Claude PR Review Documentation](docs/CLAUDE_PR_REVIEW.md) for setup and configuration.
+See [Claude PR Review Documentation](CLAUDE_PR_REVIEW.md) for setup and configuration.
 
 ### Comprehensive Javadocs
 

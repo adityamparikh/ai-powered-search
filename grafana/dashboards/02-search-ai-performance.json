@@ -60,7 +60,7 @@
       "type": "stat",
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket{job=\"ai-powered-search\",uri=\"/api/v1/search/{collection}\",method=\"GET\"}[5m])) by (le))",
+          "expr": "histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket{job=\"ai-powered-search\",uri=~\"/api/[^/]+/search/\\\\{collection\\\\}\",method=\"GET\"}[5m])) by (le))",
           "legendFormat": "p95",
           "refId": "A"
         }
@@ -110,7 +110,7 @@
       "type": "stat",
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket{job=\"ai-powered-search\",uri=\"/api/v1/search/{collection}/semantic\",method=\"GET\"}[5m])) by (le))",
+          "expr": "histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket{job=\"ai-powered-search\",uri=~\"/api/[^/]+/search/\\\\{collection\\\\}/semantic\",method=\"GET\"}[5m])) by (le))",
           "legendFormat": "p95",
           "refId": "A"
         }
@@ -160,7 +160,7 @@
       "type": "stat",
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket{job=\"ai-powered-search\",uri=\"/api/v1/search/{collection}/hybrid\",method=\"GET\"}[5m])) by (le))",
+          "expr": "histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket{job=\"ai-powered-search\",uri=~\"/api/[^/]+/search/\\\\{collection\\\\}/hybrid\",method=\"GET\"}[5m])) by (le))",
           "legendFormat": "p95",
           "refId": "A"
         }
@@ -210,7 +210,7 @@
       "type": "stat",
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket{job=\"ai-powered-search\",uri=\"/api/v1/search/ask\",method=\"POST\"}[5m])) by (le))",
+          "expr": "histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket{job=\"ai-powered-search\",uri=~\"/api/[^/]+/search/ask\",method=\"POST\"}[5m])) by (le))",
           "legendFormat": "p95",
           "refId": "A"
         }
@@ -254,22 +254,22 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket{job=\"ai-powered-search\",uri=\"/api/v1/search/{collection}\",method=\"GET\"}[5m])) by (le))",
+          "expr": "histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket{job=\"ai-powered-search\",uri=~\"/api/[^/]+/search/\\\\{collection\\\\}\",method=\"GET\"}[5m])) by (le))",
           "legendFormat": "Keyword (~100ms target)",
           "refId": "A"
         },
         {
-          "expr": "histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket{job=\"ai-powered-search\",uri=\"/api/v1/search/{collection}/semantic\",method=\"GET\"}[5m])) by (le))",
+          "expr": "histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket{job=\"ai-powered-search\",uri=~\"/api/[^/]+/search/\\\\{collection\\\\}/semantic\",method=\"GET\"}[5m])) by (le))",
           "legendFormat": "Semantic (~500ms target)",
           "refId": "B"
         },
         {
-          "expr": "histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket{job=\"ai-powered-search\",uri=\"/api/v1/search/{collection}/hybrid\",method=\"GET\"}[5m])) by (le))",
+          "expr": "histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket{job=\"ai-powered-search\",uri=~\"/api/[^/]+/search/\\\\{collection\\\\}/hybrid\",method=\"GET\"}[5m])) by (le))",
           "legendFormat": "Hybrid RRF (~600ms target)",
           "refId": "C"
         },
         {
-          "expr": "histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket{job=\"ai-powered-search\",uri=\"/api/v1/search/ask\",method=\"POST\"}[5m])) by (le))",
+          "expr": "histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket{job=\"ai-powered-search\",uri=~\"/api/[^/]+/search/ask\",method=\"POST\"}[5m])) by (le))",
           "legendFormat": "RAG Q&A (~2s target)",
           "refId": "D"
         }
@@ -661,12 +661,12 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket{job=\"ai-powered-search\",uri=\"/api/v1/index/{collection}\",method=\"POST\"}[5m])) by (le))",
+          "expr": "histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket{job=\"ai-powered-search\",uri=~\"/api/[^/]+/index/\\\\{collection\\\\}\",method=\"POST\"}[5m])) by (le))",
           "legendFormat": "Single Doc p95",
           "refId": "A"
         },
         {
-          "expr": "histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket{job=\"ai-powered-search\",uri=\"/api/v1/index/{collection}/batch\",method=\"POST\"}[5m])) by (le))",
+          "expr": "histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket{job=\"ai-powered-search\",uri=~\"/api/[^/]+/index/\\\\{collection\\\\}/batch\",method=\"POST\"}[5m])) by (le))",
           "legendFormat": "Batch p95",
           "refId": "B"
         }
@@ -706,12 +706,12 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "sum(rate(http_server_requests_seconds_count{job=\"ai-powered-search\",uri=\"/api/v1/index/{collection}\",method=\"POST\",status=\"200\"}[5m]))",
+          "expr": "sum(rate(http_server_requests_seconds_count{job=\"ai-powered-search\",uri=~\"/api/[^/]+/index/\\\\{collection\\\\}\",method=\"POST\",status=\"200\"}[5m]))",
           "legendFormat": "Single Docs/s",
           "refId": "A"
         },
         {
-          "expr": "sum(rate(http_server_requests_seconds_count{job=\"ai-powered-search\",uri=\"/api/v1/index/{collection}/batch\",method=\"POST\",status=\"200\"}[5m]))",
+          "expr": "sum(rate(http_server_requests_seconds_count{job=\"ai-powered-search\",uri=~\"/api/[^/]+/index/\\\\{collection\\\\}/batch\",method=\"POST\",status=\"200\"}[5m]))",
           "legendFormat": "Batch Requests/s",
           "refId": "B"
         }

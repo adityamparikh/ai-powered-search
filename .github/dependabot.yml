@@ -1,0 +1,20 @@
+# Version updates for the Gradle build (build.gradle.kts, the wrapper) and the GitHub Actions
+# workflows. Security updates are enabled in the repository settings; the CI workflow's
+# dependency-submission job gives Dependabot the resolved Gradle graph, BOM-managed versions included.
+version: 2
+updates:
+  - package-ecosystem: gradle
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      spring:
+        patterns:
+          - "org.springframework*"
+          - "io.spring*"
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5

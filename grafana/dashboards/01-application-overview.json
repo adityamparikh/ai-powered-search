@@ -382,12 +382,12 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "sum(rate(http_server_requests_seconds_count{job=\"ai-powered-search\",uri=~\"/api/v1/search/.*\"}[5m])) by (uri, method)",
+          "expr": "sum(rate(http_server_requests_seconds_count{job=\"ai-powered-search\",uri=~\"/api/[^/]+/search/.*\"}[5m])) by (uri, method)",
           "legendFormat": "{{method}} {{uri}}",
           "refId": "A"
         },
         {
-          "expr": "sum(rate(http_server_requests_seconds_count{job=\"ai-powered-search\",uri=~\"/api/v1/index/.*\"}[5m])) by (uri, method)",
+          "expr": "sum(rate(http_server_requests_seconds_count{job=\"ai-powered-search\",uri=~\"/api/[^/]+/index/.*\"}[5m])) by (uri, method)",
           "legendFormat": "{{method}} {{uri}}",
           "refId": "B"
         }
@@ -430,27 +430,27 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket{job=\"ai-powered-search\",uri=\"/api/v1/search/{collection}\"}[5m])) by (le))",
+          "expr": "histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket{job=\"ai-powered-search\",uri=~\"/api/[^/]+/search/\\\\{collection\\\\}\"}[5m])) by (le))",
           "legendFormat": "Keyword Search",
           "refId": "A"
         },
         {
-          "expr": "histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket{job=\"ai-powered-search\",uri=\"/api/v1/search/{collection}/semantic\"}[5m])) by (le))",
+          "expr": "histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket{job=\"ai-powered-search\",uri=~\"/api/[^/]+/search/\\\\{collection\\\\}/semantic\"}[5m])) by (le))",
           "legendFormat": "Semantic Search",
           "refId": "B"
         },
         {
-          "expr": "histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket{job=\"ai-powered-search\",uri=\"/api/v1/search/{collection}/hybrid\"}[5m])) by (le))",
+          "expr": "histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket{job=\"ai-powered-search\",uri=~\"/api/[^/]+/search/\\\\{collection\\\\}/hybrid\"}[5m])) by (le))",
           "legendFormat": "Hybrid RRF",
           "refId": "C"
         },
         {
-          "expr": "histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket{job=\"ai-powered-search\",uri=\"/api/v1/search/ask\"}[5m])) by (le))",
+          "expr": "histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket{job=\"ai-powered-search\",uri=~\"/api/[^/]+/search/ask\"}[5m])) by (le))",
           "legendFormat": "RAG Q&A",
           "refId": "D"
         },
         {
-          "expr": "histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket{job=\"ai-powered-search\",uri=~\"/api/v1/index/.*\"}[5m])) by (le))",
+          "expr": "histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket{job=\"ai-powered-search\",uri=~\"/api/[^/]+/index/.*\"}[5m])) by (le))",
           "legendFormat": "Indexing",
           "refId": "E"
         }
@@ -492,22 +492,22 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "histogram_quantile(0.50, sum(rate(http_server_requests_seconds_bucket{job=\"ai-powered-search\",uri=~\"/api/v1/.*\"}[5m])) by (le))",
+          "expr": "histogram_quantile(0.50, sum(rate(http_server_requests_seconds_bucket{job=\"ai-powered-search\",uri=~\"/api/[^/]+/.*\"}[5m])) by (le))",
           "legendFormat": "p50",
           "refId": "A"
         },
         {
-          "expr": "histogram_quantile(0.90, sum(rate(http_server_requests_seconds_bucket{job=\"ai-powered-search\",uri=~\"/api/v1/.*\"}[5m])) by (le))",
+          "expr": "histogram_quantile(0.90, sum(rate(http_server_requests_seconds_bucket{job=\"ai-powered-search\",uri=~\"/api/[^/]+/.*\"}[5m])) by (le))",
           "legendFormat": "p90",
           "refId": "B"
         },
         {
-          "expr": "histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket{job=\"ai-powered-search\",uri=~\"/api/v1/.*\"}[5m])) by (le))",
+          "expr": "histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket{job=\"ai-powered-search\",uri=~\"/api/[^/]+/.*\"}[5m])) by (le))",
           "legendFormat": "p95",
           "refId": "C"
         },
         {
-          "expr": "histogram_quantile(0.99, sum(rate(http_server_requests_seconds_bucket{job=\"ai-powered-search\",uri=~\"/api/v1/.*\"}[5m])) by (le))",
+          "expr": "histogram_quantile(0.99, sum(rate(http_server_requests_seconds_bucket{job=\"ai-powered-search\",uri=~\"/api/[^/]+/.*\"}[5m])) by (le))",
           "legendFormat": "p99",
           "refId": "D"
         }

@@ -39,3 +39,13 @@ out/
 
 # macOS
 .DS_Store
+
+### Secrets ###
+# Local env files hold real API keys; only the template is committed.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.jks

@@ -97,21 +97,64 @@ tasks.withType<Test> {
     systemProperties(providers.systemPropertiesPrefixedBy("rag.").get())
 }
 
-// RagEvaluationIT (tag "rag-eval") makes real, billed model calls across ~50 cases, so `test`,
-// and with it `./gradlew build`, never runs it. `./gradlew ragEval` runs it and nothing else.
+// Billed test runs are opt-in. Two tags mark tests that call paid model APIs whenever their key is
+// exported: "rag-eval" (RagEvaluationIT, ~50 cases of real calls) and "live" (@LiveModelTest, the
+// key-gated ITs). `test`, and with it `./gradlew build` and `verify`, never runs either, even with
+// real keys in the shell. `liveTest` and `ragEval` run them, and only with -PallowBilledCalls=true
+// (or ORG_GRADLE_PROJECT_allowBilledCalls=true); without it they fail before any test starts.
+// BilledTestsAreOptInTest fails the build if a key-gated test class has neither tag.
 tasks.test {
-    useJUnitPlatform { excludeTags("rag-eval") }
+    useJUnitPlatform { excludeTags("rag-eval", "live") }
+    // Belt and braces: the keyless suite never sees real model API keys, even when they are
+    // exported in the shell. A test that reads a key some other way (a method-level gate,
+    // assumeTrue(System.getenv(...)), getenv().getOrDefault(...)) then cannot make a billed call.
+    environment.keys.removeAll(setOf("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "TYPESAFE_API_KEY"))
+    // GrafanaLgtmIntegrationTest provisions these files into a container: re-run it when they change.
+    inputs.dir("grafana/provisioning").withPropertyName("grafanaProvisioning").withPathSensitivity(PathSensitivity.RELATIVE)
     finalizedBy(tasks.jacocoTestReport)
 }
 
+fun Test.requireBilledCallOptIn() {
+    val allowed = providers.gradleProperty("allowBilledCalls").map { it.toBoolean() }.orElse(false)
+    val taskName = name
+    doFirst {
+        if (!allowed.get()) {
+            throw GradleException(
+                "'$taskName' makes real, billed calls to the Anthropic/OpenAI/TypeSafe APIs. " +
+                    "Ask the maintainer first, then re-run with -PallowBilledCalls=true.",
+            )
+        }
+    }
+    // Model output is not deterministic and runs are repeated on purpose; never skip as up to date.
+    outputs.upToDateWhen { false }
+}
+
 tasks.register<Test>("ragEval") {
-    description = "Runs the billed RAG evaluation harness (tests tagged rag-eval)."
+    description = "Runs the billed RAG evaluation harness (tests tagged rag-eval). Needs -PallowBilledCalls=true."
     group = LifecycleBasePlugin.VERIFICATION_GROUP
     testClassesDirs = sourceSets.test.get().output.classesDirs
     classpath = sourceSets.test.get().runtimeClasspath
     useJUnitPlatform { includeTags("rag-eval") }
-    // Model output is not deterministic and runs are repeated on purpose; never skip as up to date.
-    outputs.upToDateWhen { false }
+    requireBilledCallOptIn()
+}
+
+tasks.register<Test>("liveTest") {
+    description = "Runs the tests that call paid model APIs (tag live). Needs -PallowBilledCalls=true."
+    group = LifecycleBasePlugin.VERIFICATION_GROUP
+    testClassesDirs = sourceSets.test.get().output.classesDirs
+    classpath = sourceSets.test.get().runtimeClasspath
+    useJUnitPlatform { includeTags("live") }
+    requireBilledCallOptIn()
+}
+
+// The one command to run before pushing: everything `build` checks (google-java-format via
+// spotlessCheck, javac with Error Prone + NullAway, tests, JaCoCo, the jar) plus checkLicense.
+// checkLicense stays out of `check` because the licence plugin is not configuration-cache
+// compatible (see licenseReport below), so `verify` runs without the configuration cache.
+tasks.register("verify") {
+    description = "Runs build and checkLicense: every check this project has. Run before pushing."
+    group = LifecycleBasePlugin.VERIFICATION_GROUP
+    dependsOn(tasks.build, "checkLicense")
 }
 
 tasks.withType<JavaCompile>().configureEach {

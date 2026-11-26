@@ -2,6 +2,7 @@ package dev.aparikh.aipoweredsearch.evaluation;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import dev.aparikh.aipoweredsearch.LiveModelTest;
 import dev.aparikh.aipoweredsearch.config.PostgresTestConfiguration;
 import dev.aparikh.aipoweredsearch.config.SolrTestConfiguration;
 import dev.aparikh.aipoweredsearch.embedding.EmbeddingService;
@@ -37,6 +38,7 @@ import tools.jackson.databind.ObjectMapper;
  */
 @SpringBootTest(properties = "solr.default.collection=" + RagEvalFixtureIT.COLLECTION)
 @Import({PostgresTestConfiguration.class, SolrTestConfiguration.class})
+@LiveModelTest
 @EnabledIfEnvironmentVariable(named = "OPENAI_API_KEY", matches = ".+")
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class RagEvalFixtureIT {

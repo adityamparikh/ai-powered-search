@@ -7,6 +7,7 @@ import org.springframework.boot.testcontainers.service.connection.ServiceConnect
 import org.springframework.context.annotation.Bean;
 import org.testcontainers.grafana.LgtmStackContainer;
 import org.testcontainers.utility.DockerImageName;
+import org.testcontainers.utility.MountableFile;
 
 /**
  * Shared test configuration for Grafana LGTM (Loki, Grafana, Tempo, Mimir) container.
@@ -44,11 +45,18 @@ public class LgtmTestConfiguration {
   /** Keep in step with the {@code lgtm} service image in {@code docker-compose.yml}. */
   static final String LGTM_IMAGE = "grafana/otel-lgtm:0.35.0";
 
+  /** The alert rules file, provisioned where {@code docker-compose.yml} mounts it. */
+  static final String ALERT_RULES = "grafana/provisioning/alerting/ai-powered-search.yaml";
+
+  static final String ALERT_RULES_IN_CONTAINER =
+      "/otel-lgtm/grafana/conf/provisioning/alerting/ai-powered-search.yaml";
+
   @Bean
   @ServiceConnection
   @RestartScope
   LgtmStackContainer lgtmStackContainer() {
     return new LgtmStackContainer(DockerImageName.parse(LGTM_IMAGE))
+        .withCopyFileToContainer(MountableFile.forHostPath(ALERT_RULES), ALERT_RULES_IN_CONTAINER)
         .withStartupTimeout(Duration.ofMinutes(3))
         .withReuse(true);
   }

@@ -16,8 +16,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
-import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariables;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
@@ -31,10 +29,6 @@ import org.testcontainers.junit.jupiter.Testcontainers;
   dev.aparikh.aipoweredsearch.search.MockChatModelConfiguration.class
 })
 @Testcontainers
-@EnabledIfEnvironmentVariables({
-  @EnabledIfEnvironmentVariable(named = "OPENAI_API_KEY", matches = ".+"),
-  @EnabledIfEnvironmentVariable(named = "ANTHROPIC_API_KEY", matches = ".+")
-})
 class SearchRepositoryIT extends SolrTestBase {
 
   @Autowired private SearchRepository searchRepository;
