@@ -41,6 +41,14 @@ public class PromptCacheMetricsAdvisor implements BaseAdvisor {
 
   private static final Logger log = LoggerFactory.getLogger(PromptCacheMetricsAdvisor.class);
 
+  /** Anthropic bills cache reads at 10% of the regular input-token price. */
+  private static final double CACHE_READ_COST_FACTOR = 0.1;
+
+  private static final double PERCENT = 100.0;
+
+  /** Same order as SimpleLoggerAdvisor, so both see the same response. */
+  private static final int ADVISOR_ORDER = 0;
+
   private final boolean cachingEnabled;
 
   public PromptCacheMetricsAdvisor(boolean cachingEnabled) {
@@ -91,7 +99,6 @@ public class PromptCacheMetricsAdvisor implements BaseAdvisor {
           "[Prompt Caching] PromptCacheMetricsAdvisor@{}.before() invoked",
           System.identityHashCode(this));
     }
-    // Just pass through - we only care about the response
     return request;
   }
 
@@ -108,7 +115,6 @@ public class PromptCacheMetricsAdvisor implements BaseAdvisor {
           response != null,
           response != null && response.chatResponse() != null);
 
-      // Log cache metrics if caching is enabled
       if (response != null && response.chatResponse() != null) {
         logCacheMetrics(response.chatResponse());
       }
@@ -117,7 +123,7 @@ public class PromptCacheMetricsAdvisor implements BaseAdvisor {
           "[Prompt Caching] PromptCacheMetricsAdvisor@{}.after() END",
           System.identityHashCode(this));
       return response;
-    } catch (Exception e) {
+    } catch (RuntimeException e) {
       log.error(
           "[Prompt Caching] PromptCacheMetricsAdvisor@{}.after() ERROR",
           System.identityHashCode(this),
@@ -162,10 +168,7 @@ public class PromptCacheMetricsAdvisor implements BaseAdvisor {
         regularInputTokens,
         outputTokens);
 
-    // Only log if there's cache activity
-    if ((cacheCreationTokens != null && cacheCreationTokens > 0)
-        || (cacheReadTokens != null && cacheReadTokens > 0)) {
-
+    if (isPositive(cacheCreationTokens) || isPositive(cacheReadTokens)) {
       logCacheActivity(cacheCreationTokens, cacheReadTokens, regularInputTokens, outputTokens);
     } else {
       log.debug(
@@ -188,25 +191,23 @@ public class PromptCacheMetricsAdvisor implements BaseAdvisor {
       @Nullable Integer regularInputTokens,
       @Nullable Integer outputTokens) {
 
-    if (cacheReadTokens != null && cacheReadTokens > 0) {
+    if (isPositive(cacheReadTokens)) {
       log.info(
           "[Prompt Caching] Cache HIT - Read: {} tokens, Regular input: {} tokens, Output: {} tokens",
           cacheReadTokens,
-          regularInputTokens != null ? regularInputTokens : 0,
-          outputTokens != null ? outputTokens : 0);
+          orZero(regularInputTokens),
+          orZero(outputTokens));
 
-      // Calculate approximate cost savings
-      // According to Anthropic: cache reads are 90% cheaper than regular input tokens
       // Reference: https://www.anthropic.com/news/prompt-caching
-      double savingsPercentage = calculateSavings(cacheReadTokens, regularInputTokens);
+      double savingsPercentage = calculateSavings(orZero(cacheReadTokens), regularInputTokens);
       log.info("[Prompt Caching] Cost savings: ~{}%", Math.round(savingsPercentage * 10) / 10.0);
 
-    } else if (cacheCreationTokens != null && cacheCreationTokens > 0) {
+    } else if (isPositive(cacheCreationTokens)) {
       log.info(
           "[Prompt Caching] Cache MISS - Created: {} tokens, Regular input: {} tokens, Output: {} tokens",
           cacheCreationTokens,
-          regularInputTokens != null ? regularInputTokens : 0,
-          outputTokens != null ? outputTokens : 0);
+          orZero(regularInputTokens),
+          orZero(outputTokens));
       log.info(
           "[Prompt Caching] Cache created. Subsequent requests with identical prompts will benefit from ~90% cost reduction");
     }
@@ -268,27 +269,22 @@ public class PromptCacheMetricsAdvisor implements BaseAdvisor {
    * @param regularInputTokens number of regular input tokens
    * @return percentage of cost savings due to prompt caching
    */
-  private double calculateSavings(Integer cacheReadTokens, @Nullable Integer regularInputTokens) {
-    if (cacheReadTokens == null || cacheReadTokens == 0) {
+  static double calculateSavings(int cacheReadTokens, @Nullable Integer regularInputTokens) {
+    int regularTokens = orZero(regularInputTokens);
+    double costWithoutCaching = (double) cacheReadTokens + regularTokens;
+    if (cacheReadTokens == 0 || costWithoutCaching == 0) {
       return 0.0;
     }
+    double costWithCaching = cacheReadTokens * CACHE_READ_COST_FACTOR + regularTokens;
+    return (costWithoutCaching - costWithCaching) / costWithoutCaching * PERCENT;
+  }
 
-    int regularTokens = regularInputTokens != null ? regularInputTokens : 0;
-    int totalInputTokens = cacheReadTokens + regularTokens;
+  private static boolean isPositive(@Nullable Integer tokens) {
+    return tokens != null && tokens > 0;
+  }
 
-    if (totalInputTokens == 0) {
-      return 0.0;
-    }
-
-    // Cache reads cost 10% of regular reads (90% savings)
-    double effectiveCachedCost = cacheReadTokens * 0.1;
-    double regularCost = regularTokens * 1.0;
-    double totalEffectiveCost = effectiveCachedCost + regularCost;
-
-    // What would it have cost without caching?
-    double costWithoutCaching = totalInputTokens * 1.0;
-
-    return ((costWithoutCaching - totalEffectiveCost) / costWithoutCaching) * 100;
+  private static int orZero(@Nullable Integer tokens) {
+    return tokens != null ? tokens : 0;
   }
 
   @Override
@@ -298,7 +294,6 @@ public class PromptCacheMetricsAdvisor implements BaseAdvisor {
 
   @Override
   public int getOrder() {
-    // Use same order as SimpleLoggerAdvisor (0) to ensure we're invoked
-    return 0;
+    return ADVISOR_ORDER;
   }
 }
