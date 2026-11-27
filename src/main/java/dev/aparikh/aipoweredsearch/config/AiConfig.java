@@ -4,6 +4,7 @@ import dev.aparikh.aipoweredsearch.search.HybridDocumentRetriever;
 import dev.aparikh.aipoweredsearch.search.RerankingDocumentPostProcessor;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -18,6 +19,7 @@ import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.MessageType;
 import org.springframework.ai.chat.model.ChatModel;
+import org.springframework.ai.document.Document;
 import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.model.anthropic.autoconfigure.AnthropicChatProperties;
 import org.springframework.ai.openai.OpenAiEmbeddingModel;
@@ -67,6 +69,12 @@ public class AiConfig {
 
   /** Query-context key under which a follow-up's standalone rewrite reaches the post-processors. */
   static final String STANDALONE_QUERY = "rag.standalone";
+
+  /** Conversation used by requests without a conversationId; its history mixes callers. */
+  private static final String SHARED_CONVERSATION_ID = "default";
+
+  private static final String CLAUDE_RERANK_PROVIDER = "claude";
+  private static final String CACHING_OPTIONS_BEAN = "anthropicChatOptionsWithCaching";
 
   /**
    * Creates default AnthropicChatOptions with prompt caching enabled.
@@ -190,16 +198,9 @@ public class AiConfig {
   public ChatClient searchChatClient(
       ChatModel chatModel,
       @Value("${spring.ai.anthropic.prompt-caching.enabled:true}") boolean cachingEnabled,
-      @Autowired(required = false) @Qualifier("anthropicChatOptionsWithCaching")
+      @Autowired(required = false) @Qualifier(CACHING_OPTIONS_BEAN)
           AnthropicChatOptions.@Nullable Builder chatOptions) {
-    ChatClient.Builder builder = ChatClient.builder(chatModel);
-
-    // Set default options if caching is enabled
-    if (cachingEnabled && chatOptions != null) {
-      builder.defaultOptions(chatOptions);
-    }
-
-    return builder
+    return chatClientBuilder(chatModel, cachingEnabled, chatOptions)
         .defaultAdvisors(
             SimpleLoggerAdvisor.builder().build(),
             PromptCacheMetricsAdvisor.builder().cachingEnabled(cachingEnabled).build())
@@ -251,7 +252,7 @@ public class AiConfig {
       ChatMemory chatMemory,
       HybridDocumentRetriever hybridDocumentRetriever,
       @Value("${spring.ai.anthropic.prompt-caching.enabled:true}") boolean cachingEnabled,
-      @Autowired(required = false) @Qualifier("anthropicChatOptionsWithCaching")
+      @Autowired(required = false) @Qualifier(CACHING_OPTIONS_BEAN)
           AnthropicChatOptions.@Nullable Builder chatOptions,
       @Autowired(required = false) @Nullable RerankingDocumentPostProcessor reranker,
       QueryTransformer queryTransformer,
@@ -261,13 +262,6 @@ public class AiConfig {
           @Nullable DocumentPostProcessor decisionsReranker,
       @Value("${search.rag.decisions.enabled:false}") boolean decisionsEnabled,
       @Value("${search.rag.rerank.provider:claude}") String rerankProvider) {
-    ChatClient.Builder builder = ChatClient.builder(chatModel);
-
-    // Set default options if caching is enabled
-    if (cachingEnabled && chatOptions != null) {
-      builder.defaultOptions(chatOptions);
-    }
-
     RetrievalAugmentationAdvisor.Builder ragAdvisor =
         RetrievalAugmentationAdvisor.builder()
             // Conversation-aware retrieval: "Anything cheaper by the same author?"
@@ -279,22 +273,59 @@ public class AiConfig {
             // in an ongoing conversation are often answerable from chat memory
             // alone, so preserve the previous behaviour.
             .queryAugmenter(ContextualQueryAugmenter.builder().allowEmptyContext(true).build())
-            // Pass-through joiner. The default ConcatenationDocumentJoiner
-            // re-sorts documents by their individual score, which would undo
-            // the RRF order Solr returned. Hybrid documents carry no score
-            // (Solr's per-document score in combined mode is a raw per-leg
-            // score, not the fused one), so list order is the only ranking.
-            .documentJoiner(
-                documentsForQuery ->
-                    documentsForQuery.values().stream()
-                        .flatMap(List::stream)
-                        .flatMap(List::stream)
-                        .toList());
+            .documentJoiner(AiConfig::joinPreservingRetrievalOrder);
 
-    // Post-processing decides which candidates actually reach the prompt. The optional decisions
-    // filter screens them first, so the reranker only reads passages that survived screening.
-    // Each stage judges a follow-up's standalone rewrite rather than the raw follow-up.
-    // Reranking is absent when search.rag.rerank.enabled=false.
+    List<DocumentPostProcessor> postProcessors =
+        ragPostProcessors(
+            reranker, decisionsFilter, decisionsReranker, decisionsEnabled, rerankProvider);
+    if (!postProcessors.isEmpty()) {
+      ragAdvisor.documentPostProcessors(postProcessors);
+    }
+
+    return chatClientBuilder(chatModel, cachingEnabled, chatOptions)
+        .defaultAdvisors(
+            ragAdvisor.build(),
+            MessageChatMemoryAdvisor.builder(chatMemory).build(),
+            SimpleLoggerAdvisor.builder().build(),
+            PromptCacheMetricsAdvisor.builder().cachingEnabled(cachingEnabled).build())
+        .build();
+  }
+
+  private static ChatClient.Builder chatClientBuilder(
+      ChatModel chatModel,
+      boolean cachingEnabled,
+      AnthropicChatOptions.@Nullable Builder chatOptions) {
+    ChatClient.Builder builder = ChatClient.builder(chatModel);
+    if (cachingEnabled && chatOptions != null) {
+      builder.defaultOptions(chatOptions);
+    }
+    return builder;
+  }
+
+  /**
+   * Pass-through joiner. The default ConcatenationDocumentJoiner re-sorts documents by their
+   * individual score, which would undo the RRF order Solr returned. Hybrid documents carry no score
+   * (Solr's per-document score in combined mode is a raw per-leg score, not the fused one), so list
+   * order is the only ranking.
+   */
+  private static List<Document> joinPreservingRetrievalOrder(
+      Map<Query, List<List<Document>>> documentsForQuery) {
+    return documentsForQuery.values().stream().flatMap(List::stream).flatMap(List::stream).toList();
+  }
+
+  /**
+   * Post-processing decides which candidates actually reach the prompt. The optional decisions
+   * filter screens them first, so the reranker only reads passages that survived screening. Each
+   * stage judges a follow-up's standalone rewrite rather than the raw follow-up. Reranking is
+   * Claude's unless {@code search.rag.rerank.provider=decisions} selected a decisions reranker, and
+   * absent when {@code search.rag.rerank.enabled=false}.
+   */
+  private static List<DocumentPostProcessor> ragPostProcessors(
+      @Nullable RerankingDocumentPostProcessor reranker,
+      @Nullable DocumentPostProcessor decisionsFilter,
+      @Nullable DocumentPostProcessor decisionsReranker,
+      boolean decisionsEnabled,
+      String rerankProvider) {
     List<DocumentPostProcessor> postProcessors = new ArrayList<>(2);
     if (decisionsFilter != null) {
       postProcessors.add(judgedAgainstTheRewrite(decisionsFilter));
@@ -305,10 +336,9 @@ public class AiConfig {
               + "passages are NOT screened. The 'typesafe' provider needs spring.ai.typesafe.api-key "
               + "(TYPESAFE_API_KEY; any placeholder for a local model such as Laya)");
     }
-    // Reranking is Claude's unless search.rag.rerank.provider=decisions selected a decisions
-    // reranker.
     DocumentPostProcessor rerank = decisionsReranker != null ? decisionsReranker : reranker;
-    if (decisionsReranker == null && !"claude".equalsIgnoreCase(rerankProvider.strip())) {
+    if (decisionsReranker == null
+        && !CLAUDE_RERANK_PROVIDER.equalsIgnoreCase(rerankProvider.strip())) {
       log.warn(
           "search.rag.rerank.provider={} has no decisions reranker (use 'decisions' with a configured "
               + "decisions provider); reranking with Claude",
@@ -319,19 +349,13 @@ public class AiConfig {
     }
     log.info(
         "RAG post-processors: decisions filter {}, reranker {}",
-        decisionsFilter == null ? "off" : decisionsFilter.getClass().getSimpleName(),
-        rerank == null ? "off" : rerank.getClass().getSimpleName());
-    if (!postProcessors.isEmpty()) {
-      ragAdvisor.documentPostProcessors(postProcessors);
-    }
+        simpleNameOrOff(decisionsFilter),
+        simpleNameOrOff(rerank));
+    return postProcessors;
+  }
 
-    return builder
-        .defaultAdvisors(
-            ragAdvisor.build(),
-            MessageChatMemoryAdvisor.builder(chatMemory).build(),
-            SimpleLoggerAdvisor.builder().build(),
-            PromptCacheMetricsAdvisor.builder().cachingEnabled(cachingEnabled).build())
-        .build();
+  private static String simpleNameOrOff(@Nullable Object component) {
+    return component == null ? "off" : component.getClass().getSimpleName();
   }
 
   /**
@@ -384,7 +408,7 @@ public class AiConfig {
       // the shared "default" conversation (requests without a conversationId), whose history
       // mixes unrelated callers.
       if (!hasEarlierTurns(query.history())
-          || "default".equals(query.context().get(ChatMemory.CONVERSATION_ID))) {
+          || SHARED_CONVERSATION_ID.equals(query.context().get(ChatMemory.CONVERSATION_ID))) {
         return query;
       }
       Query rewritten;
