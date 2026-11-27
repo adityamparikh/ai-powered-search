@@ -1,6 +1,7 @@
 package dev.aparikh.aipoweredsearch.search;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -701,5 +702,27 @@ class SearchServiceTest {
     // Verify year is converted from Long to Integer
     assertTrue(docMap.containsKey("year"));
     assertEquals(2024, docMap.get("year"));
+  }
+
+  @Test
+  void semanticSearchFieldListToleratesSpacesAfterCommas() {
+    String collection = "test-collection";
+    when(vectorStoreFactory.forCollection(collection)).thenReturn(vectorStore);
+    Document doc =
+        Document.builder()
+            .id("1")
+            .text("Introduction to Machine Learning")
+            .metadata(Map.of("metadata_category", "AI", "metadata_author", "Ng"))
+            .build();
+    when(vectorStore.similaritySearch(any(org.springframework.ai.vectorstore.SearchRequest.class)))
+        .thenReturn(List.of(doc));
+
+    SearchResponse response =
+        searchService.semanticSearch(collection, "ml", null, null, "content, category");
+
+    Map<String, Object> docMap = response.documents().get(0);
+    assertEquals("Introduction to Machine Learning", docMap.get("content"));
+    assertEquals("AI", docMap.get("category"));
+    assertFalse(docMap.containsKey("author"));
   }
 }

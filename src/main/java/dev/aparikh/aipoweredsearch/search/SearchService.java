@@ -7,6 +7,7 @@ import dev.aparikh.aipoweredsearch.search.model.QueryGenerationResponse;
 import dev.aparikh.aipoweredsearch.search.model.SearchRequest;
 import dev.aparikh.aipoweredsearch.search.model.SearchResponse;
 import dev.aparikh.aipoweredsearch.solr.vectorstore.VectorStoreFactory;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -424,7 +425,9 @@ public class SearchService {
     // Parse requested fields if provided
     @Nullable List<String> requestedFields = null;
     if (fieldsCsv != null && !fieldsCsv.isBlank()) {
-      requestedFields = List.of(fieldsCsv.split(","));
+      // Trim like the hybrid path does, so "content, year" also selects "year".
+      requestedFields =
+          Arrays.stream(fieldsCsv.split(",")).map(String::trim).filter(f -> !f.isEmpty()).toList();
     }
     final List<String> fieldsToInclude = requestedFields;
 
