@@ -58,7 +58,7 @@ import org.springframework.stereotype.Service;
 @Service
 public class SearchService {
 
-  private final Logger log = LoggerFactory.getLogger(SearchService.class);
+  private static final Logger log = LoggerFactory.getLogger(SearchService.class);
 
   private final Resource systemResource;
   private final SearchRepository searchRepository;
@@ -471,8 +471,8 @@ public class SearchService {
                                   || fieldsToInclude.contains(outputKey)
                                   || fieldsToInclude.contains(key)) {
                                 // Handle type conversions (e.g., Long to Integer for year)
-                                if ("year".equals(outputKey) && value instanceof Long) {
-                                  docMap.put(outputKey, ((Long) value).intValue());
+                                if ("year".equals(outputKey) && value instanceof Long year) {
+                                  docMap.put(outputKey, year.intValue());
                                 } else {
                                   docMap.put(outputKey, value);
                                 }

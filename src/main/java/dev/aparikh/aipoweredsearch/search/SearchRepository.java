@@ -61,7 +61,7 @@ public class SearchRepository {
   static final String COMBINER_RRF = "rrf";
   private static final int HTTP_NOT_FOUND = 404;
 
-  Logger log = LoggerFactory.getLogger(SearchRepository.class);
+  private static final Logger log = LoggerFactory.getLogger(SearchRepository.class);
   private final SolrClient solrClient;
   private final EmbeddingService embeddingService;
 
@@ -86,8 +86,7 @@ public class SearchRepository {
     Map<String, Object> docMap = new HashMap<>();
     for (String fieldName : doc.getFieldNames()) {
       Object value = doc.getFieldValue(fieldName);
-      if (value instanceof List) {
-        List<?> list = (List<?>) value;
+      if (value instanceof List<?> list) {
         if (!list.isEmpty()) {
           docMap.put(fieldName, list.get(0));
         }
@@ -148,8 +147,8 @@ public class SearchRepository {
       return true;
     }
     Object scoreObj = doc.get(FIELD_SCORE);
-    if (scoreObj instanceof Number) {
-      return ((Number) scoreObj).doubleValue() >= minScore;
+    if (scoreObj instanceof Number score) {
+      return score.doubleValue() >= minScore;
     }
     return true;
   }
