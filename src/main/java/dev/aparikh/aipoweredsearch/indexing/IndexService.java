@@ -138,12 +138,14 @@ public class IndexService {
           indexedIds,
           String.format("Successfully indexed %d documents, %d failed", indexedIds.size(), failed));
     } catch (Exception e) {
-      log.error("Failed to batch index documents in collection '{}'", collection, e);
+      log.error("Failed to batch index documents in collection '{}'", safeCollection, e);
+      // The documents go to the vector store in a single add, so when it fails none of them can
+      // be reported as indexed.
       return new IndexResponse(
-          indexedIds.size(),
-          batchRequest.documents().size() - indexedIds.size(),
-          indexedIds,
-          "Batch indexing partially failed: " + e.getMessage());
+          0,
+          batchRequest.documents().size(),
+          List.of(),
+          "Batch indexing failed: " + e.getMessage());
     }
   }
 

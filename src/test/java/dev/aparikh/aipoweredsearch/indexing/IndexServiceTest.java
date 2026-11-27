@@ -147,9 +147,10 @@ class IndexServiceTest {
 
     // Then
     assertNotNull(response);
-    assertEquals(2, response.indexed());
-    assertEquals(0, response.failed());
-    assertThat(response.documentIds()).containsExactlyInAnyOrder("doc-1", "doc-2");
-    assertThat(response.message()).contains("Batch indexing partially failed");
+    // Nothing reached Solr, so nothing may be reported as indexed.
+    assertEquals(0, response.indexed());
+    assertEquals(2, response.failed());
+    assertThat(response.documentIds()).isEmpty();
+    assertThat(response.message()).contains("Batch indexing failed");
   }
 }
