@@ -84,6 +84,8 @@ public class RerankingDocumentPostProcessor implements DocumentPostProcessor {
       log.debug("Reranked {} candidates down to {}", documents.size(), reranked.size());
       return reranked;
     } catch (Exception e) {
+      // Degrading is fine for a failed model call, not for a cancelled request.
+      SearchRepository.propagateIfInterrupted(e, "Reranking");
       log.warn("Reranking failed, keeping retrieval order: {}", e.getMessage());
       return truncate(documents);
     }

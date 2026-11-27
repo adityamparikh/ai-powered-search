@@ -1,6 +1,7 @@
 package dev.aparikh.aipoweredsearch.search;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
@@ -121,6 +122,21 @@ class RerankingDocumentPostProcessorTest {
     List<Document> result = processor.process(Query.builder().text("q").build(), docs(5));
 
     assertThat(ids(result)).containsExactly("doc-0", "doc-1", "doc-2");
+  }
+
+  @Test
+  void propagatesInterruptionInsteadOfFallingBack() {
+    when(callResponseSpec.entity(RerankingDocumentPostProcessor.Ranking.class))
+        .thenThrow(new IllegalStateException(new InterruptedException("cancelled")));
+
+    try {
+      assertThatThrownBy(() -> processor.process(Query.builder().text("q").build(), docs(5)))
+          .isInstanceOf(IllegalStateException.class)
+          .hasMessageContaining("interrupted");
+      assertThat(Thread.currentThread().isInterrupted()).isTrue();
+    } finally {
+      Thread.interrupted(); // clear the flag for the next test
+    }
   }
 
   @Test
