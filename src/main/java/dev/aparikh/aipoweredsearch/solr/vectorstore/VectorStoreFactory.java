@@ -59,7 +59,7 @@ public class VectorStoreFactory {
    * @throws IllegalArgumentException if collection is null or blank
    */
   public VectorStore forCollection(String collection) {
-    if (collection == null || collection.trim().isEmpty()) {
+    if (collection == null || collection.isBlank()) {
       throw new IllegalArgumentException("Collection name cannot be null or blank");
     }
 

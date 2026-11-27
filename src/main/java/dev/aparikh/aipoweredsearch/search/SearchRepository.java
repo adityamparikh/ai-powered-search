@@ -13,6 +13,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
@@ -22,8 +23,8 @@ import org.apache.solr.client.solrj.SolrServerException;
 import org.apache.solr.client.solrj.request.SolrQuery;
 import org.apache.solr.client.solrj.request.json.JsonQueryRequest;
 import org.apache.solr.client.solrj.request.schema.SchemaRequest;
+import org.apache.solr.client.solrj.response.FacetField;
 import org.apache.solr.client.solrj.response.QueryResponse;
-import org.apache.solr.client.solrj.response.schema.SchemaResponse;
 import org.apache.solr.common.SolrDocument;
 import org.apache.solr.common.SolrException;
 import org.apache.solr.common.params.ModifiableSolrParams;
@@ -31,6 +32,7 @@ import org.apache.solr.common.params.ShardParams;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.lang.Contract;
 import org.springframework.stereotype.Repository;
 
 @Repository
@@ -45,11 +47,36 @@ public class SearchRepository {
   private static final String WILDCARD_QUERY = "*:*";
   private static final String QUERY_TYPE_EDISMAX = "edismax";
 
+  // Solr request parameter names
+  private static final String PARAM_QUERY = "q";
+  private static final String PARAM_DEF_TYPE = "defType";
+  private static final String PARAM_QUERY_FIELDS = "qf";
+  private static final String PARAM_ROWS = "rows";
+  private static final String PARAM_FIELD_LIST = "fl";
+  private static final String PARAM_FILTER_QUERY = "fq";
+  private static final String PARAM_SORT = "sort";
+
+  // Schema attribute names, as returned by the Schema API
+  private static final String SCHEMA_NAME = "name";
+  private static final String SCHEMA_TYPE = "type";
+  private static final String UNKNOWN_TYPE = "unknown";
+  private static final String INTERNAL_FIELD_PREFIX = "_";
+  private static final String DYNAMIC_FIELD_WILDCARD = "*";
+
+  /** Number of documents sampled to discover which fields a collection actually uses. */
+  private static final int FIELD_SAMPLE_SIZE = 100;
+
+  /** Returned by {@link #dynamicMatchScore} when a field name does not match a pattern. */
+  private static final int NO_MATCH = -1;
+
   /**
    * Multiplier applied to topK when fetching from individual searches. Over-fetching improves
    * fusion quality by giving RRF more candidates.
    */
   static final int OVER_FETCH_MULTIPLIER = 2;
+
+  /** Upper bound on {@link #collectionsWithoutHybridHandler}. */
+  static final int MAX_TRACKED_COLLECTIONS = 256;
 
   // Solr combined query (server-side RRF) constants. See solr-config/conf/solrconfig.xml.
   static final String HYBRID_HANDLER = "/hybrid";
@@ -61,7 +88,8 @@ public class SearchRepository {
   static final String COMBINER_RRF = "rrf";
   private static final int HTTP_NOT_FOUND = 404;
 
-  Logger log = LoggerFactory.getLogger(SearchRepository.class);
+  private static final Logger log = LoggerFactory.getLogger(SearchRepository.class);
+
   private final SolrClient solrClient;
   private final EmbeddingService embeddingService;
 
@@ -72,8 +100,6 @@ public class SearchRepository {
    */
   private final Set<String> collectionsWithoutHybridHandler = ConcurrentHashMap.newKeySet();
 
-  static final int MAX_TRACKED_COLLECTIONS = 256;
-
   public SearchRepository(SolrClient solrClient, EmbeddingService embeddingService) {
     this.solrClient = solrClient;
     this.embeddingService = embeddingService;
@@ -82,14 +108,13 @@ public class SearchRepository {
   /**
    * Converts a SolrDocument to a Map, handling multi-valued fields by extracting the first value.
    */
-  private Map<String, Object> convertSolrDocumentToMap(SolrDocument doc) {
+  private static Map<String, Object> toFirstValueMap(SolrDocument doc) {
     Map<String, Object> docMap = new HashMap<>();
     for (String fieldName : doc.getFieldNames()) {
       Object value = doc.getFieldValue(fieldName);
-      if (value instanceof List) {
-        List<?> list = (List<?>) value;
-        if (!list.isEmpty()) {
-          docMap.put(fieldName, list.get(0));
+      if (value instanceof List<?> values) {
+        if (!values.isEmpty()) {
+          docMap.put(fieldName, values.get(0));
         }
       } else {
         docMap.put(fieldName, value);
@@ -98,19 +123,30 @@ public class SearchRepository {
     return docMap;
   }
 
-  /** Sets up field list parameter, automatically adding score field if not already present. */
-  private void setupFieldList(ModifiableSolrParams params, @Nullable String fieldsCsv) {
-    if (fieldsCsv != null && !fieldsCsv.isEmpty()) {
-      params.set("fl", fieldsCsv + "," + FIELD_SCORE);
-    } else {
-      params.set("fl", "*," + FIELD_SCORE);
-    }
+  private static List<Map<String, Object>> toDocumentMaps(QueryResponse response) {
+    return response.getResults().stream().map(SearchRepository::toFirstValueMap).toList();
   }
 
-  /** Sets up filter query parameter if provided. */
-  private void setupFilterQuery(ModifiableSolrParams params, @Nullable String filterExpression) {
-    if (filterExpression != null && !filterExpression.isEmpty()) {
-      params.set("fq", filterExpression);
+  private static SearchResponse documentsOnly(List<Map<String, Object>> documents) {
+    return new SearchResponse(documents, Map.of(), Map.of(), null);
+  }
+
+  @Contract("null -> false")
+  private static boolean hasText(@Nullable String value) {
+    return value != null && !value.isEmpty();
+  }
+
+  /** Sets the field list parameter, always adding the score field. */
+  private static void setFieldList(ModifiableSolrParams params, @Nullable String fieldsCsv) {
+    String fields = hasText(fieldsCsv) ? fieldsCsv : DYNAMIC_FIELD_WILDCARD;
+    params.set(PARAM_FIELD_LIST, fields + "," + FIELD_SCORE);
+  }
+
+  /** Sets the filter query parameter if one is provided. */
+  private static void setFilterQuery(
+      ModifiableSolrParams params, @Nullable String filterExpression) {
+    if (hasText(filterExpression)) {
+      params.set(PARAM_FILTER_QUERY, filterExpression);
     }
   }
 
@@ -131,9 +167,7 @@ public class SearchRepository {
       return documents;
     }
     List<Map<String, Object>> filtered =
-        documents.stream()
-            .filter(doc -> passesMinScore(doc, minScore))
-            .collect(Collectors.toList());
+        documents.stream().filter(doc -> meetsMinScore(doc, minScore)).toList();
     log.debug(
         "minScore={} filtered {} documents down to {}",
         minScore,
@@ -142,112 +176,110 @@ public class SearchRepository {
     return filtered;
   }
 
-  /** Filters documents by minimum score threshold. */
-  private boolean passesMinScore(Map<String, Object> doc, @Nullable Double minScore) {
-    if (minScore == null) {
-      return true;
-    }
-    Object scoreObj = doc.get(FIELD_SCORE);
-    if (scoreObj instanceof Number) {
-      return ((Number) scoreObj).doubleValue() >= minScore;
-    }
-    return true;
+  /** True if the document's score meets the threshold; documents without a score are kept. */
+  private static boolean meetsMinScore(Map<String, Object> doc, double minScore) {
+    return !(doc.get(FIELD_SCORE) instanceof Number score) || score.doubleValue() >= minScore;
   }
 
   public SearchResponse search(String collection, SearchRequest searchRequest) {
+    SolrQuery query = buildKeywordQuery(searchRequest);
+    try {
+      QueryResponse response = solrClient.query(collection, query);
+      return new SearchResponse(
+          toDocumentMaps(response),
+          toFacetCounts(response),
+          Map.of(), // No highlighting without knowing field names
+          spellCheckSuggestion(response, searchRequest.query()));
+    } catch (SolrServerException | IOException | SolrException e) {
+      throw new IllegalStateException("Search failed in collection " + collection, e);
+    }
+  }
+
+  private static SolrQuery buildKeywordQuery(SearchRequest searchRequest) {
     SolrQuery query = new SolrQuery(searchRequest.query());
 
-    // Use edismax for text queries (better than standard query parser)
-    // Only apply for non-wildcard queries
+    // edismax over the catch-all field works for any schema; a wildcard needs no query parser.
     if (!WILDCARD_QUERY.equals(searchRequest.query())) {
-      query.set("defType", QUERY_TYPE_EDISMAX);
-      // Use catch-all field that Solr populates from all text fields
-      query.set("qf", FIELD_TEXT_CATCHALL);
+      query.set(PARAM_DEF_TYPE, QUERY_TYPE_EDISMAX);
+      query.set(PARAM_QUERY_FIELDS, FIELD_TEXT_CATCHALL);
     }
-
     if (searchRequest.filterQueries() != null) {
       searchRequest.filterQueries().forEach(query::addFilterQuery);
     }
-
     if (searchRequest.hasSort()) {
-      query.set("sort", searchRequest.sort());
+      query.set(PARAM_SORT, searchRequest.sort());
     }
-
     if (searchRequest.hasFieldList()) {
       query.setFields(searchRequest.fieldList());
     }
+    addFacets(query, searchRequest);
+    addSpellCheck(query, searchRequest.query());
+    return query;
+  }
 
-    if (searchRequest.hasFacets()) {
-      SearchRequest.Facet facet = searchRequest.facet();
-      if (facet != null && facet.fields() != null) {
-        query.setFacet(true);
-        facet.fields().forEach(query::addFacetField);
-        if (facet.query() != null) {
-          query.addFacetQuery(facet.query());
-        }
-      }
+  private static void addFacets(SolrQuery query, SearchRequest searchRequest) {
+    SearchRequest.Facet facet = searchRequest.facet();
+    if (!searchRequest.hasFacets() || facet == null || facet.fields() == null) {
+      return;
     }
+    query.setFacet(true);
+    facet.fields().forEach(query::addFacetField);
+    if (facet.query() != null) {
+      query.addFacetQuery(facet.query());
+    }
+  }
 
-    // Enable spell checking (works without knowing specific fields)
+  /** Spell checking works without knowing specific fields. */
+  private static void addSpellCheck(SolrQuery query, String userQuery) {
     query.setParam("spellcheck", "true");
-    query.setParam("spellcheck.q", searchRequest.query());
+    query.setParam("spellcheck.q", userQuery);
     query.setParam("spellcheck.collate", "true");
+  }
 
-    try {
-      QueryResponse response = solrClient.query(collection, query);
-
-      // Handle facet fields - they can be null if no facets are requested
-      Map<String, List<SearchResponse.FacetCount>> facetCountsMap =
-          response.getFacetFields() != null
-              ? response.getFacetFields().stream()
-                  .collect(
-                      Collectors.toMap(
-                          f -> f.getName(),
-                          f ->
-                              f.getValues().stream()
-                                  .map(
-                                      c -> new SearchResponse.FacetCount(c.getName(), c.getCount()))
-                                  .collect(Collectors.toList())))
-              : new java.util.HashMap<>();
-
-      // Handle spell check suggestions
-      SearchResponse.SpellCheckSuggestion spellCheckSuggestion = null;
-      if (response.getSpellCheckResponse() != null
-          && response.getSpellCheckResponse().getCollatedResult() != null) {
-        String collation = response.getSpellCheckResponse().getCollatedResult();
-        if (!collation.equals(searchRequest.query())) {
-          spellCheckSuggestion =
-              new SearchResponse.SpellCheckSuggestion(collation, searchRequest.query());
-        }
-      }
-
-      return new SearchResponse(
-          response.getResults().stream()
-              .map(this::convertSolrDocumentToMap)
-              .collect(Collectors.toList()),
-          facetCountsMap,
-          Map.of(), // No highlighting without knowing field names
-          spellCheckSuggestion);
-    } catch (Exception e) {
-      throw new RuntimeException(e);
+  private static Map<String, List<SearchResponse.FacetCount>> toFacetCounts(
+      QueryResponse response) {
+    if (response.getFacetFields() == null) {
+      return new HashMap<>();
     }
+    return response.getFacetFields().stream()
+        .collect(
+            Collectors.toMap(
+                FacetField::getName,
+                field ->
+                    field.getValues().stream()
+                        .map(
+                            count ->
+                                new SearchResponse.FacetCount(count.getName(), count.getCount()))
+                        .toList()));
+  }
+
+  private static SearchResponse.@Nullable SpellCheckSuggestion spellCheckSuggestion(
+      QueryResponse response, String userQuery) {
+    if (response.getSpellCheckResponse() == null) {
+      return null;
+    }
+    String collation = response.getSpellCheckResponse().getCollatedResult();
+    if (collation == null || collation.equals(userQuery)) {
+      return null;
+    }
+    return new SearchResponse.SpellCheckSuggestion(collation, userQuery);
   }
 
   public Set<String> getActuallyUsedFields(String collection) {
     Set<String> usedFields = new HashSet<>();
 
     try {
-      // Query sample of documents
-      SolrQuery query = new SolrQuery("*:*");
-      query.setRows(100);
+      SolrQuery query = new SolrQuery(WILDCARD_QUERY);
+      query.setRows(FIELD_SAMPLE_SIZE);
 
       QueryResponse response = solrClient.query(collection, query);
 
       for (SolrDocument doc : response.getResults()) {
         usedFields.addAll(doc.getFieldNames());
       }
-    } catch (Exception e) {
-      log.error("Error analyzing fields", e);
+    } catch (SolrServerException | IOException | SolrException e) {
+      // Field discovery only feeds query generation hints, so an empty set is a safe answer.
+      log.error("Error analyzing fields in collection {}", collection, e);
     }
     return usedFields;
   }
@@ -302,41 +334,41 @@ public class SearchRepository {
       JsonQueryRequest request =
           buildHybridRequest(query, vector, topK, filterExpression, fieldsCsv, minScore);
 
-      List<Map<String, Object>> results =
-          request.process(solrClient, collection).getResults().stream()
-              .map(this::convertSolrDocumentToMap)
-              .collect(Collectors.toList());
+      List<Map<String, Object>> results = toDocumentMaps(request.process(solrClient, collection));
 
       log.debug("Hybrid search (Solr RRF) returned {} documents", results.size());
-      return new SearchResponse(results, Map.of(), Map.of(), null);
+      return documentsOnly(results);
 
     } catch (Exception e) {
+      // Deliberately broad: any failure (Solr, I/O, embedding) degrades to the fallback.
       if (isInterruption(e)) {
         // The caller is being cancelled: running fallback queries on this thread would ignore
         // that and swallow the interrupt. Restore the flag and propagate instead.
         Thread.currentThread().interrupt();
         throw new IllegalStateException("Hybrid search was interrupted", e);
       }
-      if (e instanceof SolrException solrException && solrException.code() == HTTP_NOT_FOUND) {
-        // A configuration problem, not an outage: no stack trace, said once per collection.
-        if (firstMissingHandlerReport(collection)) {
-          log.warn(
-              "Collection '{}' has no {} handler (solr.CombinedQuerySearchHandler, Solr 10.1+); "
-                  + "hybrid search is degrading to keyword/vector fallback. Add the handler to the "
-                  + "collection's configset (see solr-config/conf/solrconfig.xml).",
-              collection,
-              HYBRID_HANDLER);
-        } else {
-          log.debug(
-              "Collection '{}' still has no {} handler; using fallback",
-              collection,
-              HYBRID_HANDLER);
-        }
-      } else {
-        log.error("Error performing hybrid search with Solr RRF in collection: {}", collection, e);
-        log.warn("Hybrid search failed, attempting fallback");
-      }
+      logHybridFailure(collection, e);
       return fallbackSearch(collection, query, vector, topK, filterExpression, fieldsCsv, minScore);
+    }
+  }
+
+  private void logHybridFailure(String collection, Exception e) {
+    if (!(e instanceof SolrException solrException && solrException.code() == HTTP_NOT_FOUND)) {
+      log.error("Error performing hybrid search with Solr RRF in collection: {}", collection, e);
+      log.warn("Hybrid search failed, attempting fallback");
+      return;
+    }
+    // A configuration problem, not an outage: no stack trace, said once per collection.
+    if (firstMissingHandlerReport(collection)) {
+      log.warn(
+          "Collection '{}' has no {} handler (solr.CombinedQuerySearchHandler, Solr 10.1+); "
+              + "hybrid search is degrading to keyword/vector fallback. Add the handler to the "
+              + "collection's configset (see solr-config/conf/solrconfig.xml).",
+          collection,
+          HYBRID_HANDLER);
+    } else {
+      log.debug(
+          "Collection '{}' still has no {} handler; using fallback", collection, HYBRID_HANDLER);
     }
   }
 
@@ -354,7 +386,7 @@ public class SearchRepository {
   }
 
   private static boolean isInterruption(Throwable e) {
-    for (Throwable t = e; t != null; t = t.getCause()) {
+    for (@Nullable Throwable t = e; t != null; t = t.getCause()) {
       if (t instanceof InterruptedException) {
         return true;
       }
@@ -398,33 +430,9 @@ public class SearchRepository {
       @Nullable Double minScore) {
     int fetchSize = topK * OVER_FETCH_MULTIPLIER;
 
-    Map<String, Object> keywordLeg =
-        Map.of(
-            QUERY_TYPE_EDISMAX,
-            Map.of(
-                "query", query,
-                "qf", FIELD_TEXT_CATCHALL));
-
-    Map<String, Object> vectorLeg =
-        minScore == null
-            ? Map.of(
-                "knn",
-                Map.of(
-                    "f", FIELD_VECTOR,
-                    // Same as shards.rows below: kNN should find as many candidates as the
-                    // combiner will consider from this leg.
-                    "topK", fetchSize,
-                    "query", vector))
-            : Map.of(
-                "vectorSimilarity",
-                Map.of(
-                    "f", FIELD_VECTOR,
-                    "minReturn", minScore,
-                    "query", vector));
-
     Map<String, Object> queries = new LinkedHashMap<>();
-    queries.put(KEYWORD_LEG, keywordLeg);
-    queries.put(VECTOR_LEG, vectorLeg);
+    queries.put(KEYWORD_LEG, keywordLeg(query));
+    queries.put(VECTOR_LEG, vectorLeg(vector, fetchSize, minScore));
 
     JsonQueryRequest request =
         new JsonQueryRequest()
@@ -437,14 +445,34 @@ public class SearchRepository {
             .withParam(ShardParams.SHARDS_ROWS, fetchSize);
     request.setPath(HYBRID_HANDLER);
 
-    if (filterExpression != null && !filterExpression.isEmpty()) {
+    if (hasText(filterExpression)) {
       request.withFilter(filterExpression);
     }
-    if (fieldsCsv != null && !fieldsCsv.isEmpty()) {
+    if (hasText(fieldsCsv)) {
       request.returnFields(
           Arrays.stream(fieldsCsv.split(",")).map(String::trim).filter(f -> !f.isEmpty()).toList());
     }
     return request;
+  }
+
+  private static Map<String, Object> keywordLeg(String query) {
+    return Map.of(
+        QUERY_TYPE_EDISMAX, Map.of("query", query, PARAM_QUERY_FIELDS, FIELD_TEXT_CATCHALL));
+  }
+
+  /**
+   * kNN leg by default; with a {@code minScore}, a similarity-threshold leg so only sufficiently
+   * similar documents enter fusion.
+   */
+  private static Map<String, Object> vectorLeg(
+      String vector, int fetchSize, @Nullable Double minScore) {
+    if (minScore == null) {
+      // Same as shards.rows: kNN should find as many candidates as the combiner will consider
+      // from this leg.
+      return Map.of("knn", Map.of("f", FIELD_VECTOR, "topK", fetchSize, "query", vector));
+    }
+    return Map.of(
+        "vectorSimilarity", Map.of("f", FIELD_VECTOR, "minReturn", minScore, "query", vector));
   }
 
   /**
@@ -465,19 +493,10 @@ public class SearchRepository {
       @Nullable String fieldsCsv)
       throws SolrServerException, IOException {
     ModifiableSolrParams params = new ModifiableSolrParams();
-    params.set("q", query);
-    params.set("defType", QUERY_TYPE_EDISMAX);
-    params.set("qf", FIELD_TEXT_CATCHALL);
-    params.set("rows", rows);
-
-    setupFilterQuery(params, filterExpression);
-    setupFieldList(params, fieldsCsv);
-
-    QueryResponse response = solrClient.query(collection, params, SolrRequest.METHOD.POST);
-
-    return response.getResults().stream()
-        .map(this::convertSolrDocumentToMap)
-        .collect(Collectors.toList());
+    params.set(PARAM_QUERY, query);
+    params.set(PARAM_DEF_TYPE, QUERY_TYPE_EDISMAX);
+    params.set(PARAM_QUERY_FIELDS, FIELD_TEXT_CATCHALL);
+    return queryWithPost(collection, params, rows, filterExpression, fieldsCsv);
   }
 
   /**
@@ -514,17 +533,22 @@ public class SearchRepository {
             : embeddingService.embedAndFormatForSolr(query);
 
     ModifiableSolrParams params = new ModifiableSolrParams();
-    params.set("q", SolrQueryUtils.buildKnnQuery(FIELD_VECTOR, rows, vectorString));
-    params.set("rows", rows);
+    params.set(PARAM_QUERY, SolrQueryUtils.buildKnnQuery(FIELD_VECTOR, rows, vectorString));
+    return queryWithPost(collection, params, rows, filterExpression, fieldsCsv);
+  }
 
-    setupFilterQuery(params, filterExpression);
-    setupFieldList(params, fieldsCsv);
-
-    QueryResponse response = solrClient.query(collection, params, SolrRequest.METHOD.POST);
-
-    return response.getResults().stream()
-        .map(this::convertSolrDocumentToMap)
-        .collect(Collectors.toList());
+  /** POST avoids "URI too long" for 1536-dimension vectors in the query string. */
+  private List<Map<String, Object>> queryWithPost(
+      String collection,
+      ModifiableSolrParams params,
+      int rows,
+      @Nullable String filterExpression,
+      @Nullable String fieldsCsv)
+      throws SolrServerException, IOException {
+    params.set(PARAM_ROWS, rows);
+    setFilterQuery(params, filterExpression);
+    setFieldList(params, fieldsCsv);
+    return toDocumentMaps(solrClient.query(collection, params, SolrRequest.METHOD.POST));
   }
 
   /**
@@ -547,9 +571,9 @@ public class SearchRepository {
 
       if (!keywordResults.isEmpty()) {
         log.info("Keyword-only fallback returned {} results", keywordResults.size());
-        return new SearchResponse(keywordResults, Map.of(), Map.of(), null);
+        return documentsOnly(keywordResults);
       }
-    } catch (Exception e) {
+    } catch (SolrServerException | IOException | SolrException e) {
       log.error("Keyword fallback failed", e);
     }
 
@@ -562,120 +586,113 @@ public class SearchRepository {
 
       if (!vectorResults.isEmpty()) {
         log.info("Vector-only fallback returned {} results", vectorResults.size());
-        return new SearchResponse(vectorResults, Map.of(), Map.of(), null);
+        return documentsOnly(vectorResults);
       }
     } catch (Exception e) {
+      // Broad on purpose: embedding the query can fail with provider-specific exceptions.
       log.error("Vector fallback failed", e);
     }
 
     log.warn("All search strategies returned no results for query: {}", query);
-    return new SearchResponse(new ArrayList<>(), Map.of(), Map.of(), null);
+    return documentsOnly(List.of());
   }
 
-  /** Fetches field schema information from Solr including field types and attributes */
+  /**
+   * Fetches schema information for the fields a collection actually uses, resolving each against
+   * the explicit fields first and then the most specific matching dynamic field. Fields that match
+   * neither are skipped rather than reported as unknown. If the Schema API is unavailable, the used
+   * fields are returned with an {@code unknown} type.
+   */
   public List<FieldInfo> getFieldsWithSchema(String collection) {
-    List<FieldInfo> fieldInfos = new ArrayList<>();
-
     try {
-      // 1) Fetch explicit fields
-      SchemaResponse.FieldsResponse fieldsResponse =
-          new SchemaRequest.Fields().process(solrClient, collection);
-      List<Map<String, Object>> explicitFields = fieldsResponse.getFields();
-
-      // Build a quick lookup for explicit fields by name
-      Map<String, Map<String, Object>> explicitByName =
-          explicitFields.stream().collect(Collectors.toMap(f -> (String) f.get("name"), f -> f));
-
-      // 2) Fetch dynamic field definitions (e.g., metadata_*, *_i, *_txt, etc.)
-      SchemaResponse.DynamicFieldsResponse dynamicFieldsResponse =
-          new SchemaRequest.DynamicFields().process(solrClient, collection);
-      List<Map<String, Object>> dynamicFields = dynamicFieldsResponse.getDynamicFields();
-
-      // 3) Determine actually used field names from documents
-      Set<String> usedFields = getActuallyUsedFields(collection);
-
-      // 4) For each used field, resolve attributes from explicit schema or best matching dynamic
-      // field
-      for (String fieldName : usedFields) {
-        if (fieldName == null || fieldName.isEmpty() || fieldName.startsWith("_")) {
-          // Skip internal or invalid fields
-          continue;
-        }
-
-        Map<String, Object> schemaField = explicitByName.get(fieldName);
-        if (schemaField != null) {
-          String type = schemaField.get("type") instanceof String s ? s : "unknown";
-          boolean multiValued = Boolean.TRUE.equals(schemaField.get("multiValued"));
-          boolean stored = !Boolean.FALSE.equals(schemaField.get("stored")); // default true
-          boolean docValues = Boolean.TRUE.equals(schemaField.get("docValues"));
-          boolean indexed = !Boolean.FALSE.equals(schemaField.get("indexed")); // default true
-          fieldInfos.add(new FieldInfo(fieldName, type, multiValued, stored, docValues, indexed));
-          continue;
-        }
-
-        // Try to match a dynamic field pattern
-        Map<String, Object> bestMatch = null;
-        int bestScore = -1; // higher is better
-        for (Map<String, Object> df : dynamicFields) {
-          String pattern = (String) df.get("name");
-          if (pattern == null) continue;
-
-          int score = dynamicMatchScore(fieldName, pattern);
-          if (score >= 0 && score > bestScore) {
-            bestScore = score;
-            bestMatch = df;
-          }
-        }
-
-        if (bestMatch != null) {
-          String type = bestMatch.get("type") instanceof String s ? s : "unknown";
-          boolean multiValued = Boolean.TRUE.equals(bestMatch.get("multiValued"));
-          boolean stored = !Boolean.FALSE.equals(bestMatch.get("stored")); // default true
-          boolean docValues = Boolean.TRUE.equals(bestMatch.get("docValues"));
-          boolean indexed = !Boolean.FALSE.equals(bestMatch.get("indexed")); // default true
-          fieldInfos.add(new FieldInfo(fieldName, type, multiValued, stored, docValues, indexed));
-        }
-        // If no dynamic match, we skip this field to avoid returning unknowns when schema is
-        // available
-      }
-
+      List<FieldInfo> fieldInfos = resolveUsedFieldsAgainstSchema(collection);
       log.debug(
           "Resolved {} used fields with schema (including dynamic fields) from collection {}",
           fieldInfos.size(),
           collection);
-
-    } catch (Exception e) {
+      return fieldInfos;
+    } catch (SolrServerException | IOException | SolrException e) {
       log.error("Error fetching field schema from Solr", e);
-      // Fallback: return fields without type information
-      Set<String> usedFields = getActuallyUsedFields(collection);
-      for (String fieldName : usedFields) {
-        if (!fieldName.startsWith("_")) {
-          fieldInfos.add(new FieldInfo(fieldName, "unknown", false, true, false, true));
-        }
+      return getActuallyUsedFields(collection).stream()
+          .filter(fieldName -> !fieldName.startsWith(INTERNAL_FIELD_PREFIX))
+          .map(fieldName -> new FieldInfo(fieldName, UNKNOWN_TYPE, false, true, false, true))
+          .collect(Collectors.toCollection(ArrayList::new));
+    }
+  }
+
+  private List<FieldInfo> resolveUsedFieldsAgainstSchema(String collection)
+      throws SolrServerException, IOException {
+    Map<String, Map<String, Object>> explicitByName =
+        new SchemaRequest.Fields()
+            .process(solrClient, collection).getFields().stream()
+                .collect(Collectors.toMap(f -> (String) f.get(SCHEMA_NAME), f -> f));
+    List<Map<String, Object>> dynamicFields =
+        new SchemaRequest.DynamicFields().process(solrClient, collection).getDynamicFields();
+
+    List<FieldInfo> fieldInfos = new ArrayList<>();
+    for (String fieldName : getActuallyUsedFields(collection)) {
+      if (isInternalOrBlank(fieldName)) {
+        continue;
+      }
+      Map<String, Object> definition = explicitByName.get(fieldName);
+      if (definition == null) {
+        definition = bestDynamicFieldMatch(fieldName, dynamicFields).orElse(null);
+      }
+      if (definition != null) {
+        fieldInfos.add(toFieldInfo(fieldName, definition));
       }
     }
-
     return fieldInfos;
   }
 
-  // Returns a non-negative score if fieldName matches the dynamic pattern; -1 otherwise.
-  // Score represents the length of the fixed part of the pattern (longer = more specific match).
-  // Solr dynamic fields support a single wildcard either at the start or the end.
-  private int dynamicMatchScore(String fieldName, String pattern) {
-    if (pattern == null || fieldName == null) return -1;
-    if (pattern.equals(fieldName)) return pattern.length();
+  private static boolean isInternalOrBlank(@Nullable String fieldName) {
+    return fieldName == null || fieldName.isEmpty() || fieldName.startsWith(INTERNAL_FIELD_PREFIX);
+  }
 
-    if (pattern.endsWith("*")) {
+  private static Optional<Map<String, Object>> bestDynamicFieldMatch(
+      String fieldName, List<Map<String, Object>> dynamicFields) {
+    Map<String, Object> bestMatch = null;
+    int bestScore = NO_MATCH;
+    for (Map<String, Object> dynamicField : dynamicFields) {
+      if (!(dynamicField.get(SCHEMA_NAME) instanceof String pattern)) {
+        continue;
+      }
+      int score = dynamicMatchScore(fieldName, pattern);
+      if (score > bestScore) {
+        bestScore = score;
+        bestMatch = dynamicField;
+      }
+    }
+    return Optional.ofNullable(bestMatch);
+  }
+
+  /** Solr's defaults apply to absent attributes: stored and indexed default to true. */
+  private static FieldInfo toFieldInfo(String fieldName, Map<String, Object> definition) {
+    String type = definition.get(SCHEMA_TYPE) instanceof String s ? s : UNKNOWN_TYPE;
+    boolean multiValued = Boolean.TRUE.equals(definition.get("multiValued"));
+    boolean stored = !Boolean.FALSE.equals(definition.get("stored"));
+    boolean docValues = Boolean.TRUE.equals(definition.get("docValues"));
+    boolean indexed = !Boolean.FALSE.equals(definition.get("indexed"));
+    return new FieldInfo(fieldName, type, multiValued, stored, docValues, indexed);
+  }
+
+  /**
+   * Returns the length of the pattern's fixed part if {@code fieldName} matches it (longer means a
+   * more specific match), or {@link #NO_MATCH}. Solr dynamic fields support a single wildcard at
+   * either the start or the end.
+   */
+  private static int dynamicMatchScore(String fieldName, String pattern) {
+    if (pattern.equals(fieldName)) {
+      return pattern.length();
+    }
+    if (pattern.endsWith(DYNAMIC_FIELD_WILDCARD)) {
       String prefix = pattern.substring(0, pattern.length() - 1);
-      return fieldName.startsWith(prefix) ? prefix.length() : -1;
+      return fieldName.startsWith(prefix) ? prefix.length() : NO_MATCH;
     }
-
-    if (pattern.startsWith("*")) {
+    if (pattern.startsWith(DYNAMIC_FIELD_WILDCARD)) {
       String suffix = pattern.substring(1);
-      return fieldName.endsWith(suffix) ? suffix.length() : -1;
+      return fieldName.endsWith(suffix) ? suffix.length() : NO_MATCH;
     }
-
-    // No wildcard and not equal => does not match
-    return -1;
+    return NO_MATCH;
   }
 }

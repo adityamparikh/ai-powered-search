@@ -73,7 +73,7 @@ public class EmbeddingService {
       float[] embedding = embeddingModel.embed(text);
       log.debug("Successfully generated embedding with {} dimensions", embedding.length);
       return embedding;
-    } catch (Exception e) {
+    } catch (RuntimeException e) {
       log.warn("Embedding generation failed, will retry if attempts remain: {}", e.getMessage());
       throw e;
     }

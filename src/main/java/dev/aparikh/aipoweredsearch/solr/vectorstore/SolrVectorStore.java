@@ -8,7 +8,6 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import org.apache.solr.client.solrj.SolrClient;
@@ -98,6 +97,14 @@ import org.springframework.util.Assert;
  */
 public class SolrVectorStore extends AbstractObservationVectorStore {
   private static final String SCORE_FIELD = "score";
+  private static final String EMBEDDING_METADATA_KEY = "embedding";
+  private static final String YEAR_METADATA_KEY = "year";
+  private static final String SELECT_HANDLER = "/select";
+  private static final String QUERY_TYPE_PARAM = "qt";
+  private static final String WILDCARD = "*";
+
+  /** Upper bound, in milliseconds, before Solr commits an add or delete on its own. */
+  private static final int COMMIT_WITHIN_MS = 1000;
 
   private static final Logger log = LoggerFactory.getLogger(SolrVectorStore.class);
 
@@ -144,46 +151,12 @@ public class SolrVectorStore extends AbstractObservationVectorStore {
    */
   @Override
   public void doAdd(List<Document> documents) {
+    embedDocumentsMissingEmbeddings(documents);
+    List<SolrInputDocument> solrDocs = documents.stream().map(this::toSolrDocument).toList();
     try {
-      // Separate documents into those with and without embeddings
-      List<Document> documentsWithoutEmbeddings =
-          documents.stream()
-              .filter(
-                  doc -> {
-                    Object embedding = doc.getMetadata().get("embedding");
-                    return !(embedding instanceof float[] vector) || vector.length == 0;
-                  })
-              .toList();
-
-      // Generate embeddings in batch for efficiency
-      if (!documentsWithoutEmbeddings.isEmpty()) {
-        List<String> texts = documentsWithoutEmbeddings.stream().map(Document::getText).toList();
-
-        EmbeddingResponse embeddingResponse = this.embeddingModel.embedForResponse(texts);
-
-        if (embeddingResponse.getResults().size() != documentsWithoutEmbeddings.size()) {
-          throw new IllegalStateException(
-              "Expected "
-                  + documentsWithoutEmbeddings.size()
-                  + " embeddings but got "
-                  + embeddingResponse.getResults().size());
-        }
-
-        // Add embeddings to documents
-        for (int i = 0; i < documentsWithoutEmbeddings.size(); i++) {
-          Document doc = documentsWithoutEmbeddings.get(i);
-          float[] embedding = embeddingResponse.getResults().get(i).getOutput();
-          doc.getMetadata().put("embedding", embedding);
-        }
-      }
-
-      // Convert to Solr documents
-      List<SolrInputDocument> solrDocs = documents.stream().map(this::toSolrDocument).toList();
-
-      // Add to Solr using commitWithin, then perform an explicit soft commit to
-      // make documents immediately searchable for tests/integration scenarios.
-      UpdateResponse response = solrClient.add(collection, solrDocs, 1000);
-      // Ensure the newly added docs are visible to subsequent queries immediately
+      UpdateResponse response = solrClient.add(collection, solrDocs, COMMIT_WITHIN_MS);
+      // commitWithin alone leaves a window where the documents are not yet searchable; the
+      // explicit commit makes them visible to the very next query.
       solrClient.commit(collection);
 
       log.debug(
@@ -192,8 +165,39 @@ public class SolrVectorStore extends AbstractObservationVectorStore {
           collection,
           response.getStatus());
     } catch (SolrServerException | IOException e) {
-      throw new RuntimeException("Failed to add documents to Solr", e);
+      throw new IllegalStateException("Failed to add documents to Solr", e);
     }
+  }
+
+  /** Embeds, in one batch call, the documents that carry no embedding in their metadata. */
+  private void embedDocumentsMissingEmbeddings(List<Document> documents) {
+    List<Document> documentsWithoutEmbeddings =
+        documents.stream().filter(doc -> embeddingOf(doc).isEmpty()).toList();
+    if (documentsWithoutEmbeddings.isEmpty()) {
+      return;
+    }
+
+    List<String> texts = documentsWithoutEmbeddings.stream().map(Document::getText).toList();
+    EmbeddingResponse embeddingResponse = this.embeddingModel.embedForResponse(texts);
+    if (embeddingResponse.getResults().size() != documentsWithoutEmbeddings.size()) {
+      throw new IllegalStateException(
+          "Expected "
+              + documentsWithoutEmbeddings.size()
+              + " embeddings but got "
+              + embeddingResponse.getResults().size());
+    }
+
+    for (int i = 0; i < documentsWithoutEmbeddings.size(); i++) {
+      float[] embedding = embeddingResponse.getResults().get(i).getOutput();
+      documentsWithoutEmbeddings.get(i).getMetadata().put(EMBEDDING_METADATA_KEY, embedding);
+    }
+  }
+
+  private static Optional<float[]> embeddingOf(Document document) {
+    return document.getMetadata().get(EMBEDDING_METADATA_KEY) instanceof float[] embedding
+            && embedding.length > 0
+        ? Optional.of(embedding)
+        : Optional.empty();
   }
 
   /**
@@ -204,7 +208,7 @@ public class SolrVectorStore extends AbstractObservationVectorStore {
   @Override
   public void doDelete(List<String> idList) {
     try {
-      UpdateResponse response = solrClient.deleteById(collection, idList, 1000);
+      UpdateResponse response = solrClient.deleteById(collection, idList, COMMIT_WITHIN_MS);
 
       log.debug(
           "Deleted {} documents from Solr collection '{}', status: {}",
@@ -212,7 +216,7 @@ public class SolrVectorStore extends AbstractObservationVectorStore {
           collection,
           response.getStatus());
     } catch (SolrServerException | IOException e) {
-      throw new RuntimeException("Failed to delete documents from Solr", e);
+      throw new IllegalStateException("Failed to delete documents from Solr", e);
     }
   }
 
@@ -224,82 +228,68 @@ public class SolrVectorStore extends AbstractObservationVectorStore {
    */
   @Override
   public List<Document> doSimilaritySearch(SearchRequest request) {
+    if (request.getQuery().isEmpty()) {
+      throw new IllegalArgumentException("Search query cannot be null or empty");
+    }
+    SolrQuery query = buildKnnQuery(request, embedQuery(request.getQuery()));
     try {
-      // Validate query
-      if (request.getQuery().isEmpty()) {
-        throw new IllegalArgumentException("Search query cannot be null or empty");
-      }
-
-      // Generate embedding for query text
-      EmbeddingResponse embeddingResponse =
-          this.embeddingModel.embedForResponse(Collections.singletonList(request.getQuery()));
-
-      if (embeddingResponse.getResults().isEmpty()) {
-        throw new RuntimeException("Failed to generate embedding for query");
-      }
-
-      float[] queryEmbedding = embeddingResponse.getResults().getFirst().getOutput();
-
-      // Build KNN query
-      String vectorString = VectorFormatUtils.formatVectorForSolr(queryEmbedding);
-      String knnQuery =
-          SolrQueryUtils.buildKnnQuery(options.vectorFieldName(), request.getTopK(), vectorString);
-
-      SolrQuery query = new SolrQuery(knnQuery);
-      // Ensure Solr returns up to topK results
-      if (request.getTopK() > 0) {
-        query.setRows(request.getTopK());
-      }
-
-      // Apply filter expression if present
-      if (request.getFilterExpression() != null) {
-        String solrFilter = convertFilterToSolrQuery(request.getFilterExpression());
-        if (solrFilter != null && !solrFilter.isEmpty()) {
-          query.addFilterQuery(solrFilter);
-        }
-      }
-
-      // Set fields to return (include score pseudo-field for similarity scoring)
-      query.setFields(
-          options.idFieldName(),
-          options.contentFieldName(),
-          SCORE_FIELD,
-          options.metadataPrefix() + "*");
-
-      // Note: Similarity threshold filtering must be done post-query
-      // because "score" is a pseudo-field that doesn't exist until query time
-      // We'll filter results after retrieval based on the threshold
-
-      // Use POST method to avoid URI Too Long errors with large vector embeddings
-      query.setParam("qt", "/select");
+      // POST avoids "URI Too Long" errors with large vector embeddings.
       QueryResponse response = solrClient.query(collection, query, SolrRequest.METHOD.POST);
       List<SolrDocument> results = response.getResults();
 
       log.debug(
           "Similarity search in collection '{}' returned {} results", collection, results.size());
 
-      // Filter results by similarity threshold if specified
+      // "score" is a pseudo-field that exists only at query time, so the similarity threshold
+      // cannot be a Solr filter and is applied to the results instead.
       double threshold = request.getSimilarityThreshold();
       return results.stream()
-          .map(solrDoc -> toDocument(solrDoc, threshold))
-          .filter(Objects::nonNull)
-          .filter(
-              doc -> {
-                // Filter by threshold if specified
-                if (threshold >= 0) {
-                  Object scoreObj = doc.getMetadata().get(SCORE_FIELD);
-                  if (scoreObj instanceof Number) {
-                    double score = ((Number) scoreObj).doubleValue();
-                    return score >= threshold;
-                  }
-                  return false;
-                }
-                return true;
-              })
+          .map(this::toDocument)
+          .flatMap(Optional::stream)
+          .filter(doc -> meetsThreshold(doc, threshold))
           .toList();
     } catch (SolrServerException | IOException e) {
-      throw new RuntimeException("Failed to perform similarity search in Solr", e);
+      throw new IllegalStateException("Failed to perform similarity search in Solr", e);
     }
+  }
+
+  private float[] embedQuery(String queryText) {
+    EmbeddingResponse embeddingResponse =
+        this.embeddingModel.embedForResponse(Collections.singletonList(queryText));
+    if (embeddingResponse.getResults().isEmpty()) {
+      throw new IllegalStateException("Failed to generate embedding for query");
+    }
+    return embeddingResponse.getResults().getFirst().getOutput();
+  }
+
+  private SolrQuery buildKnnQuery(SearchRequest request, float[] queryEmbedding) {
+    String vectorString = VectorFormatUtils.formatVectorForSolr(queryEmbedding);
+    SolrQuery query =
+        new SolrQuery(
+            SolrQueryUtils.buildKnnQuery(
+                options.vectorFieldName(), request.getTopK(), vectorString));
+    if (request.getTopK() > 0) {
+      query.setRows(request.getTopK());
+    }
+    convertFilterToSolrQuery(request.getFilterExpression())
+        .filter(solrFilter -> !solrFilter.isEmpty())
+        .ifPresent(query::addFilterQuery);
+    query.setFields(
+        options.idFieldName(),
+        options.contentFieldName(),
+        SCORE_FIELD,
+        options.metadataPrefix() + WILDCARD);
+    query.setParam(QUERY_TYPE_PARAM, SELECT_HANDLER);
+    return query;
+  }
+
+  /** A negative threshold disables filtering; otherwise unscored documents are dropped. */
+  private static boolean meetsThreshold(Document document, double threshold) {
+    if (threshold < 0) {
+      return true;
+    }
+    return document.getMetadata().get(SCORE_FIELD) instanceof Number score
+        && score.doubleValue() >= threshold;
   }
 
   /** Creates observation context builder for metrics. */
@@ -331,11 +321,8 @@ public class SolrVectorStore extends AbstractObservationVectorStore {
   }
 
   /** Converts Spring AI filter expressions to Solr query syntax. */
-  private @Nullable String convertFilterToSolrQuery(Filter.@Nullable Expression filterExpression) {
-    if (filterExpression == null) {
-      return null;
-    }
-    return convertOperand(filterExpression);
+  private Optional<String> convertFilterToSolrQuery(Filter.@Nullable Expression filterExpression) {
+    return Optional.ofNullable(filterExpression).map(this::convertOperand);
   }
 
   private String convertOperand(Filter.@Nullable Operand operand) {
@@ -343,24 +330,20 @@ public class SolrVectorStore extends AbstractObservationVectorStore {
       // Unary operators (for example NOT) carry no right-hand operand.
       return "";
     }
-    if (operand instanceof Filter.Expression expression) {
-      return convertExpression(expression);
-    } else if (operand instanceof Filter.Group group) {
-      return "(" + convertOperand(group.content()) + ")";
-    } else if (operand instanceof Filter.Key key) {
-      String fieldName = key.key();
-      if (!fieldName.startsWith(options.metadataPrefix())) {
-        fieldName = options.metadataPrefix() + fieldName;
-      }
-      return fieldName;
-    } else if (operand instanceof Filter.Value value) {
-      Object v = value.value();
-      if (v instanceof String s) {
-        return "\"" + s + "\"";
-      }
-      return String.valueOf(v);
-    }
-    return "";
+    return switch (operand) {
+      case Filter.Expression expression -> convertExpression(expression);
+      case Filter.Group group -> "(" + convertOperand(group.content()) + ")";
+      case Filter.Key key -> withMetadataPrefix(key.key());
+      case Filter.Value value ->
+          value.value() instanceof String text ? "\"" + text + "\"" : String.valueOf(value.value());
+      default -> "";
+    };
+  }
+
+  private String withMetadataPrefix(String fieldName) {
+    return fieldName.startsWith(options.metadataPrefix())
+        ? fieldName
+        : options.metadataPrefix() + fieldName;
   }
 
   private String convertExpression(Filter.Expression expression) {
@@ -387,124 +370,88 @@ public class SolrVectorStore extends AbstractObservationVectorStore {
   private SolrInputDocument toSolrDocument(Document document) {
     SolrInputDocument solrDoc = new SolrInputDocument();
 
-    // Set ID
     String id = document.getId() != null ? document.getId() : UUID.randomUUID().toString();
     solrDoc.addField(options.idFieldName(), id);
-
-    // Set content
     solrDoc.addField(options.contentFieldName(), document.getText());
+    embeddingOf(document)
+        .ifPresent(
+            embedding -> solrDoc.addField(options.vectorFieldName(), toFloatList(embedding)));
 
-    // Set vector embedding from metadata
-    Object embeddingObj = document.getMetadata().get("embedding");
-
-    if (embeddingObj instanceof float[]) {
-      float[] embedding = (float[]) embeddingObj;
-      List<Float> embeddingList = new ArrayList<>();
-      for (float val : embedding) {
-        embeddingList.add(val);
-      }
-      solrDoc.addField(options.vectorFieldName(), embeddingList);
-    }
-
-    // Add metadata fields with prefix (skip embedding as it's stored separately)
-    if (document.getMetadata() != null) {
-      document
-          .getMetadata()
-          .forEach(
-              (key, value) -> {
-                if (!options.idFieldName().equals(key)
-                    && !options.contentFieldName().equals(key)
-                    && !options.vectorFieldName().equals(key)
-                    && !"embedding".equals(key)) {
-                  solrDoc.addField(options.metadataPrefix() + key, value);
-                }
-              });
-    }
-
+    document
+        .getMetadata()
+        .forEach(
+            (key, value) -> {
+              if (isUserMetadata(key)) {
+                solrDoc.addField(options.metadataPrefix() + key, value);
+              }
+            });
     return solrDoc;
   }
 
-  private @Nullable Document toDocument(SolrDocument solrDoc, double similarityThreshold) {
-    // Handle potential multi-valued fields from Solr
-    Object idObj = solrDoc.getFieldValue(options.idFieldName());
-    @Nullable String id = null;
-    if (idObj instanceof List) {
-      List<?> idList = (List<?>) idObj;
-      if (!idList.isEmpty()) {
-        id = idList.get(0).toString();
-      }
-    } else if (idObj != null) {
-      id = idObj.toString();
+  private static List<Float> toFloatList(float[] values) {
+    List<Float> list = new ArrayList<>(values.length);
+    for (float value : values) {
+      list.add(value);
     }
+    return list;
+  }
 
-    // A document without an id cannot be represented as a Spring AI Document; skip it.
-    if (id == null) {
-      return null;
-    }
+  /** The id, content and embedding are stored in their own fields, not as metadata. */
+  private boolean isUserMetadata(String key) {
+    return !options.idFieldName().equals(key)
+        && !options.contentFieldName().equals(key)
+        && !options.vectorFieldName().equals(key)
+        && !EMBEDDING_METADATA_KEY.equals(key);
+  }
 
-    Object contentObj = solrDoc.getFieldValue(options.contentFieldName());
-    @Nullable String content = null;
-    if (contentObj instanceof List) {
-      List<?> contentList = (List<?>) contentObj;
-      if (!contentList.isEmpty()) {
-        content = contentList.get(0).toString();
-      }
-    } else if (contentObj != null) {
-      content = contentObj.toString();
-    }
+  /** A Solr document without an id cannot be represented as a Spring AI Document. */
+  private Optional<Document> toDocument(SolrDocument solrDoc) {
+    return firstValueAsString(solrDoc.getFieldValue(options.idFieldName()))
+        .map(
+            id ->
+                Document.builder()
+                    .id(id)
+                    .text(
+                        firstValueAsString(solrDoc.getFieldValue(options.contentFieldName()))
+                            .orElse(null))
+                    .metadata(extractMetadata(solrDoc))
+                    .build());
+  }
 
-    // Extract score and normalize for cosine similarity
-    Number scoreNum = (Number) solrDoc.getFieldValue(SCORE_FIELD);
-    @Nullable Double score = scoreNum != null ? scoreNum.doubleValue() : null;
-
-    // Apply similarity threshold if score is available
-    if (score != null && similarityThreshold >= 0) {
-      // Solr returns cosine similarity in [0,1] range with 1 being most similar
-      if (score < similarityThreshold) {
-        return null; // Filter out documents below threshold
-      }
-    }
-
-    // Extract metadata (fields with metadata prefix)
+  private Map<String, Object> extractMetadata(SolrDocument solrDoc) {
     Map<String, Object> metadata = new HashMap<>();
-    solrDoc
-        .getFieldNames()
-        .forEach(
-            fieldName -> {
-              if (fieldName.startsWith(options.metadataPrefix())) {
-                String metadataKey = fieldName.substring(options.metadataPrefix().length());
-                Object metadataValue = solrDoc.getFieldValue(fieldName);
-
-                // Handle multi-valued fields - extract first value if it's a list
-                if (metadataValue instanceof List) {
-                  List<?> valueList = (List<?>) metadataValue;
-                  if (!valueList.isEmpty()) {
-                    Object firstValue = valueList.get(0);
-                    // Convert Long to Integer for year field
-                    if ("year".equals(metadataKey) && firstValue instanceof Long) {
-                      metadata.put(metadataKey, ((Long) firstValue).intValue());
-                    } else {
-                      metadata.put(metadataKey, firstValue);
-                    }
-                  }
-                } else if (metadataValue != null) {
-                  // Convert Long to Integer for year field
-                  if ("year".equals(metadataKey) && metadataValue instanceof Long) {
-                    metadata.put(metadataKey, ((Long) metadataValue).intValue());
-                  } else {
-                    metadata.put(metadataKey, metadataValue);
-                  }
-                }
-              }
-            });
-
-    // Add score if present
-    if (score != null) {
-      metadata.put(SCORE_FIELD, score);
+    for (String fieldName : solrDoc.getFieldNames()) {
+      if (!fieldName.startsWith(options.metadataPrefix())) {
+        continue;
+      }
+      String metadataKey = fieldName.substring(options.metadataPrefix().length());
+      firstValue(solrDoc.getFieldValue(fieldName))
+          .ifPresent(
+              value -> metadata.put(metadataKey, normalizeMetadataValue(metadataKey, value)));
     }
+    if (solrDoc.getFieldValue(SCORE_FIELD) instanceof Number score) {
+      metadata.put(SCORE_FIELD, score.doubleValue());
+    }
+    return metadata;
+  }
 
-    // Build document
-    return Document.builder().id(id).text(content).metadata(metadata).build();
+  /** Solr returns integer fields as Long; callers expect the year as an Integer. */
+  private static Object normalizeMetadataValue(String metadataKey, Object value) {
+    return YEAR_METADATA_KEY.equals(metadataKey) && value instanceof Long year
+        ? year.intValue()
+        : value;
+  }
+
+  /** Solr may return any field as multi-valued; only the first value is kept. */
+  private static Optional<Object> firstValue(@Nullable Object fieldValue) {
+    if (fieldValue instanceof List<?> values) {
+      return values.isEmpty() ? Optional.empty() : Optional.ofNullable(values.get(0));
+    }
+    return Optional.ofNullable(fieldValue);
+  }
+
+  private static Optional<String> firstValueAsString(@Nullable Object fieldValue) {
+    return firstValue(fieldValue).map(Object::toString);
   }
 
   /** Builder for SolrVectorStore. */
