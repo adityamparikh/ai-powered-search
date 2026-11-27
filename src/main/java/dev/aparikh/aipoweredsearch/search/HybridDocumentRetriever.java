@@ -4,7 +4,7 @@ import dev.aparikh.aipoweredsearch.search.model.SearchResponse;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
+import java.util.Optional;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -50,6 +50,9 @@ public class HybridDocumentRetriever implements DocumentRetriever {
 
   private static final Logger log = LoggerFactory.getLogger(HybridDocumentRetriever.class);
 
+  private static final @Nullable String NO_FILTER = null;
+  private static final @Nullable Double NO_MIN_SCORE = null;
+
   private final SearchRepository searchRepository;
   private final String collection;
   private final int topK;
@@ -79,10 +82,10 @@ public class HybridDocumentRetriever implements DocumentRetriever {
     // but is pure latency on a RAG turn, where the model already has the question.
     SearchResponse response =
         searchRepository.executeHybridRerankSearch(
-            collection, query.text(), topK, null, PROJECTED_FIELDS, null);
+            collection, query.text(), topK, NO_FILTER, PROJECTED_FIELDS, NO_MIN_SCORE);
 
     List<Document> documents =
-        response.documents().stream().map(this::toDocument).filter(Objects::nonNull).toList();
+        response.documents().stream().map(this::toDocument).flatMap(Optional::stream).toList();
 
     log.debug(
         "Hybrid retrieval for '{}' returned {} documents from collection '{}'",
@@ -95,14 +98,14 @@ public class HybridDocumentRetriever implements DocumentRetriever {
   /**
    * Converts a Solr result row into a Spring AI {@link Document}.
    *
-   * @return the converted document, or null if it carries no usable context
+   * @return the converted document, or empty if it carries no usable context
    */
-  private @Nullable Document toDocument(Map<String, Object> row) {
+  private Optional<Document> toDocument(Map<String, Object> row) {
     Object id = row.get(ID_FIELD);
     Object content = row.get(CONTENT_FIELD);
     if (id == null || content == null) {
       log.debug("Skipping hybrid result without id or content: {}", row.keySet());
-      return null;
+      return Optional.empty();
     }
 
     Map<String, Object> metadata = new LinkedHashMap<>();
@@ -113,6 +116,6 @@ public class HybridDocumentRetriever implements DocumentRetriever {
           }
         });
 
-    return new Document(id.toString(), content.toString(), metadata);
+    return Optional.of(new Document(id.toString(), content.toString(), metadata));
   }
 }

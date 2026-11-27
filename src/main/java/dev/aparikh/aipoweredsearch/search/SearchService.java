@@ -11,7 +11,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.stream.Collectors;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -57,7 +56,22 @@ import org.springframework.stereotype.Service;
 @Service
 public class SearchService {
 
-  private final Logger log = LoggerFactory.getLogger(SearchService.class);
+  private static final Logger log = LoggerFactory.getLogger(SearchService.class);
+
+  /** A higher default topK improves recall for short, natural-language queries. */
+  private static final int DEFAULT_SEMANTIC_TOP_K = 50;
+
+  private static final int DEFAULT_HYBRID_TOP_K = 100;
+  private static final double NO_SIMILARITY_THRESHOLD = 0.0;
+  private static final String DEFAULT_CONVERSATION_ID = "default";
+  private static final String FILTER_CONJUNCTION = " AND ";
+  private static final String ID_FIELD = "id";
+  private static final String CONTENT_FIELD = "content";
+  private static final String EMBEDDING_METADATA_KEY = "embedding";
+  private static final String YEAR_FIELD = "year";
+
+  /** Prefix stripped from metadata keys, for consistency with the earlier API. */
+  private static final String METADATA_PREFIX = "metadata_";
 
   private final Resource systemResource;
   private final SearchRepository searchRepository;
@@ -118,9 +132,7 @@ public class SearchService {
     validateSearchInputs(collection, freeTextQuery);
     log.debug("Searching for collection: {}, query: {}", collection, freeTextQuery);
 
-    String userMessage = buildQueryUserMessage(freeTextQuery, collection);
-    QueryGenerationResponse queryGenerationResponse =
-        generateQueryWithAI(systemResource, userMessage);
+    QueryGenerationResponse queryGenerationResponse = generateQuery(collection, freeTextQuery);
 
     SearchRequest searchRequest =
         new SearchRequest(
@@ -165,30 +177,19 @@ public class SearchService {
         minScore,
         fieldsCsv);
 
-    // Use a higher default topK to improve recall for short/natural queries
-    int topK = (k != null && k > 0) ? k : 50;
-    double similarityThreshold = (minScore != null) ? minScore : 0.0;
-
-    // Build Spring AI SearchRequest - leverages VectorStore's built-in search capabilities
-    // Note: We don't apply AI-generated filters here to maximize recall for semantic search
+    // AI-generated filters are deliberately not applied here, to maximize semantic recall.
     org.springframework.ai.vectorstore.SearchRequest searchRequest =
         org.springframework.ai.vectorstore.SearchRequest.builder()
             .query(freeTextQuery)
-            .topK(topK)
-            .similarityThreshold(similarityThreshold)
+            .topK(positiveOrDefault(k, DEFAULT_SEMANTIC_TOP_K))
+            .similarityThreshold(minScore != null ? minScore : NO_SIMILARITY_THRESHOLD)
             .build();
 
-    // Get VectorStore for the collection and execute similarity search
-    // This delegates to SolrVectorStore.doSimilaritySearch() which has:
-    // - Observability/metrics support via AbstractObservationVectorStore
-    // - Proper embedding generation
-    // - KNN query execution
+    // Going through the VectorStore (not the repository) keeps its observability metrics.
     VectorStore vectorStore = vectorStoreFactory.forCollection(collection);
     List<Document> documents = vectorStore.similaritySearch(searchRequest);
 
     log.debug("Semantic search returned {} documents", documents.size());
-
-    // Convert Spring AI Documents to SearchResponse format
     return toSearchResponse(documents, fieldsCsv);
   }
 
@@ -236,20 +237,16 @@ public class SearchService {
         minScore,
         fieldsCsv);
 
-    // Step 1 & 2: Generate query with AI
-    String userMessage = buildQueryUserMessage(freeTextQuery, collection);
-    QueryGenerationResponse queryGenerationResponse =
-        generateQueryWithAI(systemResource, userMessage);
-
-    // Step 3: Build filter expression if present
+    QueryGenerationResponse queryGenerationResponse = generateQuery(collection, freeTextQuery);
     String filterExpression = buildFilterExpression(queryGenerationResponse.fq());
 
-    // Step 4: Execute hybrid search using RRF in Solr
-    // Repository will handle embedding generation internally
-    int topK = (k != null && k > 0) ? k : 100;
-
     return searchRepository.executeHybridRerankSearch(
-        collection, queryGenerationResponse.q(), topK, filterExpression, fieldsCsv, minScore);
+        collection,
+        queryGenerationResponse.q(),
+        positiveOrDefault(k, DEFAULT_HYBRID_TOP_K),
+        filterExpression,
+        fieldsCsv,
+        minScore);
   }
 
   /**
@@ -274,16 +271,10 @@ public class SearchService {
     log.debug("RAG question answering for: {}", askRequest.question());
 
     String conversationId =
-        askRequest.conversationId() != null ? askRequest.conversationId() : "default";
+        askRequest.conversationId() != null ? askRequest.conversationId() : DEFAULT_CONVERSATION_ID;
 
-    // The RetrievalAugmentationAdvisor automatically:
-    // 1. Retrieves relevant documents via HybridDocumentRetriever (keyword + vector, RRF-fused)
-    // 2. Adds them as context to the prompt
-    // 3. Claude generates an answer based on that context
-    //
-    // We ask for the full ChatClientResponse rather than just content() because the advisor
-    // publishes the documents it retrieved into the response context, which lets us report
-    // them as sources.
+    // The full ChatClientResponse, not just content(): the retrieval advisor publishes the
+    // documents it placed in the prompt into the response context, and those are the sources.
     ChatClientResponse chatClientResponse =
         ragChatClient
             .prompt()
@@ -332,12 +323,11 @@ public class SearchService {
     }
     return documents.stream()
         .filter(Document.class::isInstance)
-        .map(document -> ((Document) document).getId())
-        .filter(java.util.Objects::nonNull)
+        .map(Document.class::cast)
+        .map(Document::getId)
+        .filter(Objects::nonNull)
         .toList();
   }
-
-  // ============== Helper Methods ==============
 
   /**
    * Validates search input parameters.
@@ -347,12 +337,20 @@ public class SearchService {
    * @throws IllegalArgumentException if validation fails
    */
   private void validateSearchInputs(String collection, String freeTextQuery) {
-    if (collection == null || collection.trim().isEmpty()) {
+    if (collection == null || collection.isBlank()) {
       throw new IllegalArgumentException("Collection name cannot be null or blank");
     }
-    if (freeTextQuery == null || freeTextQuery.trim().isEmpty()) {
+    if (freeTextQuery == null || freeTextQuery.isBlank()) {
       throw new IllegalArgumentException("Query cannot be null or blank");
     }
+  }
+
+  private static int positiveOrDefault(@Nullable Integer value, int defaultValue) {
+    return value != null && value > 0 ? value : defaultValue;
+  }
+
+  private QueryGenerationResponse generateQuery(String collection, String freeTextQuery) {
+    return generateQueryWithAI(systemResource, buildQueryUserMessage(freeTextQuery, collection));
   }
 
   /**
@@ -404,10 +402,10 @@ public class SearchService {
    * @return combined filter expression or null if no filters
    */
   private @Nullable String buildFilterExpression(@Nullable List<String> filterQueries) {
-    if (filterQueries != null && !filterQueries.isEmpty()) {
-      return String.join(" AND ", filterQueries);
+    if (filterQueries == null || filterQueries.isEmpty()) {
+      return null;
     }
-    return null;
+    return String.join(FILTER_CONJUNCTION, filterQueries);
   }
 
   /**
@@ -421,66 +419,50 @@ public class SearchService {
    * @return SearchResponse with converted documents
    */
   private SearchResponse toSearchResponse(List<Document> documents, @Nullable String fieldsCsv) {
-    // Parse requested fields if provided
-    @Nullable List<String> requestedFields = null;
-    if (fieldsCsv != null && !fieldsCsv.isBlank()) {
-      requestedFields = List.of(fieldsCsv.split(","));
-    }
-    final List<String> fieldsToInclude = requestedFields;
-
+    @Nullable List<String> requestedFields =
+        fieldsCsv != null && !fieldsCsv.isBlank() ? List.of(fieldsCsv.split(",")) : null;
     List<Map<String, Object>> documentMaps =
-        documents.stream()
-            .map(
-                doc -> {
-                  Map<String, Object> docMap = new HashMap<>();
-
-                  // Always include id
-                  if (doc.getId() != null) {
-                    docMap.put("id", doc.getId());
-                  }
-
-                  // Include content if requested or no filter specified
-                  if (fieldsToInclude == null || fieldsToInclude.contains("content")) {
-                    if (doc.getText() != null) {
-                      docMap.put("content", doc.getText());
-                    }
-                  }
-
-                  // Include metadata fields
-                  if (doc.getMetadata() != null) {
-                    doc.getMetadata()
-                        .forEach(
-                            (key, value) -> {
-                              // Skip the embedding field - it's internal
-                              if ("embedding".equals(key)) {
-                                return;
-                              }
-
-                              // Strip metadata_ prefix if present (for consistency with previous
-                              // API)
-                              String outputKey =
-                                  key.startsWith("metadata_")
-                                      ? key.substring("metadata_".length())
-                                      : key;
-
-                              // Include if no filter or field is in filter list
-                              if (fieldsToInclude == null
-                                  || fieldsToInclude.contains(outputKey)
-                                  || fieldsToInclude.contains(key)) {
-                                // Handle type conversions (e.g., Long to Integer for year)
-                                if ("year".equals(outputKey) && value instanceof Long) {
-                                  docMap.put(outputKey, ((Long) value).intValue());
-                                } else {
-                                  docMap.put(outputKey, value);
-                                }
-                              }
-                            });
-                  }
-
-                  return docMap;
-                })
-            .collect(Collectors.toList());
-
+        documents.stream().map(doc -> toDocumentMap(doc, requestedFields)).toList();
     return new SearchResponse(documentMaps, Map.of());
+  }
+
+  /**
+   * Converts one document to its API form: id always, content and metadata only when requested
+   * ({@code requestedFields} null means all fields).
+   */
+  private static Map<String, Object> toDocumentMap(
+      Document doc, @Nullable List<String> requestedFields) {
+    Map<String, Object> docMap = new HashMap<>();
+    if (doc.getId() != null) {
+      docMap.put(ID_FIELD, doc.getId());
+    }
+    if (doc.getText() != null && isRequested(requestedFields, CONTENT_FIELD)) {
+      docMap.put(CONTENT_FIELD, doc.getText());
+    }
+    doc.getMetadata()
+        .forEach(
+            (key, value) -> {
+              if (EMBEDDING_METADATA_KEY.equals(key)) {
+                return; // internal, never part of the API response
+              }
+              String outputKey = stripMetadataPrefix(key);
+              if (isRequested(requestedFields, outputKey) || isRequested(requestedFields, key)) {
+                docMap.put(outputKey, normalizeValue(outputKey, value));
+              }
+            });
+    return docMap;
+  }
+
+  private static boolean isRequested(@Nullable List<String> requestedFields, String field) {
+    return requestedFields == null || requestedFields.contains(field);
+  }
+
+  private static String stripMetadataPrefix(String key) {
+    return key.startsWith(METADATA_PREFIX) ? key.substring(METADATA_PREFIX.length()) : key;
+  }
+
+  /** Solr returns integer fields as Long; the API exposes the year as an Integer. */
+  private static Object normalizeValue(String field, Object value) {
+    return YEAR_FIELD.equals(field) && value instanceof Long year ? year.intValue() : value;
   }
 }

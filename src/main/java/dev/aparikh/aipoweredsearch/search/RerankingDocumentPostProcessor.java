@@ -83,7 +83,8 @@ public class RerankingDocumentPostProcessor implements DocumentPostProcessor {
 
       log.debug("Reranked {} candidates down to {}", documents.size(), reranked.size());
       return reranked;
-    } catch (Exception e) {
+    } catch (RuntimeException e) {
+      // Reranking only refines context: any model or parsing failure keeps retrieval order.
       log.warn("Reranking failed, keeping retrieval order: {}", e.getMessage());
       return truncate(documents);
     }
