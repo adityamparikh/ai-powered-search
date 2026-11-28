@@ -409,6 +409,29 @@ class SearchRepositoryTest {
     }
 
     @Test
+    void propagatesInterruptionDuringTheKeywordFallback() throws Exception {
+      stubEmbedding();
+      when(solrClient.request(any(SolrRequest.class), eq(COLLECTION)))
+          .thenThrow(new RemoteSolrException("http://solr", 503, "Service Unavailable", null));
+      when(solrClient.query(eq(COLLECTION), any(SolrParams.class), eq(SolrRequest.METHOD.POST)))
+          .thenThrow(new SolrServerException(new InterruptedException("cancelled")));
+
+      try {
+        assertThatThrownBy(
+                () ->
+                    searchRepository.executeHybridRerankSearch(
+                        COLLECTION, QUERY, 10, null, null, null))
+            .isInstanceOf(IllegalStateException.class);
+        assertThat(Thread.currentThread().isInterrupted()).isTrue();
+        // The vector fallback must not run on a cancelled request.
+        verify(solrClient, times(1))
+            .query(eq(COLLECTION), any(SolrParams.class), eq(SolrRequest.METHOD.POST));
+      } finally {
+        Thread.interrupted(); // clear the flag for the next test
+      }
+    }
+
+    @Test
     void doesNotFallBackWhenSolrFindsNothing() throws Exception {
       stubEmbedding();
       stubCombinedResults();

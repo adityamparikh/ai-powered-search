@@ -170,8 +170,16 @@ public abstract class EvaluationTestBase {
           "Content-Type: application/json",
           "-d",
           """
-                            {"add-field-type":{"name":"knn_vector_1536","class":"solr.DenseVectorField","vectorDimension":1536,"similarityFunction":"cosine","knnAlgorithm":"hnsw"}}
-                            """
+          {
+            "add-field-type": {
+              "name": "knn_vector_1536",
+              "class": "solr.DenseVectorField",
+              "vectorDimension": 1536,
+              "similarityFunction": "cosine",
+              "knnAlgorithm": "hnsw"
+            }
+          }
+          """
               .strip());
 
       Thread.sleep(1000); // Wait for schema update
@@ -186,8 +194,10 @@ public abstract class EvaluationTestBase {
           "Content-Type: application/json",
           "-d",
           """
-                            {"add-field":{"name":"vector","type":"knn_vector_1536","indexed":true,"stored":true}}
-                            """
+          {
+            "add-field": {"name": "vector", "type": "knn_vector_1536", "indexed": true, "stored": true}
+          }
+          """
               .strip());
 
       Thread.sleep(1000); // Wait for schema update

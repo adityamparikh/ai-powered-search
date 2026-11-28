@@ -61,7 +61,7 @@ public class SearchRepository {
   static final String COMBINER_RRF = "rrf";
   private static final int HTTP_NOT_FOUND = 404;
 
-  Logger log = LoggerFactory.getLogger(SearchRepository.class);
+  private static final Logger log = LoggerFactory.getLogger(SearchRepository.class);
   private final SolrClient solrClient;
   private final EmbeddingService embeddingService;
 
@@ -86,8 +86,7 @@ public class SearchRepository {
     Map<String, Object> docMap = new HashMap<>();
     for (String fieldName : doc.getFieldNames()) {
       Object value = doc.getFieldValue(fieldName);
-      if (value instanceof List) {
-        List<?> list = (List<?>) value;
+      if (value instanceof List<?> list) {
         if (!list.isEmpty()) {
           docMap.put(fieldName, list.get(0));
         }
@@ -131,9 +130,7 @@ public class SearchRepository {
       return documents;
     }
     List<Map<String, Object>> filtered =
-        documents.stream()
-            .filter(doc -> passesMinScore(doc, minScore))
-            .collect(Collectors.toList());
+        documents.stream().filter(doc -> passesMinScore(doc, minScore)).toList();
     log.debug(
         "minScore={} filtered {} documents down to {}",
         minScore,
@@ -148,8 +145,8 @@ public class SearchRepository {
       return true;
     }
     Object scoreObj = doc.get(FIELD_SCORE);
-    if (scoreObj instanceof Number) {
-      return ((Number) scoreObj).doubleValue() >= minScore;
+    if (scoreObj instanceof Number score) {
+      return score.doubleValue() >= minScore;
     }
     return true;
   }
@@ -207,7 +204,7 @@ public class SearchRepository {
                               f.getValues().stream()
                                   .map(
                                       c -> new SearchResponse.FacetCount(c.getName(), c.getCount()))
-                                  .collect(Collectors.toList())))
+                                  .toList()))
               : new java.util.HashMap<>();
 
       // Handle spell check suggestions
@@ -222,14 +219,13 @@ public class SearchRepository {
       }
 
       return new SearchResponse(
-          response.getResults().stream()
-              .map(this::convertSolrDocumentToMap)
-              .collect(Collectors.toList()),
+          response.getResults().stream().map(this::convertSolrDocumentToMap).toList(),
           facetCountsMap,
           Map.of(), // No highlighting without knowing field names
           spellCheckSuggestion);
-    } catch (Exception e) {
-      throw new RuntimeException(e);
+    } catch (SolrServerException | IOException e) {
+      propagateIfInterrupted(e, "Search");
+      throw new IllegalStateException("Search failed in collection '" + collection + "'", e);
     }
   }
 
@@ -247,6 +243,7 @@ public class SearchRepository {
         usedFields.addAll(doc.getFieldNames());
       }
     } catch (Exception e) {
+      propagateIfInterrupted(e, "Field analysis");
       log.error("Error analyzing fields", e);
     }
     return usedFields;
@@ -305,25 +302,23 @@ public class SearchRepository {
       List<Map<String, Object>> results =
           request.process(solrClient, collection).getResults().stream()
               .map(this::convertSolrDocumentToMap)
-              .collect(Collectors.toList());
+              .toList();
 
       log.debug("Hybrid search (Solr RRF) returned {} documents", results.size());
       return new SearchResponse(results, Map.of(), Map.of(), null);
 
     } catch (Exception e) {
-      if (isInterruption(e)) {
-        // The caller is being cancelled: running fallback queries on this thread would ignore
-        // that and swallow the interrupt. Restore the flag and propagate instead.
-        Thread.currentThread().interrupt();
-        throw new IllegalStateException("Hybrid search was interrupted", e);
-      }
+      // The caller is being cancelled: running fallback queries on this thread would ignore
+      // that and swallow the interrupt.
+      propagateIfInterrupted(e, "Hybrid search");
       if (e instanceof SolrException solrException && solrException.code() == HTTP_NOT_FOUND) {
         // A configuration problem, not an outage: no stack trace, said once per collection.
         if (firstMissingHandlerReport(collection)) {
           log.warn(
-              "Collection '{}' has no {} handler (solr.CombinedQuerySearchHandler, Solr 10.1+); "
-                  + "hybrid search is degrading to keyword/vector fallback. Add the handler to the "
-                  + "collection's configset (see solr-config/conf/solrconfig.xml).",
+              """
+              Collection '{}' has no {} handler (solr.CombinedQuerySearchHandler, Solr 10.1+); \
+              hybrid search is degrading to keyword/vector fallback. Add the handler to the \
+              collection's configset (see solr-config/conf/solrconfig.xml).""",
               collection,
               HYBRID_HANDLER);
         } else {
@@ -351,6 +346,17 @@ public class SearchRepository {
     // Past the cap, keep warning rather than remembering more names.
     return collectionsWithoutHybridHandler.size() >= MAX_TRACKED_COLLECTIONS
         || collectionsWithoutHybridHandler.add(collection);
+  }
+
+  /**
+   * Restores the thread's interrupt flag and throws when {@code e} was caused by an interruption,
+   * so a catch-and-degrade block does not swallow a cancellation.
+   */
+  static void propagateIfInterrupted(Exception e, String operation) {
+    if (isInterruption(e)) {
+      Thread.currentThread().interrupt();
+      throw new IllegalStateException(operation + " was interrupted", e);
+    }
   }
 
   private static boolean isInterruption(Throwable e) {
@@ -475,9 +481,7 @@ public class SearchRepository {
 
     QueryResponse response = solrClient.query(collection, params, SolrRequest.METHOD.POST);
 
-    return response.getResults().stream()
-        .map(this::convertSolrDocumentToMap)
-        .collect(Collectors.toList());
+    return response.getResults().stream().map(this::convertSolrDocumentToMap).toList();
   }
 
   /**
@@ -522,9 +526,7 @@ public class SearchRepository {
 
     QueryResponse response = solrClient.query(collection, params, SolrRequest.METHOD.POST);
 
-    return response.getResults().stream()
-        .map(this::convertSolrDocumentToMap)
-        .collect(Collectors.toList());
+    return response.getResults().stream().map(this::convertSolrDocumentToMap).toList();
   }
 
   /**
@@ -550,6 +552,7 @@ public class SearchRepository {
         return new SearchResponse(keywordResults, Map.of(), Map.of(), null);
       }
     } catch (Exception e) {
+      propagateIfInterrupted(e, "Keyword fallback");
       log.error("Keyword fallback failed", e);
     }
 
@@ -565,6 +568,7 @@ public class SearchRepository {
         return new SearchResponse(vectorResults, Map.of(), Map.of(), null);
       }
     } catch (Exception e) {
+      propagateIfInterrupted(e, "Vector fallback");
       log.error("Vector fallback failed", e);
     }
 
@@ -645,6 +649,7 @@ public class SearchRepository {
           collection);
 
     } catch (Exception e) {
+      propagateIfInterrupted(e, "Schema lookup");
       log.error("Error fetching field schema from Solr", e);
       // Fallback: return fields without type information
       Set<String> usedFields = getActuallyUsedFields(collection);

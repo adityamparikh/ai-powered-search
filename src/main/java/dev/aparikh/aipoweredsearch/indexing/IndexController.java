@@ -87,8 +87,9 @@ class IndexController {
   @Operation(
       summary = "Index a single document",
       description =
-          "Indexes a document with automatic vector embedding generation using OpenAI. "
-              + "The content will be converted to a 1536-dimensional vector and stored in Solr for semantic search.")
+          """
+          Indexes a document with automatic vector embedding generation using OpenAI. \
+          The content will be converted to a 1536-dimensional vector and stored in Solr for semantic search.""")
   public IndexResponse indexDocument(
       @Parameter(
               description = "Collection name to index into",
@@ -147,8 +148,9 @@ class IndexController {
   @Operation(
       summary = "Batch index multiple documents",
       description =
-          "Indexes multiple documents in batch with automatic vector embedding generation. "
-              + "This is more efficient than indexing documents one at a time.")
+          """
+          Indexes multiple documents in batch with automatic vector embedding generation. \
+          This is more efficient than indexing documents one at a time.""")
   public IndexResponse indexDocuments(
       @Parameter(
               description = "Collection name to index into",

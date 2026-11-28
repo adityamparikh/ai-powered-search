@@ -232,8 +232,9 @@ class RagEvaluationIT extends EvaluationTestBase {
       if (candidates.isEmpty() && !context.isEmpty()) {
         // Recall and parity would silently read as 0 / n/a rather than "not measured".
         throw new IllegalStateException(
-            "No candidates recorded although the prompt context is not empty: "
-                + "the recording reranker did not run (search.rag.rerank.enabled=false?)");
+            """
+            No candidates recorded although the prompt context is not empty: \
+            the recording reranker did not run (search.rag.rerank.enabled=false?)""");
       }
 
       double parity = Double.NaN;

@@ -120,10 +120,11 @@ class SearchController {
   @Operation(
       summary = "Semantic search using vector similarity",
       description =
-          "Performs semantic search on the specified collection using vector embeddings. "
-              + "The query is converted to a 1536-dimensional vector using OpenAI embeddings, "
-              + "and Solr's KNN (K-Nearest Neighbors) search finds semantically similar documents. "
-              + "Natural language filters are parsed by Claude AI and applied to refine results.")
+          """
+          Performs semantic search on the specified collection using vector embeddings. \
+          The query is converted to a 1536-dimensional vector using OpenAI embeddings, \
+          and Solr's KNN (K-Nearest Neighbors) search finds semantically similar documents. \
+          Natural language filters are parsed by Claude AI and applied to refine results.""")
   @ApiResponses(
       value = {
         @ApiResponse(
@@ -219,10 +220,11 @@ class SearchController {
   @Operation(
       summary = "Hybrid search using RRF (Reciprocal Rank Fusion)",
       description =
-          "Performs hybrid search combining traditional keyword search with semantic vector search using RRF. "
-              + "This approach leverages both lexical matching (edismax) and semantic similarity (KNN) "
-              + "to provide superior search results. RRF combines rankings from both methods using "
-              + "the formula: score = sum(1 / (k + rank)). Natural language filters are parsed by Claude AI.")
+          """
+          Performs hybrid search combining traditional keyword search with semantic vector search using RRF. \
+          This approach leverages both lexical matching (edismax) and semantic similarity (KNN) \
+          to provide superior search results. RRF combines rankings from both methods using \
+          the formula: score = sum(1 / (k + rank)). Natural language filters are parsed by Claude AI.""")
   @ApiResponses(
       value = {
         @ApiResponse(
@@ -258,9 +260,10 @@ class SearchController {
           @Nullable Integer k,
       @Parameter(
               description =
-                  "Minimum cosine similarity [0..1] applied to the vector half of the "
-                      + "search before fusion. Keyword (BM25) hits are not filtered by it, and it is not "
-                      + "applied to the fused RRF score.",
+                  """
+                  Minimum cosine similarity [0..1] applied to the vector half of the \
+                  search before fusion. Keyword (BM25) hits are not filtered by it, and it is not \
+                  applied to the fused RRF score.""",
               required = false,
               example = "0.5")
           @RequestParam(name = "minScore", required = false)
@@ -298,10 +301,11 @@ class SearchController {
   @Operation(
       summary = "Ask a question with RAG (Retrieval-Augmented Generation)",
       description =
-          "Performs conversational question-answering using RAG. "
-              + "The QuestionAnswerAdvisor automatically retrieves relevant documents from the VectorStore, "
-              + "and Claude AI generates a natural language answer based on the retrieved context. "
-              + "Maintains conversation history for follow-up questions using the conversationId.")
+          """
+          Performs conversational question-answering using RAG. \
+          The QuestionAnswerAdvisor automatically retrieves relevant documents from the VectorStore, \
+          and Claude AI generates a natural language answer based on the retrieved context. \
+          Maintains conversation history for follow-up questions using the conversationId.""")
   @ApiResponses(
       value = {
         @ApiResponse(

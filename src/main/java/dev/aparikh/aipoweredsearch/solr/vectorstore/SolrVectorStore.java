@@ -288,9 +288,8 @@ public class SolrVectorStore extends AbstractObservationVectorStore {
                 // Filter by threshold if specified
                 if (threshold >= 0) {
                   Object scoreObj = doc.getMetadata().get(SCORE_FIELD);
-                  if (scoreObj instanceof Number) {
-                    double score = ((Number) scoreObj).doubleValue();
-                    return score >= threshold;
+                  if (scoreObj instanceof Number score) {
+                    return score.doubleValue() >= threshold;
                   }
                   return false;
                 }
@@ -397,8 +396,7 @@ public class SolrVectorStore extends AbstractObservationVectorStore {
     // Set vector embedding from metadata
     Object embeddingObj = document.getMetadata().get("embedding");
 
-    if (embeddingObj instanceof float[]) {
-      float[] embedding = (float[]) embeddingObj;
+    if (embeddingObj instanceof float[] embedding) {
       List<Float> embeddingList = new ArrayList<>();
       for (float val : embedding) {
         embeddingList.add(val);
@@ -428,8 +426,7 @@ public class SolrVectorStore extends AbstractObservationVectorStore {
     // Handle potential multi-valued fields from Solr
     Object idObj = solrDoc.getFieldValue(options.idFieldName());
     @Nullable String id = null;
-    if (idObj instanceof List) {
-      List<?> idList = (List<?>) idObj;
+    if (idObj instanceof List<?> idList) {
       if (!idList.isEmpty()) {
         id = idList.get(0).toString();
       }
@@ -444,8 +441,7 @@ public class SolrVectorStore extends AbstractObservationVectorStore {
 
     Object contentObj = solrDoc.getFieldValue(options.contentFieldName());
     @Nullable String content = null;
-    if (contentObj instanceof List) {
-      List<?> contentList = (List<?>) contentObj;
+    if (contentObj instanceof List<?> contentList) {
       if (!contentList.isEmpty()) {
         content = contentList.get(0).toString();
       }
@@ -476,21 +472,20 @@ public class SolrVectorStore extends AbstractObservationVectorStore {
                 Object metadataValue = solrDoc.getFieldValue(fieldName);
 
                 // Handle multi-valued fields - extract first value if it's a list
-                if (metadataValue instanceof List) {
-                  List<?> valueList = (List<?>) metadataValue;
+                if (metadataValue instanceof List<?> valueList) {
                   if (!valueList.isEmpty()) {
                     Object firstValue = valueList.get(0);
                     // Convert Long to Integer for year field
-                    if ("year".equals(metadataKey) && firstValue instanceof Long) {
-                      metadata.put(metadataKey, ((Long) firstValue).intValue());
+                    if ("year".equals(metadataKey) && firstValue instanceof Long year) {
+                      metadata.put(metadataKey, year.intValue());
                     } else {
                       metadata.put(metadataKey, firstValue);
                     }
                   }
                 } else if (metadataValue != null) {
                   // Convert Long to Integer for year field
-                  if ("year".equals(metadataKey) && metadataValue instanceof Long) {
-                    metadata.put(metadataKey, ((Long) metadataValue).intValue());
+                  if ("year".equals(metadataKey) && metadataValue instanceof Long year) {
+                    metadata.put(metadataKey, year.intValue());
                   } else {
                     metadata.put(metadataKey, metadataValue);
                   }

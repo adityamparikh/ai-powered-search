@@ -169,8 +169,9 @@ public class PromptCacheMetricsAdvisor implements BaseAdvisor {
       logCacheActivity(cacheCreationTokens, cacheReadTokens, regularInputTokens, outputTokens);
     } else {
       log.debug(
-          "[Prompt Caching] No cache activity detected. "
-              + "Prompt may be too small (<1024 tokens) or caching not configured properly.");
+          """
+          [Prompt Caching] No cache activity detected. \
+          Prompt may be too small (<1024 tokens) or caching not configured properly.""");
     }
   }
 

@@ -38,8 +38,9 @@ class SearchControllerAskTest {
 
     AskResponse expectedResponse =
         new AskResponse(
-            "Spring Boot is a framework that simplifies the development of Java applications. "
-                + "It provides auto-configuration, embedded servers, and production-ready features.",
+            """
+            Spring Boot is a framework that simplifies the development of Java applications. \
+            It provides auto-configuration, embedded servers, and production-ready features.""",
             "test-conversation-1",
             List.of("doc-1", "doc-2"));
 
@@ -66,8 +67,9 @@ class SearchControllerAskTest {
 
     AskResponse expectedResponse =
         new AskResponse(
-            "Microservices are an architectural style that structures an application as a collection of small, "
-                + "loosely coupled services.",
+            """
+            Microservices are an architectural style that structures an application as a collection of small, \
+            loosely coupled services.""",
             "default",
             List.of());
 
@@ -90,16 +92,18 @@ class SearchControllerAskTest {
   void shouldHandleLongQuestion() throws Exception {
     // Given
     String longQuestion =
-        "Can you explain in detail how Spring Boot's auto-configuration works, "
-            + "including the role of @SpringBootApplication annotation, component scanning, "
-            + "and how it differs from traditional Spring configuration?";
+        """
+        Can you explain in detail how Spring Boot's auto-configuration works, \
+        including the role of @SpringBootApplication annotation, component scanning, \
+        and how it differs from traditional Spring configuration?""";
 
     AskRequest request = new AskRequest(longQuestion, "detailed-conv");
 
     AskResponse expectedResponse =
         new AskResponse(
-            "Spring Boot's auto-configuration is a powerful feature that automatically configures your application "
-                + "based on the dependencies present on the classpath...",
+            """
+            Spring Boot's auto-configuration is a powerful feature that automatically configures your application \
+            based on the dependencies present on the classpath...""",
             "detailed-conv",
             List.of("doc-spring-boot-1", "doc-spring-boot-2", "doc-spring-boot-3"));
 
@@ -125,8 +129,9 @@ class SearchControllerAskTest {
 
     AskResponse expectedResponse =
         new AskResponse(
-            "Certainly! Based on our previous discussion about Spring Boot, "
-                + "the auto-configuration feature works by...",
+            """
+            Certainly! Based on our previous discussion about Spring Boot, \
+            the auto-configuration feature works by...""",
             "conversation-123",
             List.of("doc-1"));
 

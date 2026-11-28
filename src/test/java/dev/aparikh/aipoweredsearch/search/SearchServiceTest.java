@@ -1,6 +1,7 @@
 package dev.aparikh.aipoweredsearch.search;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -427,9 +428,10 @@ class SearchServiceTest {
     // Given
     String question = "What are the benefits of Spring Boot?";
     String expectedAnswer =
-        "Spring Boot provides several benefits including auto-configuration, "
-            + "embedded servers, production-ready features, and simplified dependency management. "
-            + "It reduces boilerplate code and allows rapid application development.";
+        """
+        Spring Boot provides several benefits including auto-configuration, \
+        embedded servers, production-ready features, and simplified dependency management. \
+        It reduces boilerplate code and allows rapid application development.""";
 
     AskRequest request = new AskRequest(question);
 
@@ -453,10 +455,11 @@ class SearchServiceTest {
     String question = "How does Spring Security work?";
     String conversationId = "user-session-123";
     String expectedAnswer =
-        "Spring Security is a powerful authentication and authorization framework. "
-            + "It works by intercepting requests through a chain of filters, validating credentials, "
-            + "and managing security contexts. It supports various authentication mechanisms including "
-            + "form-based login, OAuth2, JWT, and more.";
+        """
+        Spring Security is a powerful authentication and authorization framework. \
+        It works by intercepting requests through a chain of filters, validating credentials, \
+        and managing security contexts. It supports various authentication mechanisms including \
+        form-based login, OAuth2, JWT, and more.""";
 
     AskRequest request = new AskRequest(question, conversationId);
 
@@ -479,9 +482,10 @@ class SearchServiceTest {
     // Given
     String question = "What is dependency injection?";
     String expectedAnswer =
-        "Dependency injection is a design pattern where objects receive their dependencies "
-            + "from external sources rather than creating them internally. Spring Framework implements DI "
-            + "through constructor injection, setter injection, and field injection.";
+        """
+        Dependency injection is a design pattern where objects receive their dependencies \
+        from external sources rather than creating them internally. Spring Framework implements DI \
+        through constructor injection, setter injection, and field injection.""";
 
     AskRequest request = new AskRequest(question, null);
 
@@ -701,5 +705,27 @@ class SearchServiceTest {
     // Verify year is converted from Long to Integer
     assertTrue(docMap.containsKey("year"));
     assertEquals(2024, docMap.get("year"));
+  }
+
+  @Test
+  void semanticSearchFieldListToleratesSpacesAfterCommas() {
+    String collection = "test-collection";
+    when(vectorStoreFactory.forCollection(collection)).thenReturn(vectorStore);
+    Document doc =
+        Document.builder()
+            .id("1")
+            .text("Introduction to Machine Learning")
+            .metadata(Map.of("metadata_category", "AI", "metadata_author", "Ng"))
+            .build();
+    when(vectorStore.similaritySearch(any(org.springframework.ai.vectorstore.SearchRequest.class)))
+        .thenReturn(List.of(doc));
+
+    SearchResponse response =
+        searchService.semanticSearch(collection, "ml", null, null, "content, category");
+
+    Map<String, Object> docMap = response.documents().get(0);
+    assertEquals("Introduction to Machine Learning", docMap.get("content"));
+    assertEquals("AI", docMap.get("category"));
+    assertFalse(docMap.containsKey("author"));
   }
 }

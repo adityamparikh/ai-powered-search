@@ -7,11 +7,11 @@ import dev.aparikh.aipoweredsearch.search.model.QueryGenerationResponse;
 import dev.aparikh.aipoweredsearch.search.model.SearchRequest;
 import dev.aparikh.aipoweredsearch.search.model.SearchResponse;
 import dev.aparikh.aipoweredsearch.solr.vectorstore.VectorStoreFactory;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.stream.Collectors;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -57,7 +57,7 @@ import org.springframework.stereotype.Service;
 @Service
 public class SearchService {
 
-  private final Logger log = LoggerFactory.getLogger(SearchService.class);
+  private static final Logger log = LoggerFactory.getLogger(SearchService.class);
 
   private final Resource systemResource;
   private final SearchRepository searchRepository;
@@ -424,7 +424,9 @@ public class SearchService {
     // Parse requested fields if provided
     @Nullable List<String> requestedFields = null;
     if (fieldsCsv != null && !fieldsCsv.isBlank()) {
-      requestedFields = List.of(fieldsCsv.split(","));
+      // Trim like the hybrid path does, so "content, year" also selects "year".
+      requestedFields =
+          Arrays.stream(fieldsCsv.split(",")).map(String::trim).filter(f -> !f.isEmpty()).toList();
     }
     final List<String> fieldsToInclude = requestedFields;
 
@@ -468,8 +470,8 @@ public class SearchService {
                                   || fieldsToInclude.contains(outputKey)
                                   || fieldsToInclude.contains(key)) {
                                 // Handle type conversions (e.g., Long to Integer for year)
-                                if ("year".equals(outputKey) && value instanceof Long) {
-                                  docMap.put(outputKey, ((Long) value).intValue());
+                                if ("year".equals(outputKey) && value instanceof Long year) {
+                                  docMap.put(outputKey, year.intValue());
                                 } else {
                                   docMap.put(outputKey, value);
                                 }
@@ -479,7 +481,7 @@ public class SearchService {
 
                   return docMap;
                 })
-            .collect(Collectors.toList());
+            .toList();
 
     return new SearchResponse(documentMaps, Map.of());
   }

@@ -291,9 +291,10 @@ public class BookDatasetGenerator {
 
   private static String generateDescription(String title, String genre) {
     return String.format(
-        "An engaging %s novel titled '%s'. This captivating story explores themes "
-            + "central to the %s genre, offering readers an unforgettable journey. "
-            + "Perfect for fans of %s literature.",
+        """
+        An engaging %s novel titled '%s'. This captivating story explores themes \
+        central to the %s genre, offering readers an unforgettable journey. \
+        Perfect for fans of %s literature.""",
         genre.toLowerCase(), title, genre.toLowerCase(), genre.toLowerCase());
   }
 

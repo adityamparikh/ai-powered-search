@@ -185,10 +185,11 @@ class QuestionAnswerAdvisorIT {
             Document.builder()
                 .id("spring-boot-book")
                 .text(
-                    "Spring Boot in Action is a comprehensive guide to Spring Boot, "
-                        + "written by Craig Walls. The book covers auto-configuration, "
-                        + "starter dependencies, and building production-ready applications. "
-                        + "It is published by Manning Publications and has 472 pages.")
+                    """
+                    Spring Boot in Action is a comprehensive guide to Spring Boot, \
+                    written by Craig Walls. The book covers auto-configuration, \
+                    starter dependencies, and building production-ready applications. \
+                    It is published by Manning Publications and has 472 pages.""")
                 .metadata(
                     Map.of(
                         "title", "Spring Boot in Action",
@@ -199,10 +200,11 @@ class QuestionAnswerAdvisorIT {
             Document.builder()
                 .id("java-book")
                 .text(
-                    "Effective Java by Joshua Bloch is considered one of the best books "
-                        + "for Java developers. It provides 90 best practices for writing clear, "
-                        + "correct, and efficient Java code. The third edition covers Java 7, 8, and 9. "
-                        + "It is published by Addison-Wesley and is essential reading for Java programmers.")
+                    """
+                    Effective Java by Joshua Bloch is considered one of the best books \
+                    for Java developers. It provides 90 best practices for writing clear, \
+                    correct, and efficient Java code. The third edition covers Java 7, 8, and 9. \
+                    It is published by Addison-Wesley and is essential reading for Java programmers.""")
                 .metadata(
                     Map.of(
                         "title", "Effective Java",
@@ -213,10 +215,11 @@ class QuestionAnswerAdvisorIT {
             Document.builder()
                 .id("microservices-book")
                 .text(
-                    "Building Microservices by Sam Newman is a practical guide to microservices architecture. "
-                        + "The book covers topics like service boundaries, deployment, testing, and monitoring. "
-                        + "It explains how to migrate from monolithic applications to microservices. "
-                        + "Published by O'Reilly Media, it has become a standard reference in the field.")
+                    """
+                    Building Microservices by Sam Newman is a practical guide to microservices architecture. \
+                    The book covers topics like service boundaries, deployment, testing, and monitoring. \
+                    It explains how to migrate from monolithic applications to microservices. \
+                    Published by O'Reilly Media, it has become a standard reference in the field.""")
                 .metadata(
                     Map.of(
                         "title", "Building Microservices",
@@ -227,10 +230,11 @@ class QuestionAnswerAdvisorIT {
             Document.builder()
                 .id("clean-code-book")
                 .text(
-                    "Clean Code: A Handbook of Agile Software Craftsmanship by Robert C. Martin (Uncle Bob) "
-                        + "teaches software engineers how to write maintainable code. The book covers naming conventions, "
-                        + "functions, comments, formatting, and error handling. It includes case studies and refactoring examples. "
-                        + "Published by Prentice Hall, it is a must-read for professional developers.")
+                    """
+                    Clean Code: A Handbook of Agile Software Craftsmanship by Robert C. Martin (Uncle Bob) \
+                    teaches software engineers how to write maintainable code. The book covers naming conventions, \
+                    functions, comments, formatting, and error handling. It includes case studies and refactoring examples. \
+                    Published by Prentice Hall, it is a must-read for professional developers.""")
                 .metadata(
                     Map.of(
                         "title", "Clean Code",
@@ -241,10 +245,11 @@ class QuestionAnswerAdvisorIT {
             Document.builder()
                 .id("ddd-book")
                 .text(
-                    "Domain-Driven Design by Eric Evans introduces strategic and tactical patterns for software design. "
-                        + "The book emphasizes modeling the business domain and using a ubiquitous language. "
-                        + "It covers concepts like entities, value objects, aggregates, and bounded contexts. "
-                        + "Published by Addison-Wesley, it has influenced modern software architecture practices.")
+                    """
+                    Domain-Driven Design by Eric Evans introduces strategic and tactical patterns for software design. \
+                    The book emphasizes modeling the business domain and using a ubiquitous language. \
+                    It covers concepts like entities, value objects, aggregates, and bounded contexts. \
+                    Published by Addison-Wesley, it has influenced modern software architecture practices.""")
                 .metadata(
                     Map.of(
                         "title", "Domain-Driven Design",
@@ -361,8 +366,9 @@ class QuestionAnswerAdvisorIT {
             .prompt()
             .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, CONVERSATION_ID))
             .user(
-                "Compare the books about software design and architecture. "
-                    + "Which ones focus on code quality and which focus on system design?")
+                """
+                Compare the books about software design and architecture. \
+                Which ones focus on code quality and which focus on system design?""")
             .call()
             .content();
 
