@@ -115,8 +115,15 @@ public abstract class SolrTestBase {
               "Content-type:application/json",
               "--data-binary",
               """
-                            {"add-field-type":{"name":"knn_vector","class":"solr.DenseVectorField","vectorDimension":5,"similarityFunction":"cosine"}}
-                            """
+              {
+                "add-field-type": {
+                  "name": "knn_vector",
+                  "class": "solr.DenseVectorField",
+                  "vectorDimension": 5,
+                  "similarityFunction": "cosine"
+                }
+              }
+              """
                   .strip(),
               "http://localhost:8983/solr/" + collection + "/schema");
 
@@ -132,8 +139,10 @@ public abstract class SolrTestBase {
               "Content-type:application/json",
               "--data-binary",
               """
-                            {"add-field":{"name":"vector","type":"knn_vector","indexed":true,"stored":true}}
-                            """
+              {
+                "add-field": {"name": "vector", "type": "knn_vector", "indexed": true, "stored": true}
+              }
+              """
                   .strip(),
               "http://localhost:8983/solr/" + collection + "/schema");
 

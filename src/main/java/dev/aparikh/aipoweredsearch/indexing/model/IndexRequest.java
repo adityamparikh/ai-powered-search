@@ -24,5 +24,11 @@ public record IndexRequest(
         String content,
     @Schema(
             description = "Additional metadata fields",
-            example = "{\"category\": \"framework\", \"tags\": [\"java\", \"spring\"]}")
+            example =
+                """
+                {
+                  "category": "framework",
+                  "tags": ["java", "spring"]
+                }
+                """)
         @Nullable Map<String, Object> metadata) {}
