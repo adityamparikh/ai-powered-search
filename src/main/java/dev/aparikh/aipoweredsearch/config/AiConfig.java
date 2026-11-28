@@ -301,17 +301,19 @@ public class AiConfig {
     } else if (decisionsEnabled) {
       // Screening was asked for; serving unscreened passages must not go unnoticed.
       log.warn(
-          "search.rag.decisions.enabled=true but no decisions provider is configured, so retrieved "
-              + "passages are NOT screened. The 'typesafe' provider needs spring.ai.typesafe.api-key "
-              + "(TYPESAFE_API_KEY; any placeholder for a local model such as Laya)");
+          """
+          search.rag.decisions.enabled=true but no decisions provider is configured, so retrieved \
+          passages are NOT screened. The 'typesafe' provider needs spring.ai.typesafe.api-key \
+          (TYPESAFE_API_KEY; any placeholder for a local model such as Laya)""");
     }
     // Reranking is Claude's unless search.rag.rerank.provider=decisions selected a decisions
     // reranker.
     DocumentPostProcessor rerank = decisionsReranker != null ? decisionsReranker : reranker;
     if (decisionsReranker == null && !"claude".equalsIgnoreCase(rerankProvider.strip())) {
       log.warn(
-          "search.rag.rerank.provider={} has no decisions reranker (use 'decisions' with a configured "
-              + "decisions provider); reranking with Claude",
+          """
+          search.rag.rerank.provider={} has no decisions reranker (use 'decisions' with a configured \
+          decisions provider); reranking with Claude""",
           rerankProvider);
     }
     if (rerank != null) {

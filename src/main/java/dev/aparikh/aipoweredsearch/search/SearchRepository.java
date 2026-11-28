@@ -319,9 +319,10 @@ public class SearchRepository {
         // A configuration problem, not an outage: no stack trace, said once per collection.
         if (firstMissingHandlerReport(collection)) {
           log.warn(
-              "Collection '{}' has no {} handler (solr.CombinedQuerySearchHandler, Solr 10.1+); "
-                  + "hybrid search is degrading to keyword/vector fallback. Add the handler to the "
-                  + "collection's configset (see solr-config/conf/solrconfig.xml).",
+              """
+              Collection '{}' has no {} handler (solr.CombinedQuerySearchHandler, Solr 10.1+); \
+              hybrid search is degrading to keyword/vector fallback. Add the handler to the \
+              collection's configset (see solr-config/conf/solrconfig.xml).""",
               collection,
               HYBRID_HANDLER);
         } else {
