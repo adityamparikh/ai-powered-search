@@ -130,9 +130,7 @@ public class SearchRepository {
       return documents;
     }
     List<Map<String, Object>> filtered =
-        documents.stream()
-            .filter(doc -> passesMinScore(doc, minScore))
-            .collect(Collectors.toList());
+        documents.stream().filter(doc -> passesMinScore(doc, minScore)).toList();
     log.debug(
         "minScore={} filtered {} documents down to {}",
         minScore,
@@ -206,7 +204,7 @@ public class SearchRepository {
                               f.getValues().stream()
                                   .map(
                                       c -> new SearchResponse.FacetCount(c.getName(), c.getCount()))
-                                  .collect(Collectors.toList())))
+                                  .toList()))
               : new java.util.HashMap<>();
 
       // Handle spell check suggestions
@@ -221,9 +219,7 @@ public class SearchRepository {
       }
 
       return new SearchResponse(
-          response.getResults().stream()
-              .map(this::convertSolrDocumentToMap)
-              .collect(Collectors.toList()),
+          response.getResults().stream().map(this::convertSolrDocumentToMap).toList(),
           facetCountsMap,
           Map.of(), // No highlighting without knowing field names
           spellCheckSuggestion);
@@ -306,7 +302,7 @@ public class SearchRepository {
       List<Map<String, Object>> results =
           request.process(solrClient, collection).getResults().stream()
               .map(this::convertSolrDocumentToMap)
-              .collect(Collectors.toList());
+              .toList();
 
       log.debug("Hybrid search (Solr RRF) returned {} documents", results.size());
       return new SearchResponse(results, Map.of(), Map.of(), null);
@@ -485,9 +481,7 @@ public class SearchRepository {
 
     QueryResponse response = solrClient.query(collection, params, SolrRequest.METHOD.POST);
 
-    return response.getResults().stream()
-        .map(this::convertSolrDocumentToMap)
-        .collect(Collectors.toList());
+    return response.getResults().stream().map(this::convertSolrDocumentToMap).toList();
   }
 
   /**
@@ -532,9 +526,7 @@ public class SearchRepository {
 
     QueryResponse response = solrClient.query(collection, params, SolrRequest.METHOD.POST);
 
-    return response.getResults().stream()
-        .map(this::convertSolrDocumentToMap)
-        .collect(Collectors.toList());
+    return response.getResults().stream().map(this::convertSolrDocumentToMap).toList();
   }
 
   /**
