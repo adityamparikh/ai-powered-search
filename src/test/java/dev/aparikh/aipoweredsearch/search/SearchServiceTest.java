@@ -428,9 +428,10 @@ class SearchServiceTest {
     // Given
     String question = "What are the benefits of Spring Boot?";
     String expectedAnswer =
-        "Spring Boot provides several benefits including auto-configuration, "
-            + "embedded servers, production-ready features, and simplified dependency management. "
-            + "It reduces boilerplate code and allows rapid application development.";
+        """
+        Spring Boot provides several benefits including auto-configuration, \
+        embedded servers, production-ready features, and simplified dependency management. \
+        It reduces boilerplate code and allows rapid application development.""";
 
     AskRequest request = new AskRequest(question);
 
@@ -454,10 +455,11 @@ class SearchServiceTest {
     String question = "How does Spring Security work?";
     String conversationId = "user-session-123";
     String expectedAnswer =
-        "Spring Security is a powerful authentication and authorization framework. "
-            + "It works by intercepting requests through a chain of filters, validating credentials, "
-            + "and managing security contexts. It supports various authentication mechanisms including "
-            + "form-based login, OAuth2, JWT, and more.";
+        """
+        Spring Security is a powerful authentication and authorization framework. \
+        It works by intercepting requests through a chain of filters, validating credentials, \
+        and managing security contexts. It supports various authentication mechanisms including \
+        form-based login, OAuth2, JWT, and more.""";
 
     AskRequest request = new AskRequest(question, conversationId);
 
@@ -480,9 +482,10 @@ class SearchServiceTest {
     // Given
     String question = "What is dependency injection?";
     String expectedAnswer =
-        "Dependency injection is a design pattern where objects receive their dependencies "
-            + "from external sources rather than creating them internally. Spring Framework implements DI "
-            + "through constructor injection, setter injection, and field injection.";
+        """
+        Dependency injection is a design pattern where objects receive their dependencies \
+        from external sources rather than creating them internally. Spring Framework implements DI \
+        through constructor injection, setter injection, and field injection.""";
 
     AskRequest request = new AskRequest(question, null);
 

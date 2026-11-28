@@ -60,8 +60,9 @@ class TypeSafeDecisionsRerankingLiveIT {
           "python",
           "Python lists are mutable sequences; use append() to add an element at the end.",
           ANSWER,
-          "A Clash of Kings is the second novel in A Song of Ice and Fire, written by George R. R."
-              + " Martin and published in 1998.",
+          """
+          A Clash of Kings is the second novel in A Song of Ice and Fire, written by George R. R. \
+          Martin and published in 1998.""",
           "tide",
           "Ocean tides are caused by the gravitational pull of the moon and the sun.");
 
